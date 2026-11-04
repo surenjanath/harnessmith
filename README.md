@@ -1,5 +1,7 @@
 # harnessmith
 
+[![CI](https://github.com/surenjanath/harnessmith/actions/workflows/ci.yml/badge.svg)](https://github.com/surenjanath/harnessmith/actions/workflows/ci.yml)
+
 **Self-improving, self-healing agent harnesses in Rust.** Harnessmith gives an agent a goal, then improves the agent's harness for that goal and keeps the run going when models or servers fail. It has a web UI, works with local and API models, and includes a guardrail gate, wired tools and project memory.
 
 It is a Rust port of [google-research/harness2](https://github.com/google-research/harness2), *Recursive Agent Harnessing for an Open World*. It adds a model-agnostic agent runtime and a web UI where you connect models and hand the system a goal. The command-line tool is still called `harness2`. This is an independent project, not an official Google product.
@@ -12,7 +14,17 @@ cargo build --release
 ./target/release/harness2 serve --port 8765
 ```
 
-Then open http://127.0.0.1:8765. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
+Then open http://127.0.0.1:8765.
+
+Other ways to install:
+- **Prebuilt binaries** for Linux (x86_64, arm64) and macOS (Apple silicon, Intel) are on the [Releases](https://github.com/surenjanath/harnessmith/releases) page. On Windows, use WSL or Docker: the agent's tools need bash.
+- **Docker:**
+
+```bash
+docker run -p 8765:8765 -v harnessmith:/data ghcr.io/surenjanath/harnessmith:latest
+```
+
+  Inside Docker the container is the isolation; the bubblewrap sandbox usually needs `--privileged` or a seccomp profile that allows user namespaces. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
 
 A **harness** is everything around a model that makes it an agent: system prompt, guardrails, memory, tool guidance, skills, sub-agents, scripts, and in-loop hooks or plugins. Harness² improves that harness for each task, with no ground-truth feedback:
 
@@ -180,6 +192,16 @@ The command runs with bash in the workspace. The call's arguments arrive as JSON
 - **Intake:** each goal is checked before it is queued: size, inputs, budget, a reachable model chain for every role, and valid rules. A stopped goal gets every reason at once.
 - **Tool calls:** every solver call to `bash` or a wired tool is checked against built-in rules: `sudo`, `rm -rf /`, `curl | sh`, disk wipes, `git push`, credential reads and more. You can add your own regex rules per project. Task inputs and the installed harness are read-only.
 - **Modes** (Overview → Detail A): `off`; `observe`, which runs the call and records "would block"; and `enforce`, the default, which refuses the call and tells the agent the rule so it can work another way.
+
+**Sandbox.** Every solver shell command runs in a sandbox: `bash`, wired tools and hooks. With bubblewrap:
+- the filesystem is read-only except the workspace;
+- the home directory (keys, configs) is hidden;
+- task inputs stay read-only;
+- there is no network unless the project allows it.
+
+Without bubblewrap it falls back to `unshare` namespaces, which keep inputs read-only and cut the network. Choose `auto`, `bwrap`, `unshare` or `off` under Overview → Detail A. The Doctor reports what this machine supports.
+
+**Regression guard.** In goal projects, the unmodified base attempt competes in the final selection, so an adapted harness that makes things worse can't win by default. Finals whose output reads like a failure ("file not found", "please ensure…", or nearly empty) are dropped whenever a healthy candidate exists. The benchmark adapters keep the paper's exact selection.
 
 Gate decisions appear on the pipeline map as a red feed, with a "gated ×n" badge on the affected step. The gate is not a sandbox: run Harness² under a dedicated OS account.
 

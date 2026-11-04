@@ -476,8 +476,9 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
     for s in r.stages.iter().filter(|s| s.execution_failed) {
         res.errors.push(format!("{mode}: {}: proposer execution failed: {}", s.label, s.error));
     }
-    let candidates = selection::selection_pool(mode, k, &r.rollouts, base);
-    let mut sel: Selection = if pool_policy == "finals" && k == 1 {
+    let mut candidates = selection::selection_pool(mode, k, &r.rollouts, base);
+    let guarded = adapter.guard_selection() && guard_pool(&mut candidates, base, adapter);
+    let mut sel: Selection = if pool_policy == "finals" && k == 1 && !(guarded && candidates.len() > 1) {
         selection::trivial_selection(task_id, k, mode, &candidates, adapter, &work_dir)?
     } else {
         selection::run_selection(task_id, k, mode, &candidates, adapter, selector, &work_dir, "finals")?
@@ -513,6 +514,40 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
         }
     }
     Ok(())
+}
+
+/// Phrases that mark a deliverable as a failure report rather than an answer.
+static FAILURE_TEXT: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+    regex::Regex::new(r"(?i)(\bno\s+[`'\w./-]+\s+(file\s+)?(was\s+)?found\b|\bnot\s+found\b|does\s+not\s+exist|unable\s+to\s+(find|locate|access|read|open)|could\s+not\s+(find|locate|read|open)|please\s+(ensure|provide|upload|make\s+sure))").unwrap()
+});
+
+/// Whether a delivered output reads like "I could not do it": short, and saying so.
+pub fn looks_failed(text: &str) -> bool {
+    let t = text.trim();
+    t.chars().count() < 12 || (t.chars().count() < 600 && FAILURE_TEXT.is_match(t))
+}
+
+/// The regression guard: add the base attempt as a candidate, drop failure-looking finals while
+/// a healthy candidate remains. Returns whether the pool changed.
+fn guard_pool(cands: &mut BTreeMap<String, RunView>, base: &[RunView], adapter: &dyn BenchmarkAdapter) -> bool {
+    let text = |rv: &RunView| adapter.deliverable_text(&rv.run_dir).unwrap_or_default();
+    let mut added = vec![];
+    if let Some(b) = base.iter().find(|b| b.delivered && b.ok && !cands.contains_key(&b.label) && !looks_failed(&text(b))) {
+        cands.insert(b.label.clone(), b.clone());
+        added.push(b.label.clone());
+    }
+    let suspect: Vec<String> = cands.iter().filter(|(_, rv)| !rv.delivered || looks_failed(&text(rv))).map(|(l, _)| l.clone()).collect();
+    let dropped: Vec<String> = if suspect.len() < cands.len() { suspect } else { vec![] };
+    for l in &dropped {
+        cands.remove(l);
+    }
+    if !added.is_empty() || !dropped.is_empty() {
+        crate::log::at("select", "select");
+        crate::log::event("select", "guard", json!({"added": added, "dropped": dropped}));
+        say!("  [guard] selection pool: added {:?}, dropped failure-looking {:?}", added, dropped);
+        return true;
+    }
+    false
 }
 
 /// Options shared by the task, domain and sweep drivers.
@@ -757,5 +792,19 @@ mod tests {
         let got: Vec<String> = seeded.into_iter().map(|(_, t)| t).collect();
         let want: Vec<String> = serde_json::from_str(include_str!("../../tests/golden/stream7.json")).unwrap();
         assert_eq!(got, want);
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::looks_failed;
+
+    #[test]
+    fn failure_reports_are_spotted_and_answers_are_not() {
+        assert!(looks_failed("No `regions.csv` file found in the input directory. Please ensure the file is present and try again."));
+        assert!(looks_failed("Error: the file does not exist."));
+        assert!(looks_failed("  "));
+        assert!(!looks_failed("| region | q1 | q2 |\n|---|---|---|\n| D | 48 | 42 |\n\nRegion D fell the most: -12.5%."));
+        assert!(!looks_failed(&format!("{} not found in the 2019 data, so we used 2020.", "x".repeat(700))), "long answers that mention 'not found' are kept");
     }
 }

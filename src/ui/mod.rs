@@ -219,6 +219,7 @@ async fn status() -> ApiResult {
         "projects_root": goal::projects_root(),
         "providers": connections::PROVIDERS,
         "python": util::which("python3").is_some(),
+        "sandbox": {"bwrap": crate::llm::sandbox::availability().0, "unshare": crate::llm::sandbox::availability().1},
         "policy": {
             "max_runs": crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1),
             "run_retries": crate::config::env_int("HARNESS2_RUN_RETRIES", 1).unwrap_or(1).max(0),

@@ -153,6 +153,9 @@ pub struct SolveOpts {
     pub gate_protect_inputs: bool,
     /// Project root holding memory.json, and the goal id notes are filed under (None: no memory).
     pub memory: Option<(PathBuf, String)>,
+    /// "auto" | "bwrap" | "unshare" | "off", and whether sandboxed commands get network access.
+    pub sandbox: String,
+    pub sandbox_network: bool,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -186,6 +189,12 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     let mut gate = crate::llm::gate::Gate::new(&o.gate_mode, &o.gate_rules);
     if o.gate_protect_inputs {
         gate.protect_inputs(&ws);
+    }
+    let ro = if o.gate_protect_inputs { gate.protected_list().into_iter().filter(|p| !p.starts_with("scripts/")).collect() } else { vec![] };
+    let sb = crate::llm::sandbox::Sandbox::new(&o.sandbox, &ws, &ro, o.sandbox_network);
+    if sb.kind != crate::llm::sandbox::Kind::Off {
+        crate::say!("      sandbox: {} · network {}", sb.kind.as_str(), if o.sandbox_network { "on" } else { "off" });
+        cfg.sandbox = Some(sb);
     }
     cfg.gate = Some(gate);
     if let Some((root, goal)) = &o.memory {

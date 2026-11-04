@@ -8,4 +8,5 @@ pub mod connections;
 pub mod gate;
 pub mod health;
 pub mod memory;
+pub mod sandbox;
 pub mod session;

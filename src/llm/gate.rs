@@ -85,6 +85,12 @@ impl Gate {
         }
     }
 
+    pub fn protected_list(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.protected.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
     pub fn protected_count(&self) -> usize {
         self.protected.len()
     }

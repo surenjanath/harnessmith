@@ -102,6 +102,22 @@ pub fn checks() -> Vec<Value> {
         (gb < 2.0 && !stale_temp().is_empty()).then_some(("clean_temp", "Clean temp files")),
     ));
 
+    // 1b. Sandbox for solver commands.
+    let (bw, us) = crate::llm::sandbox::availability();
+    out.push(check(
+        "sandbox",
+        "Sandbox for solver commands",
+        if bw || us { "ok" } else { "warn" },
+        if bw {
+            "bubblewrap: read-only system, hidden home, read-only inputs, no network".into()
+        } else if us {
+            "unshare namespaces: read-only inputs, no network (install bubblewrap for a read-only system and hidden home)".into()
+        } else {
+            "none available — commands run unsandboxed; install bubblewrap (apt install bubblewrap) or allow unprivileged user namespaces".into()
+        },
+        None,
+    ));
+
     // 2. Python (harness scripts and the demo run with it).
     let py = util::which("python3");
     out.push(check(

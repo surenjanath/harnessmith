@@ -669,6 +669,8 @@ function reduceEvents(events) {
     } else if (e.kind === "rollout") {
       if (e.status === "start") n.run = {s: "active", t: e.t};
       else { n.run = {...n.run, s: e.status === "done" ? (e.delivered ? "ok" : "empty") : "failed", t1: e.t, usage: e.usage, err: e.error}; S.runs++; }
+    } else if (e.kind === "select" && e.status === "guard") {
+      n.guard = e;
     } else if (e.kind === "select" || e.kind === "learn") {
       if (e.status === "start") n.sel = {s: "active", t: e.t, n: e.n};
       else { n.sel = {...n.sel, ...e, s: e.status === "done" ? "ok" : "failed", t1: e.t}; if (!(e.kind === "select" && e.trivial)) S.sessions++; }
@@ -879,7 +881,7 @@ function nodeDrawer(n, t0) {
       cls = "bad"; txt = `⛔ Gate ${e.status === "blocked" ? "blocked" : "would block (observe)"} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
     } else if (e.kind === "select") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
-      txt = e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
+      txt = e.status === "guard" ? `🛡 Regression guard: ${(e.added || []).length ? "added the unmodified base attempt <b>" + esc(e.added.join(", ")) + "</b> to the pool" : ""}${(e.added || []).length && (e.dropped || []).length ? "; " : ""}${(e.dropped || []).length ? "dropped failure-looking outputs <b>" + esc(e.dropped.join(", ")) + "</b>" : ""}` : e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
     } else if (e.kind === "learn") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
       txt = e.status === "start" ? "Reflecting on what each edit did" : e.status === "done" ? (e.entry ? `Lesson: <b>${esc(e.cue)}</b> → ${esc(e.lesson)}` : "No lesson the evidence supports") : `<span class="err">${esc(e.error)}</span>`;
@@ -1257,7 +1259,8 @@ function figure1(runs) {
   const qy = top + shown * (slotH + 12);
   o += svgBox(700, qy - 2, 190, 32, max > shown ? `+${max - shown} MORE SLOTS` : "+ QUEUED GOALS WAIT", queued.length ? `${queued.length} WAITING NOW` : "NONE WAITING", "dash");
   // tool gate + models
-  o += svgBox(185, 340, 130, 50, "TOOL GATE", `${mode} · ${g.tool.blocked} BLOCKED`, "", g.mode === "off" ? "t2 tbad" : "t2 tok");
+  const sbk = (projectData.settings.sandbox || "auto") === "off" ? "NO SANDBOX" : statusCache.sandbox && statusCache.sandbox.bwrap ? "BWRAP" : statusCache.sandbox && statusCache.sandbox.unshare ? "UNSHARE" : "NO SANDBOX";
+  o += svgBox(185, 340, 130, 50, "TOOL GATE", `${mode} · ${sbk}`, "", g.mode === "off" || sbk === "NO SANDBOX" ? "t2 tbad" : "t2 tok");
   o += svgBox(345, 340, 130, 50, "MODELS", down ? `${down} DOWN · FAILING OVER` : `${hs.length} SEEN · HEALTHY`, "", down ? "t2 tbad" : "t2 tok");
   o += `<path class="evt" d="M560,${qy + 8} V326 H250 V338"/><path class="evt" d="M640,${qy + 8} V365 H477"/>`;
   o += `<text class="t2" x="552" y="320" text-anchor="end">EVERY SOLVER TOOL CALL</text><text class="t2" x="646" y="380">EVERY MODEL CALL</text>`;
@@ -1310,6 +1313,8 @@ function renderOverview(runs) {
         <tr><td>Agent self-checks</td><td>loop ×3 · errors ×4 · deadline rescue</td></tr>
         <tr><td>Goal / inputs at the gate</td><td>≤ 20k chars · ≤ 200 files, 200 MB · k ≤ 4</td></tr>
         <tr><td>Tool gate</td><td>${g.mode} · ${g.rules.length + g.custom_rules.filter(Boolean).length} rules · inputs ${g.protect_inputs ? "read-only" : "writable"}</td></tr>
+        <tr><td>Sandbox</td><td>${esc(s.sandbox || "auto")} → ${statusCache.sandbox && statusCache.sandbox.bwrap ? "bwrap" : statusCache.sandbox && statusCache.sandbox.unshare ? "unshare" : "none"} · network ${s.sandbox_network ? "on" : "off"}</td></tr>
+        <tr><td>Regression guard</td><td>${s.select_guard === false ? "off" : "base attempt competes · failure-looking outputs dropped"}</td></tr>
         <tr><td>Project memory</td><td>${s.memory_enabled === false ? "off" : "on"} · ≤ 300 notes, 600 chars each · promote ${s.memory_promote === false ? "off" : "≤ 4k chars"}</td></tr>
         <tr><td>Gate decisions so far</td><td>${g.intake.accepted} accepted · ${g.intake.stopped} stopped · ${g.tool.blocked} calls blocked · ${g.tool.would_block} would-block</td></tr>
       </table>
@@ -1331,6 +1336,12 @@ function renderOverview(runs) {
       <div class="hint" style="font:11px var(--mono);margin:4px 0 0">Goals failing an intake check stop in every mode. The improver cannot edit the gate.</div>
       <div class="gate-ed" style="margin-top:10px">
         <label style="margin-top:4px"><input type="checkbox" id="gate-protect" style="width:auto;margin-right:6px" ${g.protect_inputs ? "checked" : ""}>Task inputs are read-only</label>
+        <div class="row" style="grid-template-columns:1fr 1fr;gap:0 12px">
+          <div><label>Sandbox for solver commands</label><select id="sb-kind">${["auto", "bwrap", "unshare", "off"].map(k => `<option ${(s.sandbox || "auto") === k ? "selected" : ""}>${k}</option>`).join("")}</select></div>
+          <div><label>&nbsp;</label><label style="margin:6px 0 0"><input type="checkbox" id="sb-net" style="width:auto;margin-right:6px" ${s.sandbox_network ? "checked" : ""}>Network inside the sandbox</label></div>
+        </div>
+        <div class="hint" style="font:11px var(--mono)">here: bubblewrap ${statusCache.sandbox && statusCache.sandbox.bwrap ? '<span class="st ok">available</span>' : '<span class="st warn">missing</span>'} · unshare ${statusCache.sandbox && statusCache.sandbox.unshare ? '<span class="st ok">available</span>' : '<span class="st warn">missing</span>'}</div>
+        <label style="margin-top:10px"><input type="checkbox" id="sel-guard" style="width:auto;margin-right:6px" ${s.select_guard !== false ? "checked" : ""}>Regression guard: the unmodified attempt competes in selection</label>
         <label>Extra rules · one regex per line, matched against shell commands</label>
         <textarea id="gate-rules" rows="3" placeholder="\\bnpm\\s+publish\\b">${esc(g.custom_rules.join("\n"))}</textarea>
         <div class="actions" style="margin-top:8px"><button class="btn small" onclick="saveGate()">Save gate</button><span id="gate-msg" class="hint"></span></div>
@@ -1351,7 +1362,7 @@ function renderOverview(runs) {
 window.setGateMode = async (m) => { projectData.settings.gate_mode = m; await saveGate(); };
 window.saveGate = async () => {
   const s = Object.assign({}, projectData.settings);
-  if ($("#gate-rules")) { s.gate_rules = $("#gate-rules").value.split("\n").map(x => x.trim()).filter(Boolean); s.gate_protect_inputs = $("#gate-protect").checked; }
+  if ($("#gate-rules")) { s.gate_rules = $("#gate-rules").value.split("\n").map(x => x.trim()).filter(Boolean); s.gate_protect_inputs = $("#gate-protect").checked; s.sandbox = $("#sb-kind").value; s.sandbox_network = $("#sb-net").checked; s.select_guard = $("#sel-guard").checked; }
   try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); await loadOverview(); msg("#gate-msg", "Gate saved: " + s.gate_mode + ".", true); }
   catch (e) { msg("#gate-msg", e.message); }
 };

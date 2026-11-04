@@ -42,6 +42,20 @@ pub struct AgentConfig {
     pub gate: Option<super::gate::Gate>,
     /// Project memory: enables `remember` / `recall`, with where new notes come from.
     pub memory: Option<(super::memory::Store, super::memory::Source)>,
+    /// Sandbox for shell commands (bash, wired tools, hooks); None runs them directly.
+    pub sandbox: Option<super::sandbox::Sandbox>,
+}
+
+/// `bash -c cmd` in the workspace, inside the sandbox when there is one.
+fn shell(cfg: &AgentConfig, cmd: &str) -> std::process::Command {
+    match &cfg.sandbox {
+        Some(sb) => sb.command(cmd),
+        None => {
+            let mut c = std::process::Command::new("bash");
+            c.arg("-c").arg(cmd).current_dir(&cfg.workspace);
+            c
+        }
+    }
 }
 
 impl AgentConfig {
@@ -63,6 +77,7 @@ impl AgentConfig {
             rescue_hint: String::new(),
             gate: None,
             memory: None,
+            sandbox: None,
         }
     }
 }
@@ -214,8 +229,8 @@ fn run_wired(cfg: &AgentConfig, t: &WiredTool, args: &Value) -> Result<String> {
         }
     }
     let ws = &cfg.workspace;
-    let mut c = std::process::Command::new("bash");
-    c.arg("-c").arg(&t.command).current_dir(ws);
+    let _ = ws;
+    let mut c = shell(cfg, &t.command);
     let mut extra: Vec<(String, String)> = vec![("TOOL_ARGS".into(), args.to_string())];
     if let Some(h) = &cfg.harness {
         extra.push(("HARNESS_DIR".into(), h.display().to_string()));
@@ -302,8 +317,7 @@ fn run_hooks(cfg: &AgentConfig, event: &str, tool: &str, input: &Value, response
             if let Some(r) = response {
                 payload["tool_response"] = json!(r);
             }
-            let mut c = std::process::Command::new("bash");
-            c.arg("-c").arg(cmd).current_dir(&cfg.workspace);
+            let c = shell(cfg, cmd);
             let Ok(out) = util::run_with_timeout(c, Some(&payload.to_string()), Duration::from_secs(60)) else { continue };
             let s = out.stdout.trim();
             if let Ok(v) = serde_json::from_str::<Value>(s) {
@@ -453,8 +467,7 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
         }
         "bash" if cfg.allow_shell => {
             let t = a.get("timeout_s").and_then(|v| v.as_u64()).unwrap_or(120).clamp(1, 600);
-            let mut c = std::process::Command::new("bash");
-            c.arg("-c").arg(s("command")).current_dir(ws);
+            let mut c = shell(cfg, &s("command"));
             config::apply_env(&mut c, &config::scrub_env(None, &[]));
             let out = util::run_with_timeout(c, None, Duration::from_secs(t))?;
             let mut text = out.stdout;

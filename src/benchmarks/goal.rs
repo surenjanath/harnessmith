@@ -74,6 +74,17 @@ pub struct GoalSettings {
     /// Append notes from adopted attempts to the base harness's LongTermMEMORY.md.
     #[serde(default = "yes")]
     pub memory_promote: bool,
+    /// Sandbox for solver commands: "auto" | "bwrap" | "unshare" | "off".
+    #[serde(default = "auto")]
+    pub sandbox: String,
+    #[serde(default)]
+    pub sandbox_network: bool,
+    /// Regression guard: the base attempt competes in selection; failure-looking finals drop out.
+    #[serde(default = "yes")]
+    pub select_guard: bool,
+}
+fn auto() -> String {
+    "auto".into()
 }
 fn enforce() -> String {
     "enforce".into()
@@ -124,6 +135,9 @@ impl Default for GoalSettings {
             gate_protect_inputs: true,
             memory_enabled: true,
             memory_promote: true,
+            sandbox: auto(),
+            sandbox_network: false,
+            select_guard: true,
         }
     }
 }
@@ -325,11 +339,16 @@ impl BenchmarkAdapter for GoalAdapter {
                 gate_rules: self.settings.gate_rules.clone(),
                 gate_protect_inputs: self.settings.gate_protect_inputs,
                 memory: self.settings.memory_enabled.then(|| (self.root.clone(), task_id.to_string())),
+                sandbox: self.settings.sandbox.clone(),
+                sandbox_network: self.settings.sandbox_network,
             },
         )
     }
     fn delivered(&self, run_dir: &Path) -> bool {
         !native::deliverables(run_dir).is_empty()
+    }
+    fn guard_selection(&self) -> bool {
+        self.settings.select_guard
     }
     fn trajectory(&self, run_dir: &Path, obs_trunc: usize) -> Result<String> {
         Ok(native::render_events(&run_dir.join("trajectory.jsonl"), obs_trunc, 2_000_000, 400))

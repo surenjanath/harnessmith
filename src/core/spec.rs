@@ -292,6 +292,11 @@ pub trait BenchmarkAdapter: Send + Sync {
 
     /// Did this rollout produce the artifact the task asked for?
     fn delivered(&self, run_dir: &Path) -> bool;
+    /// Regression guard (off for the paper's benchmarks): add the unmodified base attempt to the
+    /// final selection, and drop finals whose deliverable reads like a failure.
+    fn guard_selection(&self) -> bool {
+        false
+    }
     /// Readable trajectory in the shared [ACTION]/[OBSERVATION]/[ERROR] grammar.
     fn trajectory(&self, run_dir: &Path, obs_trunc: usize) -> Result<String>;
     /// Optional. filename -> extracted readable text, one entry per artifact produced.
