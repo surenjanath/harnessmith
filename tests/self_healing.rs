@@ -139,6 +139,11 @@ fn self_healing_scenarios() {
         std::thread::sleep(std::time::Duration::from_secs(30));
         (200, reply_text("too late"))
     }));
+    let (p12, seen12) = server(Arc::new(|n, _req: &Value| match n {
+        1 => (200, reply_text("To make the page we run `python3 make_page.py`, which prints <html>…</html>. Done!")),
+        2 => (200, reply_tool("write_file", json!({"path": "output/index.html", "content": "<h1>Hello</h1>"}))),
+        _ => (200, reply_text("Wrote output/index.html.")),
+    }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -149,7 +154,7 @@ fn self_healing_scenarios() {
     }));
     let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6), conn("mcp", p7), conn("asker", p8),
         json!({"name": "pricey", "provider": "anthropic", "base_url": format!("http://127.0.0.1:{p9}"), "default_model": "m", "api_key": "x", "input_price": 3.0, "output_price": 15.0, "daily_usd": 0.01}),
-        conn("cheap", p10), conn("sloth", p11)]}));
+        conn("cheap", p10), conn("sloth", p11), conn("narrator", p12)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -312,4 +317,17 @@ fn self_healing_scenarios() {
     harness2::log::set_current(None);
     assert!(out.error.contains("cancelled"), "{out:?}");
     assert!(t0.elapsed().as_secs() < 4, "stop took {:?}", t0.elapsed());
+
+    // 11. A prose-only reply with output/ empty does not end the session: the agent is told
+    //     nothing ran, and then writes the file.
+    let ws11 = d.path().join("ws11");
+    std::fs::create_dir_all(ws11.join("output")).unwrap();
+    let mut cfg = AgentConfig::new("narrator/m", "agent", &ws11);
+    cfg.rescue_dir = Some(ws11.join("output"));
+    cfg.trajectory = Some(d.path().join("t11.jsonl"));
+    let out = agent::run(&cfg, "make a hello world page").unwrap();
+    assert_eq!(std::fs::read_to_string(ws11.join("output/index.html")).unwrap(), "<h1>Hello</h1>");
+    assert_eq!(out.final_text, "Wrote output/index.html.");
+    assert_eq!(seen12.lock().unwrap().len(), 3);
+    assert!(trajectory_kinds(&d.path().join("t11.jsonl")).contains(&"no_action".to_string()));
 }

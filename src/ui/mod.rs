@@ -25,7 +25,9 @@
 //!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
+pub mod assist;
 pub mod auth;
+pub mod files;
 pub mod doctor;
 pub mod inbound;
 
@@ -212,6 +214,10 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/estimate", get(estimate))
             .route("/api/projects/:p/gate", get(gate_summary))
             .route("/api/projects/:p/results", get(results))
+            .route("/api/projects/:p/assist", post(assist_goal))
+            .route("/api/projects/:p/goals/:id/files", get(files::goal_files))
+            .route("/api/projects/:p/file", get(files::project_file))
+            .route("/api/open", post(files::open_in_os))
             .route("/api/projects/:p/schedules", get(schedules_get))
             .route("/api/hooks/goal", post(inbound::hook_goal))
             .route("/api/hooks/github", post(inbound::hook_github))
@@ -761,6 +767,23 @@ async fn gate_summary(AxPath(p): AxPath<String>) -> ApiResult {
             "intake": {"accepted": accepted, "stopped": entries.len() - accepted, "recent": entries.iter().rev().take(6).cloned().collect::<Vec<_>>()},
             "tool": {"blocked": blocked, "would_block": would},
         }))
+    })
+    .await
+}
+
+// ---------- goal assistant ----------
+#[derive(Deserialize)]
+struct AssistReq {
+    text: String,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+async fn assist_goal(AxPath(p): AxPath<String>, Json(r): Json<AssistReq>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let chain = if a.settings.improver_model.trim().is_empty() { a.settings.solver_model.clone() } else { a.settings.improver_model.clone() };
+        assist::expand(&chain, &r.text, &r.files)
     })
     .await
 }

@@ -343,6 +343,13 @@ pub fn text_tool_calls(text: &str, tools: &[ToolDef]) -> Vec<ToolCall> {
             cands.push(t.to_string());
         }
     }
+    // Several bare objects mixed with prose: take each balanced {...} that names a known tool.
+    if cands.len() <= 1 && text.contains("\"name\"") {
+        let objs = balanced_objects(text, 8);
+        if objs.len() > 1 || cands.is_empty() {
+            cands = objs;
+        }
+    }
     let mut out = vec![];
     let mut push = |v: &Value| {
         let name = v.get("name").and_then(|n| n.as_str()).or_else(|| v.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()));
@@ -358,6 +365,43 @@ pub fn text_tool_calls(text: &str, tools: &[ToolDef]) -> Vec<ToolCall> {
             Ok(Value::Array(a)) => a.iter().for_each(&mut push),
             Ok(v) => push(&v),
             Err(_) => {}
+        }
+    }
+    out
+}
+
+/// Top-level balanced `{...}` spans in free text (string-aware), at most `max`.
+fn balanced_objects(text: &str, max: usize) -> Vec<String> {
+    let (mut out, mut depth, mut start, mut in_str, mut esc) = (vec![], 0usize, 0usize, false, false);
+    for (i, ch) in text.char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' if depth > 0 => in_str = true,
+            '{' => {
+                if depth == 0 {
+                    start = i;
+                }
+                depth += 1;
+            }
+            '}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    out.push(text[start..=i].to_string());
+                    if out.len() >= max {
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     out
@@ -914,4 +958,19 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
         nb += y * y;
     }
     if na == 0.0 || nb == 0.0 { 0.0 } else { d / (na.sqrt() * nb.sqrt()) }
+}
+
+#[cfg(test)]
+mod prose_call_tests {
+    use super::*;
+
+    #[test]
+    fn bare_objects_in_prose_become_calls() {
+        let tools: Vec<ToolDef> = ["skill", "finish", "write_file"].iter().map(|n| ToolDef { name: n.to_string(), description: String::new(), parameters: json!({}) }).collect();
+        let text = "Sure.\n\n{\n    \"type\": \"function\",\n    \"name\": \"skill\",\n    \"parameters\": {\n        \"name\": \"sleekhtml\"\n    }\n}\n\n{\n    \"type\": \"function\",\n    \"name\": \"finish\",\n    \"parameters\": {\"answer\": \"done {not a brace}\"}\n}\n";
+        let calls = text_tool_calls(text, &tools);
+        assert_eq!(calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), vec!["skill", "finish"]);
+        assert_eq!(calls[0].args["name"], "sleekhtml");
+        assert_eq!(calls[1].args["answer"], "done {not a brace}");
+    }
 }

@@ -124,6 +124,16 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .restab td, .restab th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
 .restab td.n { font: 12px var(--mono); text-align: right; white-space: nowrap; }
 svg .bar-b { fill: var(--line2); } svg .bar-a { fill: var(--accent); } svg .axis { stroke: var(--line); } svg .lbl { font: 10px var(--mono); fill: var(--muted); }
+.assist { border: 1.5px solid color-mix(in srgb, var(--selector) 55%, var(--line)); border-radius: 10px; padding: 12px 14px; margin: 10px 0 4px; background: color-mix(in srgb, var(--selector) 6%, var(--panel)); }
+.assist textarea { font: 13px/1.5 var(--mono); }
+.assist .qs li { color: var(--muted); font-size: 13px; }
+.spark { border-color: color-mix(in srgb, var(--selector) 60%, var(--line2)) !important; color: var(--selector) !important; }
+.fgroup { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.fgroup.adopted { border-color: var(--warn); }
+.frow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 3px 0; font: 12.5px var(--mono); }
+.path { font: 11.5px var(--mono); color: var(--muted); word-break: break-all; }
+.slow { color: var(--warn); font: 11.5px var(--mono); }
+.slowhint { border-left: 3px solid var(--warn); padding: 6px 10px; margin: 6px 0 10px; font-size: 12.5px; color: var(--muted); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 /* overview: paper-style figures */
 .paper { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 30px 30px; margin-bottom: 14px; }
 .paper .ttl { text-align: center; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
@@ -322,8 +332,9 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     </div>
   </div>
   <div class="panel">
-    <h2>What should the agent do?</h2>
+    <div class="live-head"><h2>What should the agent do?</h2><div class="spacer"></div><button class="btn small spark" id="g-assist" title="Rewrite your goal into a detailed brief with grading criteria">✨ Improve with AI</button></div>
     <textarea id="g-text" rows="5" placeholder="e.g. Read the attached sales.csv, find the three regions with the largest quarter-over-quarter decline, and write a one-page brief with a table to output/brief.md"></textarea>
+    <div id="g-assist-box" class="assist hidden"></div>
     <div class="row">
       <div><label>Input files (optional)</label><input type="file" id="g-files" multiple></div>
       <div><label>Domain (groups goals for learning)</label><input id="g-domain" placeholder="general"></div>
@@ -753,7 +764,14 @@ function reduceEvents(events) {
       else { n.sel = {...n.sel, ...e, s: e.status === "done" ? "ok" : "failed", t1: e.t}; if (!(e.kind === "select" && e.trivial)) S.sessions++; }
     } else if (e.kind === "step") {
       const ph = e.phase === "run" ? n.run : e.phase === "edit" ? n.edit : n.sel;
-      if (e.status === "turn" && !e.depth) { ph.steps = e.step; ph.tok = (e.in || 0) + (e.out || 0); ph.act = (e.tools && e.tools.length ? e.tools.join(", ") : e.say) || ph.act; ph.lastT = e.t; }
+      if (e.status === "call" && !e.depth) { ph.callT = e.t; ph.model = e.model; }
+      if (e.status === "turn" && !e.depth) {
+        const took = ph.callT ? e.t - ph.callT : null, dIn = (e.in || 0) - (ph.inTok || 0);
+        if (took != null && (!ph.slowest || took > ph.slowest.ms)) ph.slowest = {ms: took, inTok: dIn, step: e.step};
+        if (took != null && (!S.slowest || took > S.slowest.ms)) S.slowest = {ms: took, inTok: dIn, node: n.label, model: e.model};
+        ph.callT = null; ph.inTok = e.in || 0;
+        ph.steps = e.step; ph.tok = (e.in || 0) + (e.out || 0); ph.act = (e.tools && e.tools.length ? e.tools.join(", ") : e.say) || ph.act; ph.lastT = e.t;
+      }
       if (e.status === "end") { S.inTok += e.in || 0; S.outTok += e.out || 0; S.usd += e.usd || 0; }
     }
   }
@@ -774,6 +792,7 @@ function phaseLine(name, p, kind) {
   const extra = [];
   if (p.steps) extra.push(p.steps + (p.steps === 1 ? " step" : " steps"));
   if (p.s === "active" && p.tok) extra.push(fmtK(p.tok) + " tok");
+  if (p.s === "active" && p.callT) extra.push("thinking " + fmtT(Date.now() - p.callT));
   if (p.t1 && p.t && p.t1 - p.t >= 1000) extra.push(fmtT(p.t1 - p.t));
   if (p.retries) extra.push(p.retries + " retry");
   return `<div class="ln ${cls}"><span class="dot ${cls}"></span><span>${name} <b>${esc(txt)}</b>${extra.length ? " · " + esc(extra.join(" · ")) : ""}</span></div>`;
@@ -853,8 +872,12 @@ function renderPipeline(target, S) {
     <div class="bar" title="${pct}% of the planned budget"><i style="width:${S.done ? 100 : pct}%"></i></div></div>`;
   if (S.done) h += `<div class="pg-now">${S.done.status === "ok" || S.done.status === "skipped" ? "✓ Finished" : "Finished with status " + esc(S.done.status)}${(S.done.errors || []).length ? " — " + esc(S.done.errors.join("; ")) : ""}</div>`;
   else if (S.active.length) h += `<div class="pg-now" title="${esc(S.active.map(a => a.n.label + ": " + (a.p.act || "")).join("\n"))}">Now: ${S.active.slice(0, 3).map(a => `<b>${esc(a.n.label === "learn" ? "learn" : a.n.label)}</b> ${a.verb}${a.p.steps ? " (step " + a.p.steps + ")" : ""}`).join(" · ")}</div>`;
+  if (S.slowest && S.slowest.ms > 60000) {
+    const sl = S.slowest, big = sl.inTok > 12000;
+    h += `<div class="slowhint">⏱ Slowest model call: <b>${fmtT(sl.ms)}</b> at <b>${esc(sl.node)}</b>${sl.model ? " on " + esc(sl.model) : ""}${sl.inTok > 0 ? `, reading ${fmtK(sl.inTok)} new tokens of prompt` : ""}. ${big ? "Long prompts dominate on local models (prompt processing is slow without enough GPU): give the improver a faster model, raise GPU offload, or lower the connection's context window." : "The model itself is slow here: try a smaller or better-quantised model, or check the Model advisor on the Models tab."}</div>`;
+  }
   if (S.heals.length) {
-    const label = {failover: "model failover", recovered: "back on the preferred model", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run"};
+    const label = {failover: "model failover", recovered: "back on the preferred model", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run", no_action: "pushed a text-only reply to act", finish_refused: "refused finish with nothing written", budget_cap: "spending cap reached", spend_cap: "daily cap reached on every model"};
     const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
     const last = S.heals[S.heals.length - 1];
     h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
@@ -932,6 +955,7 @@ window.addEventListener("resize", () => { if (pgTarget && pgState) drawEdges(pgT
 
 function nodeDrawer(n, t0) {
   const rel = (t) => "+" + fmtT(t - t0);
+  const callAt = {}, lastIn = {};
   const items = n.evs.map(e => {
     let cls = "", txt = "";
     if (e.kind === "stage") {
@@ -942,15 +966,19 @@ function nodeDrawer(n, t0) {
     } else if (e.kind === "rollout") {
       cls = e.status === "done" ? (e.delivered ? "ok" : "bad") : e.status === "failed" ? "bad" : "act";
       txt = e.status === "start" ? "Solver rollout started" : e.status === "done" ? `Rollout finished — ${e.delivered ? "delivered output" : "no output"}${e.usage && e.usage.steps ? ` · ${e.usage.steps} steps · ${fmtK((e.usage.input_tokens || 0) + (e.usage.output_tokens || 0))} tokens` : ""}` : `Rollout failed: <span class="err">${esc(e.error)}</span>`;
+    } else if (e.kind === "step" && e.status === "call") {
+      callAt[(e.phase || "") + (e.depth || 0)] = e; return "";
     } else if (e.kind === "step" && e.status === "turn") {
-      cls = "act"; txt = `<span class="muted">${esc(e.phase)} step ${e.step}${e.depth ? " (sub-agent)" : ""}:</span> <code>${esc((e.tools || []).join(", ") || e.say || "(reply)")}</code>`;
+      const c = callAt[(e.phase || "") + (e.depth || 0)], took = c ? e.t - c.t : null, dIn = (e.in || 0) - (lastIn[e.phase] || 0);
+      lastIn[e.phase] = e.in || 0;
+      cls = "act"; txt = `<span class="muted">${esc(e.phase)} step ${e.step}${e.depth ? " (sub-agent)" : ""}:</span> <code>${esc((e.tools || []).join(", ") || e.say || "(reply)")}</code>${took != null ? ` <span class="${took > 60000 ? "slow" : "muted"}" style="font-size:11.5px">· model ${fmtT(took)}${dIn > 0 ? ` · ${fmtK(dIn)} in` : ""}${took > 60000 ? " ⏱ slow" : ""}</span>` : ""}`;
     } else if (e.kind === "step" && e.status === "end") {
       cls = e.error ? "bad" : "ok"; txt = `Agent session ended after ${e.steps} steps (${fmtK(e.in)} in / ${fmtK(e.out)} out tokens)${e.error ? ` — <span class="err">${esc(e.error)}</span>` : ""}`;
     } else if (e.kind === "heal") {
       cls = "act";
       const what = {failover: `Failed over ${esc(e.from || "")} → <b>${esc(e.to || "")}</b>`, recovered: `Recovered: back on <b>${esc(e.to || "")}</b> (from ${esc(e.from || "")})`, wait_recovery: `Every model down — waited ${e.seconds}s for <b>${esc(e.model)}</b>`, retry_call: `Retried a failed model call (attempt ${e.attempt})`,
         loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
-        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`}[e.status] || esc(e.status);
+        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: output/ was still empty`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
     } else if (e.kind === "memory") {
       cls = "act"; txt = e.status === "remember" ? `🧠 Saved a note <code>${esc(e.id)}</code>${e.dup ? " (already known)" : ""}: ${esc(e.text)}` : e.status === "recall" ? `🧠 Recalled ${e.hits} note(s) for “${esc(e.query)}”` : `🧠 Memory settled: kept ${e.kept}, archived ${e.archived}, promoted ${e.promoted}`;
@@ -1210,14 +1238,17 @@ function renderGoal() {
       const key = ns.namespace + mode, tab = detailTab[key] || "output";
       const sum = ns.summary.modes[mode] || {};
       h += `<h3>${mode === "agg" ? "Parallel" : "Sequential"} · k=${ns.summary.k} · adopted <code>${esc(r.label || "—")}</code></h3>`;
-      h += `<div class="tabs2">${["output", "compare", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
+      h += `<div class="tabs2">${["output", "files", "compare", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
       if (tab === "output") {
         const files = Object.entries(r.files || {});
         h += files.length ? files.map(([n, b]) => `<div class="hint"><b>${esc(n)}</b></div><pre>${esc(b)}</pre>`).join("") : '<p class="muted">No output files.</p>';
-        if (r.run_dir) h += `<div class="hint">Files on disk: <code>${esc(r.run_dir)}/workspace/output</code></div>`;
+        if (r.run_dir) h += `<div class="hint">Files on disk: <code>${esc(r.run_dir)}/workspace/output</code> <button class="btn small" onclick="openOS(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Open folder</button> <button class="btn small" onclick="copyPath(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Copy path</button> <button class="btn small" onclick="detailTab['${key}']='files';renderGoal()">All files</button></div>`;
         const dl = (what) => `projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(d.task.id)}/download?mode=${mode}&what=${what}`;
         h += `<div class="actions"><a class="btn small" href="/api/${dl("output")}">Download output (.tar.gz)</a><a class="btn small" href="/api/${dl("harness")}">Download adopted harness</a></div>`;
         if (r.usage && r.usage.steps) h += `<div class="hint">${r.usage.steps} steps · ${r.usage.input_tokens} in / ${r.usage.output_tokens} out tokens${r.usage.cost_usd ? ` · $${r.usage.cost_usd.toFixed(4)}` : ""}</div>`;
+      } else if (tab === "files") {
+        h += `<div id="files-${esc(key)}"><p class="muted">Loading files…</p></div>`;
+        setTimeout(() => { const el = document.getElementById("files-" + key); if (el) renderFiles(d.task.id, el); }, 0);
       } else if (tab === "compare") {
         const names = [...new Set([...Object.keys(r.base_files || {}), ...Object.keys(r.files || {})])];
         h += `<p class="hint">The first base attempt (unmodified harness) beside the adopted output.</p>`;
@@ -1621,6 +1652,57 @@ async function saveSchedules(list) {
 }
 window.schedToggle = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l[i].enabled = !l[i].enabled; saveSchedules(l); };
 window.schedDel = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l.splice(i, 1); saveSchedules(l); };
+
+// ---------- goal assistant ----------
+let assistLast = null;
+async function runAssist() {
+  const text = $("#g-text").value.trim(), box = $("#g-assist-box");
+  if (!text) { msg("#g-msg", "Write a few words first, e.g. “a research document on dogs”."); return; }
+  box.classList.remove("hidden");
+  box.innerHTML = `<div class="ph" style="color:var(--selector)">✨ Expanding your goal…</div><p class="hint">Using the improver model of this project. Local models can take a minute.</p>`;
+  $("#g-assist").disabled = true;
+  try {
+    const files = [...$("#g-files").files].map(f => f.name);
+    const r = await jpost(`projects/${encodeURIComponent(project)}/assist`, {text, files});
+    assistLast = r;
+    box.innerHTML = `<div class="ph" style="color:var(--selector)">✨ Suggested brief${r.title ? " · " + esc(r.title) : ""} <span class="muted">· by ${esc(r.model || "")}</span></div>
+      ${r.note ? `<p class="hint">${esc(r.note)}</p>` : ""}
+      <label>Goal (edit freely)</label><textarea id="as-goal" rows="12">${esc(r.goal || "")}</textarea>
+      <div class="row" style="grid-template-columns: 2fr 1fr;gap:0 12px">
+        <div><label>Grading criteria · one per line (never shown to the agent)</label><textarea id="as-rubric" rows="5">${esc((r.rubric || []).join("\n"))}</textarea></div>
+        <div><label>Domain</label><input id="as-domain" value="${esc(r.domain || "")}"><label>Deliverables</label><div class="path">${(r.deliverables || []).map(esc).join("<br>") || "—"}</div></div>
+      </div>
+      ${(r.questions || []).length ? `<label>Worth deciding</label><ul class="qs" style="margin:2px 0 0;padding-left:18px">${r.questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
+      <div class="actions"><button class="btn primary small" id="as-use">Use this</button><button class="btn small" id="as-again">Try again</button><button class="btn small" id="as-close">Discard</button></div>`;
+    $("#as-use").onclick = () => {
+      $("#g-text").value = $("#as-goal").value; $("#g-rubric").value = $("#as-rubric").value;
+      if ($("#as-domain").value.trim()) $("#g-domain").value = $("#as-domain").value.trim();
+      if ($("#g-rubric").value.trim()) $("#g-rubric").closest("details").open = true;
+      box.classList.add("hidden"); msg("#g-msg", "Brief filled in. Review it, then Start.", true);
+    };
+    $("#as-again").onclick = runAssist; $("#as-close").onclick = () => box.classList.add("hidden");
+  } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  $("#g-assist").disabled = false;
+}
+$("#g-assist").onclick = runAssist;
+
+// ---------- files: where a goal's outputs live ----------
+const fmtB = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? (n / 1024).toFixed(1) + " KB" : n + " B";
+window.openOS = async (path) => { try { const r = await jpost("open", {project, path}); toast("Opened " + r.opened); } catch (e) { toast(e.message, true); } };
+window.copyPath = async (path) => { try { await navigator.clipboard.writeText(path); toast("Path copied"); } catch (e) { prompt("Copy this path", path); } };
+window.viewFile = (path) => window.open(`/api/projects/${encodeURIComponent(project)}/file?path=${encodeURIComponent(path)}`, "_blank", "noopener");
+function toast(t, bad) { const el = document.createElement("div"); el.textContent = t; el.style.cssText = `position:fixed;right:16px;bottom:16px;z-index:9;padding:8px 12px;border-radius:8px;font:12.5px var(--mono);background:var(--panel2);border:1px solid ${bad ? "var(--bad)" : "var(--line2)"};color:${bad ? "var(--bad)" : "var(--ink)"}`; document.body.appendChild(el); setTimeout(() => el.remove(), 3500); }
+async function renderFiles(goalId, el) {
+  try {
+    const r = await api(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(goalId)}/files`);
+    const btns = (p) => `${r.can_open ? `<button class="btn small" onclick="openOS(${esc(JSON.stringify(p))})">Open folder</button>` : ""}<button class="btn small" onclick="copyPath(${esc(JSON.stringify(p))})">Copy path</button>`;
+    const rows = (files) => files.map(f => `<div class="frow"><span>${esc(f.name)} <span class="muted">· ${fmtB(f.size)}</span></span><button class="btn small" onclick="viewFile(${esc(JSON.stringify(f.path))})">View</button><button class="btn small" onclick="copyPath(${esc(JSON.stringify(f.path))})">Path</button></div>`).join("") || '<p class="hint">empty</p>';
+    let h = `<div class="fgroup"><div class="live-head"><b>Project folder</b><div class="spacer"></div>${btns(r.project_dir)}</div><div class="path">${esc(r.project_dir)}</div>${r.can_open ? "" : '<p class="hint">This server has no desktop to open folders on (remote or headless): copy the path, or use View / Download.</p>'}</div>`;
+    if (r.inputs) h += `<div class="fgroup"><div class="live-head"><b>Inputs</b><div class="spacer"></div>${btns(r.inputs.dir)}</div><div class="path">${esc(r.inputs.dir)}</div>${rows(r.inputs.files)}</div>`;
+    h += r.groups.map(g => `<div class="fgroup ${g.adopted ? "adopted" : ""}"><div class="live-head"><b>${g.adopted ? "★ " : ""}${esc(g.label)}</b><span class="muted" style="font-size:12px">${g.adopted ? "adopted output (" + g.modes.join(", ") + ")" : "attempt output"} · ${g.files.length} file(s)</span><div class="spacer"></div>${btns(g.dir)}</div><div class="path">${esc(g.dir)}</div>${rows(g.files)}</div>`).join("");
+    el.innerHTML = h;
+  } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
 
 // ---------- results dashboard ----------
 async function loadResults() {

@@ -691,6 +691,10 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let t0 = Instant::now();
     let mut stop_blocks = 0;
     let mut nudges = 0;
+    let mut idle_nudges = 0;
+    let mut finish_refusals = 0;
+    // Nothing delivered yet? (Only when the caller names a deliverables folder.)
+    let undelivered = |cfg: &AgentConfig| cfg.rescue_dir.as_ref().map(|d| util::files_sorted(d).iter().all(|p| std::fs::metadata(p).map(|m| m.len() == 0).unwrap_or(true))).unwrap_or(false);
     let mut outage_retries = 0u32;
     let mut last_idx: Option<usize> = None;
     let mut avoid: Vec<Option<Instant>> = vec![None; chain.len()];
@@ -819,6 +823,15 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             )));
             continue;
         }
+        // Self-check 4: a prose-only reply ends the session only once something is delivered.
+        // Small models often narrate running tools instead of calling them.
+        if resp.calls.is_empty() && cfg.depth == 0 && idle_nudges < 3 && out.steps + 1 < cfg.max_steps && undelivered(cfg) {
+            idle_nudges += 1;
+            heal(&mut out, &mut traj, "no_action", json!({"reply": util::take_chars(resp.text.trim(), 160)}));
+            messages.push(Msg::Assistant { text: resp.text.clone(), calls: vec![] });
+            messages.push(Msg::User("[self-check] You replied with text only, so nothing was executed and output/ is still empty. Describing commands does not run them. Do the work now with real tool calls: write each deliverable with write_file (for example output/index.html or output/answer.md), run code with bash if needed, then call finish.".into()));
+            continue;
+        }
         messages.push(Msg::Assistant { text: resp.text.clone(), calls: resp.calls.clone() });
         if resp.calls.is_empty() {
             if let Some(reason) = run_hooks(cfg, "Stop", "", &json!({}), None).filter(|_| stop_blocks < 3) {
@@ -902,6 +915,12 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                 heal(&mut out, &mut traj, "error_streak", json!({"streak": err_streak}));
             }
             traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": if is_error { "error" } else { "ok" }, "output": content}));
+            if call.name == "finish" && !is_error && cfg.depth == 0 && finish_refusals < 2 && undelivered(cfg) {
+                finish_refusals += 1;
+                heal(&mut out, &mut traj, "finish_refused", json!({}));
+                results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: "[self-check] finish refused: output/ is still empty. Write the deliverable with write_file first (the finish answer alone is not saved as a file), then call finish again.".into(), is_error: true });
+                continue;
+            }
             if call.name == "finish" && !is_error {
                 finish = Some(content.clone());
             }
