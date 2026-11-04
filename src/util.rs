@@ -165,7 +165,15 @@ pub fn run_with_timeout(mut cmd: Command, stdin: Option<&str>, timeout: Duration
         let _ = se.read_to_end(&mut b);
         b
     });
-    let status = child.wait_timeout(timeout)?;
+    // Wait in short slices so Stop kills a long command at once, not at its timeout.
+    let t0 = std::time::Instant::now();
+    let status = loop {
+        match child.wait_timeout(Duration::from_millis(250))? {
+            Some(s) => break Some(s),
+            None if crate::log::cancelled() || t0.elapsed() >= timeout => break None,
+            None => {}
+        }
+    };
     let (code, timed_out) = match status {
         Some(s) => (s.code(), false),
         None => {
@@ -226,4 +234,16 @@ pub fn slug_safe(label: &str) -> String {
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::Digest as _;
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Sleep up to `d`, waking early when the run is cancelled. Returns true when cancelled.
+pub fn sleep_cancellable(d: Duration) -> bool {
+    let until = std::time::Instant::now() + d;
+    while std::time::Instant::now() < until {
+        if crate::log::cancelled() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200).min(until.saturating_duration_since(std::time::Instant::now())));
+    }
+    crate::log::cancelled()
 }

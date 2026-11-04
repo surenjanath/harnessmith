@@ -89,38 +89,169 @@ fn agent_for(url: &str, timeout: Duration) -> ureq::Agent {
         .build()
 }
 
+/// The outcome of one HTTP attempt.
+enum Sent {
+    Ok(String),
+    Status(u16, String),
+    /// Transport failure; `true` when retrying is pointless (nothing listening, or cancelled).
+    Transport(String, bool),
+}
+
+pub const CANCELLED: &str = "cancelled by user";
+
 fn post(url: &str, headers: &[(&str, String)], body: &Value, timeout: Duration) -> Result<Value> {
     let mut last = String::new();
     for attempt in 0..4u32 {
-        if attempt > 0 {
-            std::thread::sleep(Duration::from_secs(2u64.pow(attempt)));
+        if attempt > 0 && crate::util::sleep_cancellable(Duration::from_secs(2u64.pow(attempt))) {
+            bail!(CANCELLED);
         }
-        let mut req = agent_for(url, timeout).post(url).set("content-type", "application/json");
-        for (k, v) in headers {
-            req = req.set(k, v);
-        }
-        match req.send_json(body.clone()) {
-            Ok(resp) => {
-                let text = resp.into_string()?;
+        // Plain-HTTP servers (local Ollama, llama.cpp, LM Studio...) go through a client whose
+        // socket Stop can close mid-call, which also makes the server stop generating. HTTPS
+        // calls run on a helper thread that Stop abandons.
+        let sent = if url.starts_with("http://") && (bypass_proxy(url) || std::env::var("HTTP_PROXY").or_else(|_| std::env::var("http_proxy")).is_err()) {
+            plain_post(url, headers, body, timeout)
+        } else {
+            ureq_post_cancellable(url, headers, body, timeout)
+        };
+        match sent {
+            Sent::Ok(text) => {
                 return serde_json::from_str(&text).map_err(|e| anyhow!("invalid JSON from {url}: {e}: {}", crate::util::take_chars(&text, 300)));
             }
-            Err(ureq::Error::Status(code, resp)) => {
-                let body = resp.into_string().unwrap_or_default();
-                last = format!("HTTP {code} from {url}: {}", crate::util::take_chars(&body, 600));
+            Sent::Status(code, b) => {
+                last = format!("HTTP {code} from {url}: {}", crate::util::take_chars(&b, 600));
                 if ![408, 409, 429, 500, 502, 503, 504, 529].contains(&code) {
                     bail!(last);
                 }
             }
-            Err(ureq::Error::Transport(t)) => {
-                last = format!("transport error calling {url}: {t}");
-                // Nothing listening / unknown host: retrying here only delays failover.
-                if matches!(t.kind(), ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Dns) {
+            Sent::Transport(msg, fatal) => {
+                if msg == CANCELLED {
+                    bail!(CANCELLED);
+                }
+                last = format!("transport error calling {url}: {msg}");
+                if fatal {
                     bail!(last);
                 }
             }
         }
     }
     bail!(last)
+}
+
+fn ureq_post_cancellable(url: &str, headers: &[(&str, String)], body: &Value, timeout: Duration) -> Sent {
+    let (url_o, hs, body_o) = (url.to_string(), headers.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<Vec<_>>(), body.clone());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut req = agent_for(&url_o, timeout).post(&url_o).set("content-type", "application/json");
+        for (k, v) in &hs {
+            req = req.set(k, v);
+        }
+        let r = match req.send_json(body_o) {
+            Ok(resp) => match resp.into_string() {
+                Ok(t) => Sent::Ok(t),
+                Err(e) => Sent::Transport(format!("reading the reply: {e}"), false),
+            },
+            Err(ureq::Error::Status(code, resp)) => Sent::Status(code, resp.into_string().unwrap_or_default()),
+            Err(ureq::Error::Transport(t)) => {
+                let fatal = matches!(t.kind(), ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Dns);
+                Sent::Transport(format!("{t}"), fatal)
+            }
+        };
+        let _ = tx.send(r);
+    });
+    loop {
+        match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(r) => return r,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if crate::log::cancelled() {
+                    return Sent::Transport(CANCELLED.into(), true);
+                }
+            }
+            Err(_) => return Sent::Transport("request thread ended".into(), false),
+        }
+    }
+}
+
+/// A minimal HTTP/1.1 POST over a plain TCP socket, polled so Stop can close it at once.
+fn plain_post(url: &str, headers: &[(&str, String)], body: &Value, timeout: Duration) -> Sent {
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+    let rest = &url["http://".len()..];
+    let (hostport, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    let hp = if hostport.contains(':') && !hostport.ends_with(']') { hostport.to_string() } else { format!("{hostport}:80") };
+    let addr = match hp.to_socket_addrs().ok().and_then(|mut a| a.next()) {
+        Some(a) => a,
+        None => return Sent::Transport(format!("Dns Failed: cannot resolve {hostport}"), true),
+    };
+    let mut s = match TcpStream::connect_timeout(&addr, Duration::from_secs(10)) {
+        Ok(s) => s,
+        Err(e) => return Sent::Transport(format!("Connection Failed: Connect error: {e}"), true),
+    };
+    let payload = body.to_string();
+    let mut head = format!("POST {path} HTTP/1.1\r\nHost: {hostport}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n", payload.len());
+    for (k, v) in headers {
+        head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    head.push_str("\r\n");
+    if let Err(e) = s.write_all(head.as_bytes()).and_then(|_| s.write_all(payload.as_bytes())) {
+        return Sent::Transport(format!("sending the request: {e}"), false);
+    }
+    let _ = s.set_read_timeout(Some(Duration::from_millis(250)));
+    let t0 = std::time::Instant::now();
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 65536];
+    loop {
+        match s.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {
+                if crate::log::cancelled() {
+                    let _ = s.shutdown(Shutdown::Both);
+                    return Sent::Transport(CANCELLED.into(), true);
+                }
+                if t0.elapsed() > timeout {
+                    let _ = s.shutdown(Shutdown::Both);
+                    return Sent::Transport(format!("timed out reading response after {}s", timeout.as_secs()), false);
+                }
+            }
+            Err(e) => return Sent::Transport(format!("reading the reply: {e}"), false),
+        }
+    }
+    let Some(split) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Sent::Transport("malformed HTTP reply (no header end)".into(), false);
+    };
+    let head = String::from_utf8_lossy(&buf[..split]).to_string();
+    let mut body_b = buf[split + 4..].to_vec();
+    let code: u16 = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+    let lower = head.to_lowercase();
+    if lower.contains("transfer-encoding: chunked") {
+        body_b = dechunk(&body_b);
+    }
+    let text = String::from_utf8_lossy(&body_b).to_string();
+    if (200..300).contains(&code) {
+        Sent::Ok(text)
+    } else {
+        Sent::Status(code, text)
+    }
+}
+
+fn dechunk(b: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let Some(nl) = b[i..].windows(2).position(|w| w == b"\r\n") else { break };
+        let size_s = String::from_utf8_lossy(&b[i..i + nl]).to_string();
+        let size = usize::from_str_radix(size_s.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+        i += nl + 2;
+        if size == 0 || i + size > b.len() {
+            break;
+        }
+        out.extend_from_slice(&b[i..i + size]);
+        i += size + 2;
+    }
+    out
 }
 
 pub fn get_json(url: &str, headers: &[(&str, String)]) -> Result<Value> {
@@ -160,6 +291,9 @@ pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) ->
         Ok(r) => {
             super::health::record_ok(&conn.name, t0.elapsed(), r.input_tokens, r.output_tokens);
             r
+        }
+        Err(e) if format!("{e}").contains(CANCELLED) => {
+            return Err(e);
         }
         Err(e) => {
             if super::health::record_fail(&conn.name, &format!("{e}")) {
@@ -555,7 +689,7 @@ fn gemini(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
 fn mock(req: &ChatReq) -> ChatResp {
     // Optional delay so demos and UI tests can watch a run move (HARNESS2_MOCK_DELAY_MS).
     if let Some(ms) = crate::config::env_int("HARNESS2_MOCK_DELAY_MS", 0).ok().filter(|m| *m > 0) {
-        std::thread::sleep(Duration::from_millis(ms.min(60_000) as u64));
+        let _ = crate::util::sleep_cancellable(Duration::from_millis(ms.min(60_000) as u64));
     }
     let used_tools = req.messages.iter().any(|m| matches!(m, Msg::Tools(_)));
     let has_write = req.tools.iter().any(|t| t.name == "write_file");
@@ -712,4 +846,72 @@ mod real_reply {
         assert_eq!(c[0].args["path"], "scripts/regions_analysis.py");
         assert!(c[0].args["content"].as_str().unwrap().contains("def find_percentage_change"));
     }
+}
+
+/// Embed texts with an embedding model id (`connection/model`). OpenAI-compatible servers use
+/// `/embeddings`, Ollama `/api/embed`, Gemini `batchEmbedContents`; `mock` hashes words into a
+/// small vector so offline tests can exercise semantic recall.
+pub fn embed(model_id: &str, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+    if texts.is_empty() {
+        return Ok(vec![]);
+    }
+    let (conn, model) = super::connections::resolve(model_id)?;
+    let t = Duration::from_secs(60);
+    let vecs: Vec<Vec<f32>> = match conn.provider.as_str() {
+        "mock" => texts.iter().map(|s| mock_embed(s)).collect(),
+        "ollama" => {
+            let base = conn.base();
+            let base = base.strip_suffix("/v1").unwrap_or(&base).to_string();
+            let v = post(&format!("{base}/api/embed"), &[], &json!({"model": model, "input": texts}), t)?;
+            v["embeddings"].as_array().cloned().unwrap_or_default().iter().map(to_f32).collect()
+        }
+        "gemini" => {
+            let reqs: Vec<Value> = texts.iter().map(|s| json!({"model": format!("models/{model}"), "content": {"parts": [{"text": s}]}})).collect();
+            let v = post(&format!("{}/v1beta/models/{model}:batchEmbedContents", conn.base()), &[("x-goog-api-key", conn.key())], &json!({"requests": reqs}), t)?;
+            v["embeddings"].as_array().cloned().unwrap_or_default().iter().map(|e| to_f32(&e["values"])).collect()
+        }
+        "anthropic" => bail!("Anthropic has no embeddings API; use an OpenAI-compatible, Ollama or Gemini embedding model"),
+        _ => {
+            let key = conn.key();
+            let mut h = vec![];
+            if !key.is_empty() {
+                h.push(("authorization", format!("Bearer {key}")));
+            }
+            let v = post(&format!("{}/embeddings", conn.base()), &h, &json!({"model": model, "input": texts}), t)?;
+            v["data"].as_array().cloned().unwrap_or_default().iter().map(|d| to_f32(&d["embedding"])).collect()
+        }
+    };
+    if vecs.len() != texts.len() || vecs.iter().any(|v| v.is_empty()) {
+        bail!("embedding model returned {} vector(s) for {} text(s)", vecs.len(), texts.len());
+    }
+    Ok(vecs)
+}
+
+fn to_f32(v: &Value) -> Vec<f32> {
+    v.as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect()).unwrap_or_default()
+}
+
+fn mock_embed(s: &str) -> Vec<f32> {
+    use sha2::Digest as _;
+    let mut v = vec![0f32; 64];
+    for w in s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2) {
+        // crude stemming so "delimiters" and "delimiter" meet
+        let w = w.trim_end_matches('s');
+        let h = sha2::Sha256::digest(w.as_bytes());
+        v[(h[0] as usize) % 64] += 1.0;
+    }
+    v
+}
+
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let (mut d, mut na, mut nb) = (0f32, 0f32, 0f32);
+    for (x, y) in a.iter().zip(b) {
+        d += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    if na == 0.0 || nb == 0.0 { 0.0 } else { d / (na.sqrt() * nb.sqrt()) }
 }

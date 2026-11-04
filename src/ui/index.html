@@ -115,6 +115,15 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .appr { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--panel)); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
 .appr .r { grid-template-columns: 12px minmax(0, 1fr) auto; }
 .mcp-row { display: grid; grid-template-columns: 12px minmax(90px, max-content) minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.kpi .kl { font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.kpi .kv { font: 650 22px/1.2 Inter, system-ui, sans-serif; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.kpi .ks { font: 11px var(--mono); color: var(--faint); }
+.restab { width: 100%; border-collapse: collapse; font-size: 13px; }
+.restab td, .restab th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.restab td.n { font: 12px var(--mono); text-align: right; white-space: nowrap; }
+svg .bar-b { fill: var(--line2); } svg .bar-a { fill: var(--accent); } svg .axis { stroke: var(--line); } svg .lbl { font: 10px var(--mono); fill: var(--muted); }
 /* overview: paper-style figures */
 .paper { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 30px 30px; margin-bottom: 14px; }
 .paper .ttl { text-align: center; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
@@ -273,6 +282,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     <button data-v="run" class="on">Run a goal</button>
     <button data-v="models">Models</button>
     <button data-v="history">History</button>
+    <button data-v="results">Results</button>
     <button data-v="harness">Base harness</button>
     <button data-v="library">Library</button>
     <button data-v="memory">Memory</button>
@@ -284,6 +294,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
   <button class="theme-t" id="theme-t" title="Switch light / dark"></button>
   <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
   <button class="btn small" id="newproj" title="New project">+ Project</button>
+  <a class="btn small hidden" id="signout" href="/logout" title="Sign out">Sign out</a>
 </header>
 <main>
 <div id="approvals" class="appr hidden"></div>
@@ -488,6 +499,17 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
   </div>
 </section>
 
+<!-- RESULTS -->
+<section id="v-results" class="hidden">
+  <div class="panel">
+    <div class="ph">Results · <b id="res-proj"></b> · does adapting the harness help on your goals?</div>
+    <div class="kpis" id="res-kpis"></div>
+    <div id="res-chart" style="margin-top:14px"></div>
+    <div id="res-table" style="margin-top:14px;overflow-x:auto"></div>
+    <p class="hint">Scores come from the judge model grading each output against the goal's rubric (fraction of criteria met). After a run, the adopted output and the unmodified base attempt are both graded when the goal has a rubric and a judge model is set (turn off with <code>auto_judge</code>). Goals without a rubric still show cost, time and whether the base attempt was kept.</p>
+  </div>
+</section>
+
 <!-- MEMORY -->
 <section id="v-memory" class="hidden">
   <div class="grid2 top">
@@ -514,10 +536,14 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
           <div><span class="dot ok"></span><span><b>SETTLE:</b> after a run, notes from the adopted attempt and base runs become <i>active</i>; the rest are archived</span></div>
           <div><span class="dot learner"></span><span><b>PROMOTE:</b> adopted notes are appended to the base harness's <code>LongTermMEMORY.md</code></span></div>
           <div><span class="dot selector"></span><span><b>PIN:</b> pinned notes go into every solver's instructions</span></div>
+          <div><span class="dot cyan"></span><span><b>MEANING:</b> with an embedding model, recall matches by meaning, not only shared words</span></div>
+          <div><span class="dot hollow"></span><span><b>FADE:</b> unused notes rank lower over time (30-day half-life) and are archived after 90 days; pinned ones never fade</span></div>
           <div><span class="dot bad"></span><span><b>SAFE:</b> notes that look like keys or tokens are refused; memory lives outside the harness</span></div>
         </div>
         <label style="margin-top:14px"><input type="checkbox" id="m-on" style="width:auto;margin-right:6px">Solver can remember and recall</label>
         <label style="margin-top:6px"><input type="checkbox" id="m-promote" style="width:auto;margin-right:6px">Promote adopted notes into LongTermMEMORY.md</label>
+        <label style="margin-top:6px"><input type="checkbox" id="m-shared" style="width:auto;margin-right:6px">Also recall notes shared from other projects</label>
+        <label>Embedding model for semantic recall · empty = keywords only</label><input id="m-embed" list="all-models" placeholder="ollama/nomic-embed-text or openai/text-embedding-3-small">
         <div class="actions" style="margin-top:8px"><button class="btn small" id="m-save">Save memory settings</button><span id="m-smsg" class="hint"></span></div>
       </div>
     </div>
@@ -562,6 +588,7 @@ function show(v) {
   if (v === "doctor") runDoctor();
   if (v === "overview") loadOverview(); else closeLive();
   if (v === "memory") loadMemory();
+  if (v === "results") loadResults();
   if (v === "models") startHealthTable(); else stopHealthTable();
 }
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
@@ -645,7 +672,7 @@ function renderPolicy() {
     line("cyan", "DOCTOR:", `safe fixes at startup and every 10 min · <a href="#" onclick="show('doctor');return false">open</a>`),
   ].join("");
 }
-async function loadStatus() { try { statusCache = await api("status"); renderPolicy(); } catch (e) {} }
+async function loadStatus() { try { statusCache = await api("status"); renderPolicy(); $("#signout").classList.toggle("hidden", !statusCache.auth); } catch (e) {} }
 
 let estTimer = null;
 function updateBudget() {
@@ -1595,6 +1622,44 @@ async function saveSchedules(list) {
 window.schedToggle = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l[i].enabled = !l[i].enabled; saveSchedules(l); };
 window.schedDel = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l.splice(i, 1); saveSchedules(l); };
 
+// ---------- results dashboard ----------
+async function loadResults() {
+  $("#res-proj").textContent = project;
+  let r; try { r = await api(`projects/${encodeURIComponent(project)}/results`); } catch (e) { $("#res-table").innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const g = r.goals, judged = g.filter(x => x.base_score != null && x.adopted_score != null);
+  const cnt = (v) => judged.filter(x => x.verdict === v).length;
+  const mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const lift = mean(judged.map(x => x.adopted_score - x.base_score));
+  const usd = g.reduce((t, x) => t + (x.usd || 0), 0), mins = mean(g.filter(x => x.minutes != null).map(x => x.minutes));
+  const keptBase = g.filter(x => x.chosen.length && x.chosen_is_base).length, withChoice = g.filter(x => x.chosen.length).length;
+  const k = (l, v, sub) => `<div class="kpi"><div class="kl">${l}</div><div class="kv">${v}</div><div class="ks">${sub || "&nbsp;"}</div></div>`;
+  $("#res-kpis").innerHTML = k("Goals", g.length, `${withChoice} finished`) + k("Judged", judged.length, "base and adopted graded")
+    + k("Adapted wins", judged.length ? `${cnt("win")} / ${judged.length}` : "—", judged.length ? `${cnt("tie")} tie · ${cnt("loss")} loss` : "add a rubric to grade")
+    + k("Avg lift", lift == null ? "—" : `${lift >= 0 ? "+" : ""}${Math.round(lift * 100)} pts`, "adopted − base score")
+    + k("Base kept", withChoice ? `${Math.round(100 * keptBase / withChoice)}%` : "—", "regression guard picks")
+    + k("Spend", "$" + usd.toFixed(usd < 1 ? 3 : 2), "last run of each goal") + k("Avg time", mins == null ? "—" : fmtT(mins * 60000), "per run");
+  // chart: paired bars, base (grey) vs adopted (accent), per judged goal
+  if (judged.length) {
+    const W = 900, H = 200, pad = 34, n = judged.length, bw = Math.min(26, (W - pad * 2) / n / 2.6);
+    let o = `<svg viewBox="0 0 ${W} ${H + 40}" style="width:100%;max-width:${W}px;height:auto" role="img" aria-label="Base vs adopted scores">`;
+    [0, .5, 1].forEach(t => { const y = H - t * (H - 20); o += `<line class="axis" x1="${pad}" x2="${W - 10}" y1="${y}" y2="${y}"/><text class="lbl" x="${pad - 6}" y="${y + 3}" text-anchor="end">${t * 100}%</text>`; });
+    judged.forEach((x, i) => {
+      const cx = pad + (i + .5) * (W - pad - 10) / n, hb = x.base_score * (H - 20), ha = x.adopted_score * (H - 20);
+      o += `<rect class="bar-b" x="${cx - bw - 1}" y="${H - hb}" width="${bw}" height="${hb}" rx="2"><title>base ${Math.round(x.base_score * 100)}%</title></rect>`;
+      o += `<rect class="bar-a" x="${cx + 1}" y="${H - ha}" width="${bw}" height="${ha}" rx="2"><title>adopted ${Math.round(x.adopted_score * 100)}%</title></rect>`;
+      o += `<text class="lbl" x="${cx}" y="${H + 14}" text-anchor="middle">${i + 1}</text><text class="lbl" x="${cx}" y="${H + 28}" text-anchor="middle" style="fill:var(--${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "muted"})">${x.verdict}</text>`;
+    });
+    o += `</svg><div class="legend"><span><i class="sw" style="background:var(--line2);height:8px;width:14px"></i>base attempt</span><span><i class="sw" style="background:var(--accent);height:8px;width:14px"></i>adopted output</span></div>`;
+    $("#res-chart").innerHTML = o;
+  } else $("#res-chart").innerHTML = '<p class="hint">No graded goals yet. Give a goal grading criteria (Run a goal → Optional grading criteria) and set a judge model; scores appear here after the run.</p>';
+  const pct = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+  $("#res-table").innerHTML = g.length ? `<table class="restab"><tr><th>#</th><th>Goal</th><th>Adopted</th><th class="n">Base</th><th class="n">Adopted</th><th>Verdict</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Heals</th><th class="n">Gate</th></tr>${g.map((x, i) => `<tr>
+      <td class="n">${judged.indexOf(x) >= 0 ? judged.indexOf(x) + 1 : ""}</td><td><a href="#" onclick="show('history');openGoal('${esc(x.id)}');return false">${esc(x.prompt)}</a><div class="hint mono">${esc(x.created_at.slice(0, 16).replace("T", " "))} · ${esc(x.domain)}${x.has_rubric ? " · rubric" : ""}</div></td>
+      <td class="mono" style="font-size:12px">${x.chosen.map(esc).join(", ") || "—"}${x.chosen_is_base ? ' <span class="st warn">base kept</span>' : ""}</td>
+      <td class="n">${pct(x.base_score)}</td><td class="n">${pct(x.adopted_score)}</td><td><span class="st ${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "info"}">${x.verdict || "—"}</span></td>
+      <td class="n">${x.usd ? "$" + x.usd.toFixed(3) : "—"}</td><td class="n">${x.minutes != null ? fmtT(x.minutes * 60000) : "—"}</td><td class="n">${x.heals || ""}</td><td class="n">${x.gates || ""}</td></tr>`).join("")}</table>` : '<p class="muted">No goals in this project yet.</p>';
+}
+
 // ---------- memory ----------
 let memNotes = [];
 async function loadMemory() {
@@ -1604,6 +1669,7 @@ async function loadMemory() {
     $("#m-proj").textContent = project;
     $("#m-stats").textContent = `${st.active} active · ${st.candidate} candidate · ${st.pinned} pinned · ${st.promoted} promoted · ${st.uses} recalls`;
     $("#m-on").checked = projectData.settings.memory_enabled !== false; $("#m-promote").checked = projectData.settings.memory_promote !== false;
+    $("#m-shared").checked = !!projectData.settings.memory_shared; $("#m-embed").value = projectData.settings.memory_embed_model || "";
     renderMemory();
   } catch (e) { $("#m-list").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
@@ -1617,16 +1683,18 @@ function renderMemory() {
   $("#m-list").innerHTML = list.length ? list.map(n => `<div class="r" style="grid-template-columns:12px minmax(0,1fr) auto;padding:6px 0;border-bottom:1px solid var(--line)">
       <span class="dot ${dot(n)}"></span>
       <span><span style="font-size:13.5px">${n.pinned ? '<b style="color:var(--selector)">★</b> ' : ""}${esc(n.text)}</span>
-        <div class="v" style="white-space:normal">${esc(n.id)} · ${esc(n.status)}${n.tags.length ? " · " + n.tags.map(esc).join(", ") : ""} · from ${esc(from(n))} · used ${n.uses}×${n.promoted ? ' · <span class="st ok">in LongTermMEMORY.md</span>' : ""}${n.note ? " · " + esc(n.note) : ""}</div></span>
+        <div class="v" style="white-space:normal">${esc(n.id)} · ${esc(n.status)}${n.vec_model ? " · semantic" : ""}${n.tags.length ? " · " + n.tags.map(esc).join(", ") : ""} · from ${esc(from(n))} · used ${n.uses}×${n.promoted ? ' · <span class="st ok">in LongTermMEMORY.md</span>' : ""}${n.note ? " · " + esc(n.note) : ""}</div></span>
       <span class="s" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
         <button class="btn small" onclick="memEdit('${n.id}',{pinned:${!n.pinned}})">${n.pinned ? "Unpin" : "Pin"}</button>
         ${!n.promoted && n.status !== "archived" ? `<button class="btn small" onclick="memPromote('${n.id}')">Promote</button>` : ""}
+        ${n.status !== "archived" ? `<button class="btn small" onclick="memShare('${n.id}')" title="Copy to the store other projects can recall">Share</button>` : ""}
         <button class="btn small" onclick="memEdit('${n.id}',{status:'${n.status === "archived" ? "active" : "archived"}'})">${n.status === "archived" ? "Restore" : "Archive"}</button>
         <button class="btn small" onclick="memDel('${n.id}')">Delete</button></span></div>`).join("")
     : '<p class="muted">No notes here yet. The solver saves notes with <code>remember</code> during runs, or add one yourself.</p>';
 }
 $("#m-q").oninput = renderMemory; $("#m-f").onchange = renderMemory;
 window.memEdit = async (id, body) => { try { await jpost(`projects/${encodeURIComponent(project)}/memory/${id}`, body, "PUT"); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
+window.memShare = async (id) => { try { await jpost(`projects/${encodeURIComponent(project)}/memory/${id}/share`, {}); msg("#m-msg", "Shared: projects with “recall shared notes” on can now find it.", true); } catch (e) { msg("#m-msg", e.message); } };
 window.memDel = async (id) => { if (!confirm("Delete this note?")) return; try { await api(`projects/${encodeURIComponent(project)}/memory/${id}`, {method: "DELETE"}); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
 window.memPromote = async (id) => { try { const r = await jpost(`projects/${encodeURIComponent(project)}/memory/${id}/promote`, {}); msg("#m-msg", r.promoted ? "Promoted into LongTermMEMORY.md." : "Not promoted (already there, or over the 4k budget).", !!r.promoted); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
 $("#m-add").onclick = async () => {
@@ -1634,7 +1702,7 @@ $("#m-add").onclick = async () => {
   catch (e) { msg("#m-msg", e.message); }
 };
 $("#m-save").onclick = async () => {
-  const s = Object.assign({}, projectData.settings, {memory_enabled: $("#m-on").checked, memory_promote: $("#m-promote").checked});
+  const s = Object.assign({}, projectData.settings, {memory_enabled: $("#m-on").checked, memory_promote: $("#m-promote").checked, memory_shared: $("#m-shared").checked, memory_embed_model: $("#m-embed").value.trim()});
   try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); msg("#m-smsg", "Saved.", true); } catch (e) { msg("#m-smsg", e.message); }
 };
 

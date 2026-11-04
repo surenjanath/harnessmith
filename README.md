@@ -241,6 +241,20 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 
 ![Live Overview](docs/img/overview_live.png)
 
+## Results, login and Stop
+
+- **Results tab.** For goals with grading criteria and a judge model, the adopted output and the unmodified base attempt are both graded after each run (`auto_judge`, on by default). The tab shows:
+  - adapted wins, ties and losses, and the average lift in points;
+  - how often the regression guard kept the base attempt;
+  - spend and time per goal;
+  - a bar chart of base vs adopted score per goal.
+- **Smarter memory.**
+  - Set an embedding model (Memory tab), e.g. `ollama/nomic-embed-text` or `openai/text-embedding-3-small`, and `recall` matches by meaning as well as keywords.
+  - Unpinned notes nobody recalls fade (30-day half-life in ranking) and are archived after 90 days.
+  - **Share** copies a note to a store that other projects can recall when "recall shared notes" is on.
+- **Login.** Set `HARNESS2_UI_PASSWORD` (8+ characters). Every page and API call then needs the session cookie from `/login` or `Authorization: Bearer <password>`. Inbound hooks keep their own tokens. Use this whenever the UI is reachable beyond localhost.
+- **Stop is immediate.** Stop closes in-flight model calls at once. Local plain-HTTP servers see the connection drop and stop generating, and HTTPS calls are abandoned. It also kills running shell commands and ends retry waits. Cancelled calls do not count against a model's circuit breaker.
+
 ## Memory
 
 | Memory | Holds | Read by | Written by |

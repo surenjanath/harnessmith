@@ -153,6 +153,8 @@ pub struct SolveOpts {
     pub gate_protect_inputs: bool,
     /// Project root holding memory.json, and the goal id notes are filed under (None: no memory).
     pub memory: Option<(PathBuf, String)>,
+    pub memory_embed: String,
+    pub memory_shared: bool,
     /// "auto" | "bwrap" | "unshare" | "off", and whether sandboxed commands get network access.
     pub sandbox: String,
     pub sandbox_network: bool,
@@ -210,7 +212,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         }
     }
     if let Some((root, goal)) = &o.memory {
-        let store = crate::llm::memory::Store::open(root);
+        let store = crate::llm::memory::Store::open(root).with(Some(o.memory_embed.clone()), o.memory_shared);
         cfg.system = format!("{}\n\n---\n\n{}", cfg.system, crate::llm::memory::system_section(&store.pinned()));
         cfg.memory = Some((store, crate::llm::memory::Source { goal: goal.clone(), by: "agent".into(), ..Default::default() }));
     }

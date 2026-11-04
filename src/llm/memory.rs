@@ -61,11 +61,37 @@ pub struct Note {
     /// Why a note was archived, when it was.
     #[serde(default)]
     pub note: String,
+    /// Embedding for semantic recall, and the model that made it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vec: Vec<f32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub vec_model: String,
+    /// For notes in the shared store: the project that shared it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub project: String,
 }
+
+/// Unused, unpinned notes fade out of recall over time (half-life), and are archived after this.
+pub const HALF_LIFE_DAYS: f64 = 30.0;
+pub const FADE_AFTER_DAYS: i64 = 90;
 
 #[derive(Debug, Clone)]
 pub struct Store {
     pub path: PathBuf,
+    /// Embedding model id for semantic recall (None: keywords only).
+    pub embed: Option<String>,
+    /// A store shared across projects, also searched by `recall`.
+    pub shared: Option<PathBuf>,
+}
+
+/// Where notes shared across projects live.
+pub fn shared_path() -> PathBuf {
+    crate::config::get().runs.join("shared_memory").join("memory.json")
+}
+
+fn age_days(n: &Note) -> f64 {
+    let t = if n.last_used.is_empty() { &n.created } else { &n.last_used };
+    chrono::DateTime::parse_from_rfc3339(t).map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_minutes() as f64 / 1440.0).unwrap_or(0.0).max(0.0)
 }
 
 fn words(s: &str) -> HashSet<String> {
@@ -78,7 +104,18 @@ fn norm(s: &str) -> String {
 
 impl Store {
     pub fn open(project_root: &Path) -> Store {
-        Store { path: project_root.join("memory.json") }
+        Store { path: project_root.join("memory.json"), embed: None, shared: None }
+    }
+
+    pub fn with(mut self, embed: Option<String>, shared: bool) -> Store {
+        self.embed = embed.filter(|e| !e.trim().is_empty());
+        self.shared = shared.then(shared_path);
+        self
+    }
+
+    fn embed_one(&self, text: &str) -> Option<Vec<f32>> {
+        let m = self.embed.as_ref()?;
+        super::client::embed(m, &[text.to_string()]).ok().and_then(|mut v| v.pop())
     }
 
     pub fn load(&self) -> Vec<Note> {
@@ -117,6 +154,8 @@ impl Store {
             bail!("this note looks like it contains a key or token; secrets are never stored in memory");
         }
         let tags: Vec<String> = tags.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).take(8).collect();
+        let vec = self.embed_one(text).unwrap_or_default();
+        let vec_model = if vec.is_empty() { String::new() } else { self.embed.clone().unwrap_or_default() };
         self.update(|notes| {
             if let Some(ex) = notes.iter_mut().find(|x| norm(&x.text) == norm(text) && x.status != "archived") {
                 for t in &tags {
@@ -127,7 +166,7 @@ impl Store {
                 return Ok((ex.clone(), true));
             }
             let id = format!("m{}", &crate::util::sha256_hex(format!("{}{}", text, crate::util::now_iso()).as_bytes())[..10]);
-            let note = Note { id, text: text.into(), tags, status: status.into(), pinned: false, promoted: false, source, created: crate::util::now_iso(), uses: 0, last_used: String::new(), note: String::new() };
+            let note = Note { id, text: text.into(), tags, status: status.into(), pinned: false, promoted: false, source, created: crate::util::now_iso(), uses: 0, last_used: String::new(), note: String::new(), vec, vec_model, project: String::new() };
             notes.push(note.clone());
             // Over the cap: archive the least useful unpinned notes.
             let live = notes.iter().filter(|x| x.status != "archived").count();
@@ -143,9 +182,39 @@ impl Store {
         })
     }
 
-    /// The best notes for `query`: active ones, plus this goal's own candidates.
+    /// The best notes for `query`: active ones, plus this goal's own candidates, plus the shared
+    /// store when enabled. Keyword overlap and tags, plus embedding similarity when an embedding
+    /// model is set; unused notes fade with a 30-day half-life (pinned ones do not).
     pub fn recall(&self, query: &str, k: usize, goal: &str) -> Result<Vec<Note>> {
+        let mut hits = self.recall_scored(query, k, goal)?;
+        if let Some(sp) = &self.shared {
+            let sh = Store { path: sp.clone(), embed: self.embed.clone(), shared: None };
+            hits.extend(sh.recall_scored(query, k, "")?);
+        }
+        hits.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(hits.into_iter().take(k.clamp(1, 10)).map(|(_, n)| n).collect())
+    }
+
+    fn recall_scored(&self, query: &str, k: usize, goal: &str) -> Result<Vec<(f64, Note)>> {
         let q = words(query);
+        let qv = if q.is_empty() { None } else { self.embed_one(query) };
+        // Embed notes that have no vector yet (or one from another model), a batch at a time.
+        if let (Some(m), Some(_)) = (&self.embed, &qv) {
+            let missing: Vec<(String, String)> = self.load().into_iter().filter(|n| n.status != "archived" && (n.vec.is_empty() || &n.vec_model != m)).take(64).map(|n| (n.id, n.text)).collect();
+            if !missing.is_empty() {
+                if let Ok(vs) = super::client::embed(m, &missing.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>()) {
+                    let _ = self.update(|notes| {
+                        for ((id, _), v) in missing.iter().zip(vs) {
+                            if let Some(n) = notes.iter_mut().find(|n| &n.id == id) {
+                                n.vec = v;
+                                n.vec_model = m.clone();
+                            }
+                        }
+                        Ok(())
+                    });
+                }
+            }
+        }
         self.update(|notes| {
             let mut scored: Vec<(f64, usize)> = notes
                 .iter()
@@ -155,19 +224,57 @@ impl Store {
                     let w = words(&n.text);
                     let overlap = q.intersection(&w).count() as f64;
                     let tag = n.tags.iter().filter(|t| q.contains(*t)).count() as f64;
-                    let s = if q.is_empty() { 1.0 } else { overlap + 2.0 * tag };
-                    (s + 0.1 * (n.uses.min(20) as f64) + if n.pinned { 0.5 } else { 0.0 }, i)
+                    let sim = qv.as_ref().map(|v| super::client::cosine(v, &n.vec) as f64).unwrap_or(0.0);
+                    let s = if q.is_empty() { 1.0 } else { overlap + 2.0 * tag + if sim > 0.25 { 4.0 * sim } else { 0.0 } };
+                    let fade = if n.pinned { 1.0 } else { 0.5f64.powf(age_days(n) / HALF_LIFE_DAYS).max(0.25) };
+                    (s, (s + 0.1 * (n.uses.min(20) as f64) + if n.pinned { 0.5 } else { 0.0 }) * fade, i)
                 })
-                .filter(|(s, _)| *s >= 1.0)
+                .filter(|(raw, _, _)| *raw >= 1.0)
+                .map(|(_, ranked, i)| (ranked, i))
                 .collect();
             scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(notes[b.1].created.cmp(&notes[a.1].created)));
             let now = crate::util::now_iso();
-            let out: Vec<Note> = scored.iter().take(k.clamp(1, 10)).map(|(_, i)| *i).collect::<Vec<_>>().into_iter().map(|i| {
+            let out: Vec<(f64, Note)> = scored.iter().take(k.clamp(1, 10)).cloned().collect::<Vec<_>>().into_iter().map(|(sc, i)| {
                 notes[i].uses += 1;
                 notes[i].last_used = now.clone();
-                notes[i].clone()
+                let mut n = notes[i].clone();
+                n.vec.clear();
+                (sc, n)
             }).collect();
             Ok(out)
+        })
+    }
+
+    /// Archive unpinned notes nobody recalled for FADE_AFTER_DAYS. Returns how many faded.
+    pub fn fade(&self) -> Result<usize> {
+        self.update(|notes| {
+            let mut n = 0;
+            for x in notes.iter_mut().filter(|x| x.status == "active" && !x.pinned && x.uses == 0 && age_days(x) > FADE_AFTER_DAYS as f64) {
+                x.status = "archived".into();
+                x.note = format!("faded: not recalled for {FADE_AFTER_DAYS} days");
+                n += 1;
+            }
+            Ok(n)
+        })
+    }
+
+    /// Copy a note into the shared store so other projects can recall it.
+    pub fn share(&self, id: &str, project: &str) -> Result<Note> {
+        let n = self.load().into_iter().find(|n| n.id == id).ok_or_else(|| anyhow::anyhow!("no note {id}"))?;
+        if n.status == "archived" {
+            bail!("restore the note before sharing it");
+        }
+        let sh = Store { path: shared_path(), embed: None, shared: None };
+        sh.update(|notes| {
+            if let Some(ex) = notes.iter().find(|x| norm(&x.text) == norm(&n.text)) {
+                return Ok(ex.clone());
+            }
+            let mut c = n.clone();
+            c.status = "active".into();
+            c.project = project.into();
+            c.uses = 0;
+            notes.push(c.clone());
+            Ok(c)
         })
     }
 
@@ -250,6 +357,30 @@ pub fn system_section(pinned: &[Note]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_recall_and_fading() {
+        let d = tempfile::tempdir().unwrap();
+        let st = Store::open(d.path()).with(Some("mock/embed".into()), false);
+        st.remember("the export uses semicolons as the delimiter", &[], src("g1", "base1"), "active").unwrap();
+        // no shared keyword ("semicolon" vs "semicolons", "delimiters" vs "delimiter"): only the embedding matches
+        let kw_only = Store::open(d.path());
+        assert!(kw_only.recall("semicolon delimiters", 5, "g9").unwrap().is_empty());
+        let hits = st.recall("semicolon delimiters", 5, "g9").unwrap();
+        assert_eq!(hits.len(), 1, "semantic recall finds it");
+        assert!(hits[0].vec.is_empty(), "vectors stay out of tool results");
+        // an unused note from long ago fades out
+        st.remember("an old fact nobody needs any more", &[], src("g1", "base1"), "active").unwrap();
+        st.update(|notes| {
+            for n in notes.iter_mut().filter(|n| n.text.starts_with("an old")) {
+                n.created = "2020-01-01T00:00:00+00:00".into();
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(st.fade().unwrap(), 1);
+        assert_eq!(st.load().iter().filter(|n| n.status == "archived").count(), 1);
+    }
 
     fn src(goal: &str, node: &str) -> Source {
         Source { goal: goal.into(), mode: "agg".into(), node: node.into(), by: "agent".into() }

@@ -25,6 +25,7 @@
 //!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
+pub mod auth;
 pub mod doctor;
 pub mod inbound;
 
@@ -210,6 +211,7 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/library", get(get_library))
             .route("/api/projects/:p/estimate", get(estimate))
             .route("/api/projects/:p/gate", get(gate_summary))
+            .route("/api/projects/:p/results", get(results))
             .route("/api/projects/:p/schedules", get(schedules_get))
             .route("/api/hooks/goal", post(inbound::hook_goal))
             .route("/api/hooks/github", post(inbound::hook_github))
@@ -219,6 +221,8 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/memory", get(memory_list).post(memory_add))
             .route("/api/projects/:p/memory/:id", put(memory_edit).delete(memory_delete))
             .route("/api/projects/:p/memory/:id/promote", post(memory_promote))
+            .route("/api/projects/:p/memory/:id/share", post(memory_share))
+            .route("/api/memory/shared", get(memory_shared_list))
             .route("/api/projects/:p/goals/:id/download", get(download))
             .route("/api/runs", get(list_runs))
             .route("/api/runs/:id/log", get(run_log))
@@ -226,12 +230,15 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/runs/:id/cancel", post(cancel_run))
             .route("/api/runs/:id/stream", get(run_stream))
             .route("/api/live", get(live_stream))
-            .layer(axum::extract::DefaultBodyLimit::max(200 * 1024 * 1024));
+            .route("/login", get(auth::login_page).post(auth::login_post))
+            .route("/logout", get(auth::logout))
+            .layer(axum::extract::DefaultBodyLimit::max(200 * 1024 * 1024))
+            .layer(axum::middleware::from_fn(auth::guard));
         let listener = tokio::net::TcpListener::bind((host, port)).await?;
         let addr = listener.local_addr()?;
-        println!("Harness² UI on http://{addr}  (Ctrl-C to stop)");
-        if host != "127.0.0.1" && host != "localhost" {
-            println!("WARNING: the UI has no authentication and can run shell commands through the agent; bind it to 127.0.0.1 unless you trust the network.");
+        println!("Harnessmith UI on http://{addr}  (Ctrl-C to stop){}", if auth::password().is_some() { "  · login required" } else { "" });
+        if host != "127.0.0.1" && host != "localhost" && auth::password().is_none() {
+            println!("WARNING: the UI is open to the network with no login, and it can run shell commands through the agent. Set HARNESS2_UI_PASSWORD (8+ characters), or bind to 127.0.0.1.");
         }
         axum::serve(listener, app).await?;
         anyhow::Ok(())
@@ -247,6 +254,7 @@ async fn status() -> ApiResult {
         "projects_root": goal::projects_root(),
         "providers": connections::PROVIDERS,
         "python": util::which("python3").is_some(),
+        "auth": auth::password().is_some(),
         "sandbox": {"bwrap": crate::llm::sandbox::availability().0, "unshare": crate::llm::sandbox::availability().1},
         "policy": {
             "max_runs": crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1),
@@ -520,7 +528,14 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
                 hlog::event("heal", "retry_run", json!({"attempt": attempt, "errors": errs, "wait_s": wait}));
                 crate::say!("! run ended {status} ({}); healing: retrying in {wait}s, reusing finished work", util::take_chars(&errs.join("; "), 200));
                 set_status(&rid, |r| r.attempts = attempt);
-                std::thread::sleep(std::time::Duration::from_secs(wait));
+                if util::sleep_cancellable(std::time::Duration::from_secs(wait)) {
+                    set_status(&rid, |r| {
+                        r.finished = util::now_iso();
+                        r.status = "cancelled".into();
+                        r.error = "stopped while waiting to retry".into();
+                    });
+                    break;
+                }
                 continue;
             }
             set_status(&rid, |r| {
@@ -531,6 +546,12 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
             });
             if !cancelled && status != "failed" {
                 settle_memory(&a, &gid, &rid);
+            }
+            if !cancelled && status != "failed" && a.settings.auto_judge && !a.settings.judge_model.trim().is_empty() && a.load_task(&gid).map(|t| !t.rubric.trim().is_empty()).unwrap_or(false) {
+                match judge_goal_sync(&a, &gid) {
+                    Ok(rows) => crate::say!("judged against the rubric: {}", rows.iter().map(|r| format!("{} {}", r["label"].as_str().unwrap_or(""), r["frac"].as_f64().map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_else(|| "—".into()))).collect::<Vec<_>>().join(" · ")),
+                    Err(e) => crate::say!("! auto-judge failed: {e}"),
+                }
             }
             deliver_result(&rid, &status, &errs, res.as_ref().ok());
             match res {
@@ -602,6 +623,10 @@ fn settle_memory(a: &GoalAdapter, gid: &str, rid: &str) {
         .collect();
     let store = crate::llm::memory::Store::open(&a.root);
     let Ok((on, off, won)) = store.settle(gid, &adopted) else { return };
+    let faded = store.fade().unwrap_or(0);
+    if faded > 0 {
+        crate::say!("memory: {faded} unused note(s) faded out");
+    }
     let mut promoted = 0;
     if a.settings.memory_promote && !won.is_empty() {
         if let Ok(base) = a.base_harness() {
@@ -785,6 +810,10 @@ async fn memory_list(AxPath(p): AxPath<String>) -> ApiResult {
     blocking(move || {
         let (_, st) = mem_store(&p)?;
         let mut notes = st.load();
+        notes.iter_mut().for_each(|n| {
+            n.vec_model = if n.vec.is_empty() { String::new() } else { n.vec_model.clone() };
+            n.vec.clear();
+        });
         notes.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.created.cmp(&a.created)));
         let count = |s: &str| notes.iter().filter(|n| n.status == s).count();
         Ok(json!({
@@ -858,6 +887,25 @@ async fn memory_delete(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
             notes.retain(|n| n.id != id);
             Ok(json!({"deleted": before - notes.len()}))
         })
+    })
+    .await
+}
+
+async fn memory_share(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
+    blocking(move || {
+        let (_, st) = mem_store(&p)?;
+        let n = st.share(&id, &p)?;
+        Ok(json!({"shared": n.id}))
+    })
+    .await
+}
+
+async fn memory_shared_list() -> ApiResult {
+    blocking(move || {
+        let st = crate::llm::memory::Store { path: crate::llm::memory::shared_path(), embed: None, shared: None };
+        let mut notes = st.load();
+        notes.iter_mut().for_each(|n| n.vec.clear());
+        Ok(json!({"notes": notes}))
     })
     .await
 }
@@ -936,19 +984,90 @@ async fn get_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
 async fn judge_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
     blocking(move || {
         let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
-        let mut sels = vec![];
-        for dir in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
-            if let Ok(s) = std::fs::read_to_string(dir.path().join(&id).join("summary.json")) {
-                let v: Value = serde_json::from_str(&s)?;
-                for (_m, sel) in v["selections"].as_object().cloned().unwrap_or_default() {
-                    sels.push(sel);
+        Ok(json!({"rows": judge_goal_sync(&a, &id)?}))
+    })
+    .await
+}
+
+/// Grade the adopted output of every mode, and the unmodified base attempt, against the
+/// goal's rubric with the judge model; saved to the goal's judged.json.
+pub(crate) fn judge_goal_sync(a: &GoalAdapter, id: &str) -> Result<Vec<Value>> {
+    let mut sels = vec![];
+    let mut base: Option<(String, String, PathBuf)> = None;
+    for dir in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
+        if let Ok(s) = std::fs::read_to_string(dir.path().join(id).join("summary.json")) {
+            let v: Value = serde_json::from_str(&s)?;
+            for (_m, sel) in v["selections"].as_object().cloned().unwrap_or_default() {
+                sels.push(sel);
+            }
+            if base.is_none() {
+                if let Some(b) = v["base"].get(0) {
+                    base = Some((b["label"].as_str().unwrap_or("base1").into(), b["run_id"].as_str().unwrap_or("").into(), PathBuf::from(b["run_dir"].as_str().unwrap_or(""))));
                 }
             }
         }
-        let rows = judge::judge_selections(&a, &sels, 4);
-        let out: Vec<Value> = rows.iter().map(|r| r.to_json()).collect();
-        util::write(&a.task_dir(&id).join("judged.json"), serde_json::to_string_pretty(&out)?)?;
-        Ok(json!({"rows": out}))
+    }
+    let mut rows: Vec<Value> = judge::judge_selections(a, &sels, 4).iter().map(|r| r.to_json()).collect();
+    if let Some((label, run_id, dir)) = base.filter(|b| b.2.is_dir()) {
+        let mut r = judge::judge_one(a, id, "base", 1, &label, &run_id, &dir, true, "").to_json();
+        r["is_base_attempt"] = json!(true);
+        rows.push(r);
+    }
+    util::write(&a.task_dir(id).join("judged.json"), serde_json::to_string_pretty(&rows)?)?;
+    Ok(rows)
+}
+
+/// Per-goal results for the dashboard: adopted vs base scores, cost, time, heals and gates.
+async fn results(AxPath(p): AxPath<String>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let runs: Vec<RunInfo> = RUNS.lock().unwrap().values().filter(|r| r.project == p).cloned().collect();
+        let mut out = vec![];
+        for t in a.all_tasks() {
+            let judged: Vec<Value> = std::fs::read_to_string(a.task_dir(&t.id).join("judged.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+            let base_frac = judged.iter().find(|r| r["is_base_attempt"] == true).and_then(|r| r["frac"].as_f64());
+            let adopted: Vec<&Value> = judged.iter().filter(|r| r["is_base_attempt"] != true).collect();
+            let adopted_frac = adopted.iter().filter_map(|r| r["frac"].as_f64()).fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))));
+            let mut chosen = vec![];
+            let mut chosen_is_base = false;
+            let mut status = String::new();
+            for dir in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
+                if let Ok(s) = std::fs::read_to_string(dir.path().join(&t.id).join("summary.json")) {
+                    if let Ok(v) = serde_json::from_str::<Value>(&s) {
+                        status = v["status"].as_str().unwrap_or("").into();
+                        for (m, sel) in v["selections"].as_object().cloned().unwrap_or_default() {
+                            chosen.push(format!("{m}:{}", sel["chosen_label"].as_str().unwrap_or("")));
+                            chosen_is_base |= sel["chosen_is_base"].as_bool().unwrap_or(false) || sel["chosen_label"].as_str().map(|l| l.starts_with("base")).unwrap_or(false);
+                        }
+                    }
+                }
+            }
+            let last = runs.iter().filter(|r| r.goal_id == t.id && !r.finished.is_empty()).max_by(|x, y| x.started.cmp(&y.started));
+            let (mut usd, mut heals, mut gates, mut minutes) = (0.0, 0, 0, None);
+            if let Some(r) = last {
+                for e in hlog::named(&r.id).events_from(0) {
+                    match (e["kind"].as_str(), e["status"].as_str()) {
+                        (Some("step"), Some("end")) => usd += e["usd"].as_f64().unwrap_or(0.0),
+                        (Some("heal"), _) => heals += 1,
+                        (Some("gate"), _) => gates += 1,
+                        _ => {}
+                    }
+                }
+                if let (Ok(s), Ok(f)) = (chrono::DateTime::parse_from_rfc3339(&r.started), chrono::DateTime::parse_from_rfc3339(&r.finished)) {
+                    minutes = Some((f - s).num_seconds() as f64 / 60.0);
+                }
+            }
+            let verdict = match (base_frac, adopted_frac) {
+                (Some(b), Some(x)) if x > b + 1e-9 => "win",
+                (Some(b), Some(x)) if x < b - 1e-9 => "loss",
+                (Some(_), Some(_)) => "tie",
+                _ => "",
+            };
+            out.push(json!({"id": t.id, "prompt": util::take_chars(&t.prompt, 160), "domain": t.domain, "created_at": t.created_at, "has_rubric": !t.rubric.is_empty(),
+                "status": status, "chosen": chosen, "chosen_is_base": chosen_is_base, "base_score": base_frac, "adopted_score": adopted_frac, "verdict": verdict,
+                "usd": (usd * 10000.0).round() / 10000.0, "minutes": minutes, "heals": heals, "gates": gates, "run_status": last.map(|r| r.status.clone())}));
+        }
+        Ok(json!({"goals": out}))
     })
     .await
 }
@@ -1244,5 +1363,5 @@ async fn cancel_run(AxPath(id): AxPath<String>) -> ApiResult {
         return Err(anyhow::anyhow!("run {id} is not running").into());
     }
     hlog::named(&id).cancel();
-    Ok(Json(json!({"ok": true, "note": "stopping after the current model call"})))
+    Ok(Json(json!({"ok": true, "note": "stopping now: in-flight model calls and commands are being interrupted"})))
 }

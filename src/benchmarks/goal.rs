@@ -91,6 +91,15 @@ pub struct GoalSettings {
     /// Spending cap per run in USD (0: none). Agents stop once the run has spent this much.
     #[serde(default)]
     pub max_usd_per_run: f64,
+    /// Grade the base attempt and the adopted output against the rubric after each run.
+    #[serde(default = "yes")]
+    pub auto_judge: bool,
+    /// Embedding model for semantic memory recall (`connection/model`; empty: keywords only).
+    #[serde(default)]
+    pub memory_embed_model: String,
+    /// Also recall notes shared from other projects.
+    #[serde(default)]
+    pub memory_shared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -175,6 +184,9 @@ impl Default for GoalSettings {
             mcp_servers: vec![],
             schedules: vec![],
             max_usd_per_run: 0.0,
+            auto_judge: true,
+            memory_embed_model: String::new(),
+            memory_shared: false,
         }
     }
 }
@@ -376,6 +388,8 @@ impl BenchmarkAdapter for GoalAdapter {
                 gate_rules: self.settings.gate_rules.clone(),
                 gate_protect_inputs: self.settings.gate_protect_inputs,
                 memory: self.settings.memory_enabled.then(|| (self.root.clone(), task_id.to_string())),
+                memory_embed: self.settings.memory_embed_model.clone(),
+                memory_shared: self.settings.memory_shared,
                 sandbox: self.settings.sandbox.clone(),
                 sandbox_network: self.settings.sandbox_network,
                 mcp_servers: self.settings.mcp_servers.clone(),

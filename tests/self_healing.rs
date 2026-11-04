@@ -135,6 +135,10 @@ fn self_healing_scenarios() {
             "usage": {"input_tokens": 1000, "output_tokens": 100, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 2000}}))
     }));
     let (p10, seen10) = server(Arc::new(|_n, _req: &Value| (200, reply_text("cheap done"))));
+    let (p11, _seen11) = server(Arc::new(|_n, _req: &Value| {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        (200, reply_text("too late"))
+    }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -145,7 +149,7 @@ fn self_healing_scenarios() {
     }));
     let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6), conn("mcp", p7), conn("asker", p8),
         json!({"name": "pricey", "provider": "anthropic", "base_url": format!("http://127.0.0.1:{p9}"), "default_model": "m", "api_key": "x", "input_price": 3.0, "output_price": 15.0, "daily_usd": 0.01}),
-        conn("cheap", p10)]}));
+        conn("cheap", p10), conn("sloth", p11)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -292,4 +296,20 @@ fn self_healing_scenarios() {
     assert!(!seen10.lock().unwrap().is_empty());
     // 1000*3 + 2000*3*1.25 + 50000*0.3 + 100*15 = 3000 + 7500 + 15000 + 1500 = 27000 / 1e6
     assert!((out.cost_usd - 0.027).abs() < 1e-9, "{}", out.cost_usd);
+
+    // 10. Stop interrupts a model call in flight: a 30 s reply is abandoned within ~1 s of cancel.
+    let ws10 = d.path().join("ws10");
+    std::fs::create_dir_all(&ws10).unwrap();
+    let sink = harness2::log::Sink::persistent(d.path().join("sink10"));
+    harness2::log::set_current(Some(sink.clone()));
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        sink.cancel();
+    });
+    let t0 = std::time::Instant::now();
+    let out = agent::run(&AgentConfig::new("sloth/m", "agent", &ws10), "go").unwrap();
+    canceller.join().unwrap();
+    harness2::log::set_current(None);
+    assert!(out.error.contains("cancelled"), "{out:?}");
+    assert!(t0.elapsed().as_secs() < 4, "stop took {:?}", t0.elapsed());
 }

@@ -336,7 +336,7 @@ pub fn execute_healing(adapter: &dyn BenchmarkAdapter, task_id: &str, harness_di
             let wait = config::env_int("HARNESS2_ROLLOUT_RETRY_WAIT", 10).unwrap_or(10).max(0) as u64;
             crate::log::event("heal", "retry_rollout", json!({"run_id": run_id, "error": util::take_chars(&format!("{e}"), 300), "wait_s": wait}));
             say!("  ! rollout {run_id} failed ({}); retrying once in {wait}s", util::take_chars(&format!("{e}"), 160));
-            std::thread::sleep(std::time::Duration::from_secs(wait));
+            let _ = crate::util::sleep_cancellable(std::time::Duration::from_secs(wait));
             adapter.execute(task_id, harness_dir, run_id, None)
         }
     }
