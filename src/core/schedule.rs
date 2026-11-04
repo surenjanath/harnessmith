@@ -477,7 +477,7 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
         res.errors.push(format!("{mode}: {}: proposer execution failed: {}", s.label, s.error));
     }
     let mut candidates = selection::selection_pool(mode, k, &r.rollouts, base);
-    let guarded = adapter.guard_selection() && guard_pool(&mut candidates, base, adapter);
+    let guarded = adapter.guard_selection() && guard_pool(&mut candidates, base, adapter, task_id);
     let mut sel: Selection = if pool_policy == "finals" && k == 1 && !(guarded && candidates.len() > 1) {
         selection::trivial_selection(task_id, k, mode, &candidates, adapter, &work_dir)?
     } else {
@@ -518,7 +518,7 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
 
 /// Phrases that mark a deliverable as a failure report rather than an answer.
 static FAILURE_TEXT: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-    regex::Regex::new(r"(?i)(\bno\s+[`'\w./-]+\s+(file\s+)?(was\s+)?found\b|\bnot\s+found\b|does\s+not\s+exist|unable\s+to\s+(find|locate|access|read|open)|could\s+not\s+(find|locate|read|open)|please\s+(ensure|provide|upload|make\s+sure))").unwrap()
+    regex::Regex::new(r#"(?i)(\bno\s+[`'\w./-]+\s+(file\s+)?(was\s+)?found\b|\bnot\s+found\b|does\s+not\s+exist|unable\s+to\s+(find|locate|access|read|open)|could\s+not\s+(find|locate|read|open)|please\s+(ensure|provide|upload|make\s+sure)|"status"\s*:\s*"error"|^\W*error\b|no\s+sub-agent\s+named|no\s+skill\s+named|unknown\s+tool|traceback\s+\(most\s+recent|\bi\s+(can't|cannot|am\s+unable\s+to)\b)"#).unwrap()
 });
 
 /// Whether a delivered output reads like "I could not do it": short, and saying so.
@@ -529,14 +529,48 @@ pub fn looks_failed(text: &str) -> bool {
 
 /// The regression guard: add the base attempt as a candidate, drop failure-looking finals while
 /// a healthy candidate remains. Returns whether the pool changed.
-fn guard_pool(cands: &mut BTreeMap<String, RunView>, base: &[RunView], adapter: &dyn BenchmarkAdapter) -> bool {
+/// File types the goal asks for ("an HTML page", "a CSV"), as lowercase extensions.
+pub fn expected_exts(prompt: &str) -> Vec<&'static str> {
+    let p = prompt.to_lowercase();
+    let mut v = vec![];
+    for (ext, words) in [
+        ("html", &["html", "web page", "webpage", "landing page", "website"][..]),
+        ("csv", &["csv"][..]),
+        ("json", &["json"][..]),
+        ("py", &["python script", ".py"][..]),
+        ("svg", &["svg"][..]),
+        ("js", &["javascript", ".js"][..]),
+        ("css", &["stylesheet", ".css"][..]),
+        ("xlsx", &["xlsx", "excel"][..]),
+        ("docx", &["docx", "word document"][..]),
+        ("pdf", &["pdf"][..]),
+    ] {
+        if words.iter().any(|w| p.contains(w)) {
+            v.push(ext);
+        }
+    }
+    v
+}
+
+fn guard_pool(cands: &mut BTreeMap<String, RunView>, base: &[RunView], adapter: &dyn BenchmarkAdapter, task_id: &str) -> bool {
     let text = |rv: &RunView| adapter.deliverable_text(&rv.run_dir).unwrap_or_default();
+    let want = expected_exts(&adapter.task_prompt(task_id).unwrap_or_default());
+    let on_format = |rv: &RunView| {
+        want.is_empty()
+            || adapter.deliverable_files(&rv.run_dir).map(|m| m.keys().any(|f| want.iter().any(|e| f.to_lowercase().ends_with(&format!(".{e}"))))).unwrap_or(false)
+    };
     let mut added = vec![];
     if let Some(b) = base.iter().find(|b| b.delivered && b.ok && !cands.contains_key(&b.label) && !looks_failed(&text(b))) {
         cands.insert(b.label.clone(), b.clone());
         added.push(b.label.clone());
     }
-    let suspect: Vec<String> = cands.iter().filter(|(_, rv)| !rv.delivered || looks_failed(&text(rv))).map(|(l, _)| l.clone()).collect();
+    let mut suspect: Vec<String> = cands.iter().filter(|(_, rv)| !rv.delivered || looks_failed(&text(rv))).map(|(l, _)| l.clone()).collect();
+    // Of the healthy ones, those without the requested file type lose to those with it.
+    let healthy: Vec<&String> = cands.keys().filter(|l| !suspect.contains(l)).collect();
+    let off: Vec<String> = healthy.iter().filter(|l| !on_format(&cands[**l])).map(|l| (*l).clone()).collect();
+    if !off.is_empty() && off.len() < healthy.len() {
+        suspect.extend(off);
+    }
     let dropped: Vec<String> = if suspect.len() < cands.len() { suspect } else { vec![] };
     for l in &dropped {
         cands.remove(l);
@@ -806,5 +840,9 @@ mod guard_tests {
         assert!(looks_failed("  "));
         assert!(!looks_failed("| region | q1 | q2 |\n|---|---|---|\n| D | 48 | 42 |\n\nRegion D fell the most: -12.5%."));
         assert!(!looks_failed(&format!("{} not found in the 2019 data, so we used 2020.", "x".repeat(700))), "long answers that mention 'not found' are kept");
+        assert!(looks_failed("```\n{\"status\":\"ERROR\",\"data\":{\"error\": \"No sub-agent named 'client'.\"}}\n```"));
+        assert!(looks_failed("Error: unknown tool `client`"));
+        assert_eq!(super::expected_exts("create a hello world sleek html page"), vec!["html"]);
+        assert!(super::expected_exts("write a research report on dogs").is_empty());
     }
 }

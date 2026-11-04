@@ -162,13 +162,21 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
             parameters: obj(json!({"query": {"type": "string"}, "k": {"type": "integer", "description": "how many notes, default 5"}}), &[]),
         });
     }
-    if cfg.harness.is_some() {
+    // Offer `skill` / `task` only when the harness has skills / sub-agents: small models call
+    // tools that exist in the list even when there is nothing behind them.
+    let has = |dir: &str, file: &str| {
+        cfg.harness.as_ref().and_then(|h| std::fs::read_dir(h.join(dir)).ok()).map(|rd| rd.flatten().any(|e| e.path().join(file).is_file())).unwrap_or(false)
+    };
+    let (has_skills, has_agents) = (has("skills", "SKILL.md"), has("sub_agents", "AGENT.md"));
+    if cfg.harness.is_some() && has_skills {
         t.push(ToolDef {
             name: "skill".into(),
             description: "Load the full instructions of a named skill from the harness.".into(),
             parameters: obj(json!({"name": {"type": "string"}}), &["name"]),
         });
-        if cfg.depth == 0 {
+    }
+    if cfg.harness.is_some() {
+        if cfg.depth == 0 && has_agents {
             t.push(ToolDef {
                 name: "task".into(),
                 description: "Delegate a bounded sub-task to a named sub-agent. It runs in its OWN context (it cannot see this conversation) and returns text.".into(),

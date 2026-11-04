@@ -225,7 +225,8 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     if died || out.error.contains("cancelled") {
         anyhow::bail!("solver session failed: {}", out.error);
     }
-    if deliverables(run_dir).is_empty() && !out.final_text.trim().is_empty() {
+    // The final reply becomes output/answer.md only when it is an answer, not an error report.
+    if deliverables(run_dir).is_empty() && !out.final_text.trim().is_empty() && !crate::core::schedule::looks_failed(&out.final_text) {
         util::write(&ws.join("output/answer.md"), &out.final_text)?;
     }
     let mut extra = serde_json::Map::new();
