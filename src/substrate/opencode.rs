@@ -36,6 +36,7 @@ pub fn opencode_surface() -> SurfaceSpec {
         plugin_dir: Some("plugin"),
         hooks_file: None,
         hook_events: vec![],
+        tool_dir: None,
         compile_skill_scripts: false,
         reject_empty_always_on: false,
         stubs: vec![

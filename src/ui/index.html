@@ -6,18 +6,34 @@
 <title>Harness² Studio</title>
 <style>
 :root {
-  --bg: #12161d; --panel: #181e27; --panel2: #1d2430; --ink: #e8ecf1; --muted: #8b95a3; --faint: #5f6977; --line: #2b3441; --line2: #3a4553;
-  --accent: #4f8ff0; --accent-ink: #0b0f15; --ok: #3cc48d; --warn: #e5a03a; --bad: #e9646b;
-  --solver: #4f8ff0; --improver: #3cc48d; --selector: #b48cf0; --learner: #d6cf5b; --judge: #e5a03a; --cyan: #45c6d6; --pink: #ec73b7;
-  --code: #121821; --chip: #232c39;
+  --bg: #f5f6f8; --panel: #ffffff; --panel2: #f0f2f5; --ink: #16191d; --muted: #5b6470; --faint: #8a929d; --line: #e2e5e9; --line2: #cdd2d9;
+  --accent: #2563eb; --accent-ink: #ffffff; --ok: #188a55; --warn: #b26a00; --bad: #cc3b3b;
+  --solver: #2f6fde; --improver: #1b9a60; --selector: #8b5cf6; --learner: #a8980f; --judge: #c27b12; --cyan: #0e9aab; --pink: #d6409a;
+  --code: #f3f4f6; --chip: #eceff3; --codeink: #24292f;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000; --panel: #0b0b0c; --panel2: #141416; --ink: #ededee; --muted: #9a9aa0; --faint: #65656b; --line: #222225; --line2: #34343a;
+    --accent: #4f8ff0; --accent-ink: #000000; --ok: #3cc48d; --warn: #e5a03a; --bad: #ec666d;
+    --solver: #4f8ff0; --improver: #3cc48d; --selector: #b48cf0; --learner: #d6cf5b; --judge: #e5a03a; --cyan: #45c6d6; --pink: #ec73b7;
+    --code: #0f0f11; --chip: #1b1b1e; --codeink: #d4d4d8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --panel: #0b0b0c; --panel2: #141416; --ink: #ededee; --muted: #9a9aa0; --faint: #65656b; --line: #222225; --line2: #34343a;
+  --accent: #4f8ff0; --accent-ink: #000000; --ok: #3cc48d; --warn: #e5a03a; --bad: #ec666d;
+  --solver: #4f8ff0; --improver: #3cc48d; --selector: #b48cf0; --learner: #d6cf5b; --judge: #e5a03a; --cyan: #45c6d6; --pink: #ec73b7;
+  --code: #0f0f11; --chip: #1b1b1e; --codeink: #d4d4d8;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 a { color: var(--accent); }
-header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 92%, black); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
 header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
 header h1 sup { font-size: 10px; }
 header h1 small { font: 11px var(--mono); color: var(--faint); font-weight: 400; margin-left: 6px; }
@@ -46,7 +62,7 @@ main { max-width: 1320px; margin: 0 auto; padding: 18px 16px 60px; }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
 pre, code, .mono { font-family: var(--mono); font-size: 12.5px; }
-code { color: #c9d3df; background: var(--code); padding: 0 4px; border-radius: 4px; }
+code { color: var(--codeink); background: var(--code); padding: 0 4px; border-radius: 4px; }
 pre code { background: none; padding: 0; }
 pre { background: var(--code); border: 1px solid var(--line); padding: 10px 12px; border-radius: 7px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 6px 0; max-height: 520px; }
 pre.log { max-height: 420px; min-height: 120px; }
@@ -78,6 +94,10 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .steps span.done { color: var(--ok); border-color: var(--ok); }
 .steps span.cur { color: var(--accent); border-color: var(--accent); }
 .hidden { display: none !important; }
+.theme-t { display: inline-flex; align-items: center; gap: 6px; font: 12px var(--mono); padding: 4px 10px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
+.theme-t:hover { color: var(--ink); }
+.tools .r { grid-template-columns: 12px minmax(110px, max-content) minmax(0, 1fr) auto; }
+.tools .r .v { white-space: normal; }
 .hpill { display: inline-flex; gap: 7px; align-items: center; font: 12px var(--mono); padding: 4px 10px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
 .hpill.bad { color: var(--bad); } .hpill.warn { color: var(--warn); } .hpill.ok { color: var(--ok); }
 .heal { display: inline-block; font: 600 10.5px var(--mono); padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); margin-top: 4px; }
@@ -91,6 +111,58 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .check .cd { font: 11.5px/1.45 var(--mono); color: var(--muted); margin-top: 1px; word-break: break-word; }
 .st { font: 11.5px var(--mono); white-space: nowrap; }
 .st.ok { color: var(--ok); } .st.bad { color: var(--bad); } .st.warn { color: var(--warn); } .st.info, .st.idle { color: var(--muted); }
+
+/* overview: paper-style figures */
+.paper { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 30px 30px; margin-bottom: 14px; }
+.paper .ttl { text-align: center; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
+.paper .ttl h2 { font: 700 28px/1.2 Georgia, "Times New Roman", serif; margin: 0; letter-spacing: .01em; }
+.paper .ttl h2 sup { font-size: 15px; }
+.paper .ttl .tag { font: 12px/1.6 Georgia, serif; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.paper .sec { display: grid; grid-template-columns: 34px 1fr; gap: 0 10px; margin: 18px 0 6px; }
+.paper .sec > b { font: 12px Georgia, serif; color: var(--muted); padding-top: 2px; }
+.paper .sec h3 { font: 600 13px Georgia, serif; letter-spacing: .1em; text-transform: uppercase; margin: 0 0 6px; color: var(--ink); }
+.paper .sec p { font: 14.5px/1.6 Georgia, "Times New Roman", serif; margin: 0 0 8px; text-align: justify; hyphens: auto; }
+.fig { overflow-x: auto; margin: 8px 0 2px; }
+.fig svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.fig-cap { text-align: center; font: 13.5px Georgia, serif; margin: 6px 0 14px; color: var(--ink); }
+.fig-cap b { font-weight: 400; margin-right: 10px; }
+.fig .id { text-align: right; font: 600 10px var(--mono); color: var(--muted); }
+svg .bx rect, svg .bx path.cyl { fill: var(--panel); stroke: var(--ink); stroke-width: 1.5; }
+svg .bx.dash rect { stroke-dasharray: 5 4; fill: transparent; }
+svg .bx.live rect { stroke: var(--accent); stroke-width: 2.2; }
+svg .bx.off rect { stroke: var(--line2); }
+svg .bx.off text { fill: var(--faint); }
+svg .t1 { font: 600 10.5px var(--mono); fill: var(--ink); letter-spacing: .04em; }
+svg .t2 { font: 9px var(--mono); fill: var(--muted); letter-spacing: .03em; }
+svg .t3 { font: 600 9px var(--mono); fill: var(--muted); letter-spacing: .06em; }
+svg .tok { fill: var(--ok); } svg .tbad { fill: var(--bad); } svg .twarn { fill: var(--warn); } svg .tacc { fill: var(--accent); }
+svg .grp { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 7 5; }
+svg .main { fill: none; stroke: var(--ink); stroke-width: 2.6; }
+svg .data { fill: none; stroke: var(--ink); stroke-width: 1.3; marker-end: url(#ah); }
+svg .evt { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 4 3; marker-end: url(#ah); }
+svg .ahp { fill: var(--ink); }
+svg .num circle { fill: var(--panel); stroke: var(--ink); stroke-width: 1.3; }
+svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: middle; }
+.pgrid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px 26px; align-items: start; }
+@media (max-width: 860px) { .pgrid { grid-template-columns: 1fr; } .paper { padding: 18px 16px 20px; } }
+.ptab { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.ptab caption { font: 13px Georgia, serif; margin-bottom: 6px; color: var(--ink); }
+.ptab th, .ptab td { border: 1px solid var(--ink); padding: 3px 8px; text-align: left; vertical-align: top; }
+.ptab th { font: 600 11px var(--mono); text-transform: none; letter-spacing: 0; color: var(--ink); text-align: center; }
+.ptab td.c { text-align: center; }
+.modes { border: 1.5px solid var(--ink); }
+.modes td { cursor: pointer; }
+.modes tr.on td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.modes tr.on td:first-child::after { content: "  ●"; color: var(--accent); }
+.caution h4 { font: 700 13px Georgia, serif; letter-spacing: .12em; text-align: center; text-decoration: underline; margin: 0 0 6px; }
+.caution p { font: 13.5px/1.5 Georgia, serif; margin: 0 0 12px; text-align: justify; }
+.bring { border: 1.5px solid var(--ink); font: 12px/1.7 var(--mono); }
+.bring .bh { display: flex; justify-content: space-between; background: var(--ink); color: var(--panel); font-weight: 700; padding: 2px 8px; letter-spacing: .05em; }
+.bring ol { margin: 0; padding: 6px 10px 8px 28px; }
+.bring li.done::marker { color: var(--ok); }
+.bring li .ck { color: var(--ok); }
+.bring li .todo { color: var(--warn); }
+.gate-ed textarea { font: 12px var(--mono); }
 
 /* diagram-style key/value rows */
 .rows { display: grid; gap: 1px; }
@@ -177,6 +249,7 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 <header>
   <h1>Harness<sup>2</sup> Studio <small id="ver"></small></h1>
   <nav id="nav">
+    <button data-v="overview">Overview</button>
     <button data-v="run" class="on">Run a goal</button>
     <button data-v="models">Models</button>
     <button data-v="history">History</button>
@@ -186,10 +259,16 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
   </nav>
   <div class="spacer"></div>
   <button class="hpill" id="hpill" title="Model health (circuit breakers). Click for the Doctor." onclick="show('doctor')"><span class="dot"></span><span>models: checking…</span></button>
+  <button class="theme-t" id="theme-t" title="Switch light / dark"></button>
   <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
   <button class="btn small" id="newproj" title="New project">+ Project</button>
 </header>
 <main>
+
+<!-- OVERVIEW -->
+<section id="v-overview" class="hidden">
+  <div class="paper" id="paper"><p class="muted">Loading…</p></div>
+</section>
 
 <!-- RUN -->
 <section id="v-run">
@@ -326,6 +405,12 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 
 <!-- HARNESS -->
 <section id="v-harness" class="hidden">
+  <div class="panel tools">
+    <div class="ph">Tools · what the agent can call · <b id="t-count"></b></div>
+    <div class="rows" id="tools-list"></div>
+    <div class="actions"><button class="btn small" id="t-new">+ New wired tool</button><button class="btn small hidden" id="t-starter">+ Add starter tool: csv_profile</button>
+      <span class="hint">A wired tool is <code>tools/&lt;name&gt;.json</code>: name, description, JSON-Schema <code>parameters</code> and a <code>command</code>. Arguments arrive as JSON on stdin and as <code>$ARG_&lt;NAME&gt;</code>. The improver can wire new tools too.</span></div>
+  </div>
   <div class="panel">
     <h2>Base harness</h2>
     <p class="hint">Where every goal in this project starts. Edit files in place; add a skill as <code>skills/&lt;name&gt;/SKILL.md</code> (with <code>name:</code> and <code>description:</code> frontmatter), a helper as <code>scripts/&lt;name&gt;.py</code>, a sub-agent as <code>sub_agents/&lt;name&gt;/AGENT.md</code>, or hooks in <code>hooks.json</code>.</p>
@@ -366,6 +451,11 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 </main>
 
 <script>
+// ---------- theme ----------
+function themeNow() { const t = document.documentElement.dataset.theme; return t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+function paintToggle() { const b = document.getElementById("theme-t"); if (b) b.textContent = themeNow() === "dark" ? "☾ dark" : "☀ light"; }
+(() => { let t = null; try { t = localStorage.getItem("h2.theme"); } catch (e) {} if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; })();
+document.addEventListener("DOMContentLoaded", paintToggle);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 let project = "default", projectData = null, conns = null, liveRun = null, liveFrom = 0, liveTimer = null, baseTree = {};
@@ -390,9 +480,16 @@ function show(v) {
   if (v === "harness") loadHarness();
   if (v === "library") loadLibrary();
   if (v === "doctor") runDoctor();
+  if (v === "overview") loadOverview();
   if (v === "models") startHealthTable(); else stopHealthTable();
 }
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
+$("#theme-t").onclick = () => {
+  const next = themeNow() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next; store("h2.theme", next); paintToggle();
+  if (pgTarget && pgState) drawEdges(pgTarget, pgState);
+};
+paintToggle();
 
 async function loadProjects() {
   const p = await api("projects");
@@ -421,6 +518,7 @@ async function refreshProject() {
 
 // ---------- wiring + policy (diagram legend panels) ----------
 let healthCache = {}, statusCache = null;
+const BUILTIN_TOOLS_N = 9;
 const ROLE_DEFS = [
   ["solver", "Solver", "solver_model", "attempts the goal · base runs and every probe"],
   ["improver", "Improver", "improver_model", "reads traces · edits the harness (INV, DOM, compose)"],
@@ -447,7 +545,10 @@ function renderWiring() {
     const [stc, stt] = chainState(chain);
     const v = chain.length ? chain.map(esc).join(' <span class="arrow">→</span> ') : "—";
     return `<div class="r" title="${esc(what)}"><span class="dot ${chain.length ? cls : "hollow"}"></span><span class="k">${name}</span><span class="v">${v} <span class="muted" style="font-family:Inter,system-ui,sans-serif;font-size:12.5px">&nbsp;${esc(what)}</span></span><span class="s st ${stc}">${stt}</span></div>`;
-  }).join("") + (Object.keys(healthCache).length ? "" : `<div class="hint" style="margin-top:6px">Status turns <span class="st ok">Live</span> after the first successful call. <span class="st warn">Backup n</span> means a failover is serving.</div>`);
+  }).join("") + (() => {
+    const w = wiredFrom(projectData.base), shell = s.allow_shell !== false;
+    return `<div class="r" title="tools the solver can call"><span class="dot cyan"></span><span class="k">Tools</span><span class="v">${BUILTIN_TOOLS_N} built-in${w.length ? ' <span class="arrow">+</span> ' + w.map(t => esc(t.name)).join(", ") : ""} <span class="muted" style="font-family:Inter,system-ui,sans-serif;font-size:12.5px">&nbsp;<a href="#" onclick="show('harness');return false">${w.length ? "edit" : "wire one"}</a></span></span><span class="s st ${w.length ? (shell ? "ok" : "warn") : "idle"}">${w.length ? (shell ? w.length + " wired" : "Shell off") : "None wired"}</span></div>`;
+  })() + (Object.keys(healthCache).length ? "" : `<div class="hint" style="margin-top:6px">Status turns <span class="st ok">Live</span> after the first successful call. <span class="st warn">Backup n</span> means a failover is serving.</div>`);
 }
 function renderPolicy() {
   const el = $("#policy"); if (!el || !statusCache) return;
@@ -503,7 +604,7 @@ const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3)
 const MODE_NAME = {agg: "Parallel recursion", seq: "Sequential recursion"};
 
 function reduceEvents(events) {
-  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: []};
+  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: [], gates: []};
   const get = (mode, node) => {
     const key = (node.startsWith("base") ? "" : mode) + "|" + node;
     return S.nodes[key] ||= {key, mode, label: node, dim: node.startsWith("base") ? "BASE" : "", edit: {s: "wait"}, run: {s: "wait"}, sel: {s: "wait"}, evs: []};
@@ -513,10 +614,12 @@ function reduceEvents(events) {
     if (e.kind === "task" && e.status === "start") S.plan = {k: e.k, modes: e.modes};
     if (e.kind === "task" && e.status === "done") S.done = e;
     if (e.kind === "heal") S.heals.push(e);
+    if (e.kind === "gate") S.gates.push(e);
     if (e.kind === "task" && e.status === "start" && S.done) S.done = null; // a healing retry restarted the task
     if (!e.node) continue;
     const n = get(e.mode, e.node); n.evs.push(e);
     if (e.kind === "heal") n.heals = (n.heals || 0) + 1;
+    if (e.kind === "gate") n.gates = (n.gates || 0) + 1;
     if (e.kind === "stage") {
       n.dim = e.dim || n.dim;
       if (e.status === "start") { n.edit = {s: "active", t: e.t}; }
@@ -580,6 +683,7 @@ function nodeCard(laneId, n, adopted, selected) {
     cls = anyActive ? "active" : bad ? "bad" : n.run.s !== "wait" ? "done" : "";
   }
   if (n.heals) body += `<div class="heal" title="self-healing actions on this node">healed ×${n.heals}</div>`;
+  if (n.gates) body += ` <div class="heal" style="color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)" title="guardrail gate decisions on this node">gated ×${n.gates}</div>`;
   if (!cls) cls = "wait";
   if (adopted) cls += " adopted";
   if (selected) cls += " sel";
@@ -634,6 +738,10 @@ function renderPipeline(target, S) {
     const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
     const last = S.heals[S.heals.length - 1];
     h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
+  }
+  if (S.gates.length) {
+    const b = S.gates.filter(e => e.status === "blocked").length, last = S.gates[S.gates.length - 1];
+    h += `<div class="feed" style="border-color:color-mix(in srgb,var(--bad) 55%,var(--line))"><b style="color:var(--bad)">Guardrail gate ×${S.gates.length}</b> — blocked ×${b}${S.gates.length - b ? ` · would block ×${S.gates.length - b} (observe mode)` : ""}<div class="hint">latest: <b style="color:var(--ink)">${esc(last.rule)}</b>${last.node ? " at " + esc(last.node) : ""}: ${esc(last.call || "")} — ${esc(last.reason || "")}</div></div>`;
   }
   h += `<div class="legend"><span><span class="dot active"></span>working</span><span><span class="dot ok"></span>done</span><span><span class="dot warn"></span>fell back / no output</span><span><span class="dot bad"></span>failed</span><span>★ adopted</span><span style="margin-left:auto"><span class="dot solver"></span>solver</span><span><span class="dot improver"></span>improver</span><span><span class="dot selector"></span>selector</span><span><span class="dot learner"></span>library</span></div>`;
   for (const mode of modes) {
@@ -720,6 +828,8 @@ function nodeDrawer(n, t0) {
         loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
         deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
+    } else if (e.kind === "gate") {
+      cls = "bad"; txt = `⛔ Gate ${e.status === "blocked" ? "blocked" : "would block (observe)"} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
     } else if (e.kind === "select") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
       txt = e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
@@ -1000,21 +1110,202 @@ window.adoptBase = async (s) => {
 
 // ---------- harness ----------
 let hSel = null;
+const BUILTIN_TOOLS = [
+  ["list_files", "list a workspace directory"], ["read_file", "read a file, paged by lines"], ["write_file", "create or overwrite a file"],
+  ["edit_file", "replace an exact substring"], ["delete_file", "delete a file"], ["bash", "run a shell command (when shell is allowed)"],
+  ["skill", "load a harness skill's instructions"], ["task", "delegate to a sub-agent in its own context"], ["finish", "end the session with an answer"],
+];
+function wiredFrom(tree) {
+  return Object.keys(tree || {}).filter(p => /^tools\/[a-z0-9][a-z0-9_-]*\.json$/.test(p)).sort().map(p => {
+    try { const v = JSON.parse(tree[p]); return {p, name: v.name || "", desc: v.description || "", cmd: v.command || "", ok: v.name === p.slice(6, -5) && !!v.command}; }
+    catch (e) { return {p, name: p.slice(6, -5), desc: "invalid JSON", cmd: "", ok: false}; }
+  });
+}
+function renderTools() {
+  const wired = wiredFrom(baseTree), shell = !projectData || projectData.settings.allow_shell !== false;
+  $("#t-count").textContent = `${BUILTIN_TOOLS.length} built-in · ${wired.length} wired`;
+  $("#tools-list").innerHTML = wired.map(t => `<div class="r"><span class="dot ${t.ok ? "cyan" : "bad"}"></span><span class="k"><a href="#" onclick="selectFile('${esc(t.p)}');return false">${esc(t.name)}</a></span><span class="v">${esc(t.desc)}<br><span class="mono" style="color:var(--faint)">$ ${esc(t.cmd)}</span></span><span class="s st ${t.ok ? (shell ? "ok" : "warn") : "bad"}">${t.ok ? (shell ? "Wired" : "Shell off") : "Invalid"}</span></div>`).join("")
+    + BUILTIN_TOOLS.map(([n, d]) => `<div class="r"><span class="dot solver"></span><span class="k mono" style="font-weight:500">${n}</span><span class="v">${esc(d)}</span><span class="s st info">Built-in</span></div>`).join("");
+  const st = projectData && projectData.starter_tools || {};
+  $("#t-starter").classList.toggle("hidden", !Object.keys(st).length || Object.keys(st).every(k => baseTree[k] !== undefined));
+}
+$("#t-new").onclick = () => {
+  let n = "my_tool", i = 2; while (baseTree[`tools/${n}.json`] !== undefined) n = "my_tool" + i++;
+  baseTree[`tools/${n}.json`] = JSON.stringify({name: n, description: "When to call this tool and what it returns.", parameters: {type: "object", properties: {path: {type: "string", description: "input file, relative to the workspace"}}, required: ["path"]}, command: `python3 scripts/${n}.py`, timeout_s: 120}, null, 2) + "\n";
+  baseTree[`scripts/${n}.py`] = `import json, sys\n\nargs = json.load(sys.stdin)\n# do the work; whatever you print is the tool result\nprint(f"got {args}")\n`;
+  renderHarnessFiles(); renderTools(); selectFile(`tools/${n}.json`); msg("#h-msg", "Added a tool template (not saved yet).", true);
+};
+$("#t-starter").onclick = () => { Object.assign(baseTree, projectData.starter_tools); renderHarnessFiles(); renderTools(); selectFile("tools/csv_profile.json"); msg("#h-msg", "Added csv_profile (not saved yet).", true); };
+
 async function loadHarness() {
   await refreshProject();
   baseTree = Object.assign({}, projectData.base);
-  renderHarnessFiles(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
+  renderHarnessFiles(); renderTools(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
 }
 function renderHarnessFiles() {
   $("#h-files").innerHTML = Object.keys(baseTree).sort().map(p => `<button class="${p === hSel ? "on" : ""}" onclick="selectFile('${esc(p)}')">${esc(p)}</button>`).join("") + `<button onclick="selectFile('')">+ new file</button>`;
 }
 window.selectFile = (p) => { hSel = p; $("#h-path").value = p || ""; $("#h-body").value = p ? baseTree[p] : ""; renderHarnessFiles(); };
-$("#h-apply").onclick = () => { const p = $("#h-path").value.trim(); if (!p) return msg("#h-msg", "Give the file a path."); if (hSel && hSel !== p) delete baseTree[hSel]; baseTree[p] = $("#h-body").value; hSel = p; renderHarnessFiles(); msg("#h-msg", "Applied (not saved yet).", true); };
+$("#h-apply").onclick = () => { const p = $("#h-path").value.trim(); if (!p) return msg("#h-msg", "Give the file a path."); if (hSel && hSel !== p) delete baseTree[hSel]; baseTree[p] = $("#h-body").value; hSel = p; renderHarnessFiles(); renderTools(); msg("#h-msg", "Applied (not saved yet).", true); };
 $("#h-del").onclick = () => { if (hSel) { delete baseTree[hSel]; hSel = null; renderHarnessFiles(); selectFile(Object.keys(baseTree)[0]); msg("#h-msg", "Removed (not saved yet).", true); } };
 $("#h-save").onclick = async () => {
   $("#h-apply").onclick();
   try { const r = await jpost(`projects/${encodeURIComponent(project)}/base`, baseTree, "PUT"); msg("#h-msg", `Saved ${r.files} files.`, true); loadHarness(); }
   catch (e) { msg("#h-msg", e.message); }
+};
+
+// ---------- overview: the system as a paper figure ----------
+let gateCache = null;
+async function loadOverview() {
+  try {
+    const [st, runs, gate, h] = await Promise.all([api("status"), api("runs"), api(`projects/${encodeURIComponent(project)}/gate`), api("health")]);
+    statusCache = st; gateCache = gate; healthCache = h.connections;
+    renderOverview(runs.runs);
+  } catch (e) { $("#paper").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function svgBox(x, y, w, h, l1, l2, cls = "", l2cls = "t2") {
+  return `<g class="bx ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5"/><text class="t1" x="${x + w / 2}" y="${y + h / 2 - (l2 ? 3 : -4)}" text-anchor="middle">${esc(l1)}</text>${l2 ? `<text class="${l2cls}" x="${x + w / 2}" y="${y + h / 2 + 11}" text-anchor="middle">${esc(l2)}</text>` : ""}</g>`;
+}
+const svgNum = (x, y, n) => `<g class="num"><circle cx="${x}" cy="${y}" r="9"/><text x="${x}" y="${y + 4}">${n}</text></g>`;
+const svgDefs = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahp" d="M0,0 L10,5 L0,10 z"/></marker></defs>`;
+function figure1(runs) {
+  const p = statusCache.policy || {}, max = p.max_runs || 1;
+  const live = runs.filter(r => r.status === "running"), queued = runs.filter(r => r.status === "queued");
+  const hs = Object.values(healthCache || {}), down = hs.filter(x => x.state === "open").length;
+  const g = gateCache, mode = g.mode.toUpperCase();
+  let o = `<svg viewBox="0 0 1100 500" role="img" aria-label="System layout">${svgDefs}`;
+  // process boundary
+  o += `<rect class="grp" x="150" y="14" width="940" height="430"/><text class="t3" x="162" y="30">HARNESS² PROCESS (ONE PER SERVER)</text>`;
+  o += `<path class="evt" d="M210,48 H1030 V70" /><text class="t2" x="380" y="44">RERUN ON A GOAL PAGE: STRAIGHT TO THE QUEUE, SAME LIBRARY</text>`;
+  // sources
+  o += `<rect class="grp" x="10" y="92" width="122" height="230"/><text class="t3" x="18" y="108">SOURCES</text>`;
+  o += svgBox(22, 120, 98, 46, "WEB UI", "RUN A GOAL") + svgBox(22, 182, 98, 46, "CLI", "HARNESS2 GOAL") + svgBox(22, 244, 98, 46, "RESUME", p.auto_resume === false ? "OFF" : "AFTER RESTART", "dash");
+  o += svgNum(71, 340, 1);
+  o += `<path class="main" d="M120,143 H150 V178 H183"/><path class="main" d="M120,205 H150"/><path class="main" d="M120,267 H150 V205"/>`;
+  // gate
+  o += svgNum(245, 128, 2) + svgBox(185, 150, 120, 56, "GATE", `INTAKE · ${g.checks.length + 1} CHECKS`);
+  o += `<path class="data" d="M245,206 V246"/>` + svgBox(178, 248, 134, 48, "STOP", `REASONS RETURNED · ${g.intake.stopped}`);
+  o += `<path class="main" d="M305,178 H343"/><text class="t2" x="324" y="171" text-anchor="middle">ACCEPT</text><text class="t2 tok" x="324" y="194" text-anchor="middle">${g.intake.accepted}</text>`;
+  // queue + store
+  o += svgNum(405, 128, 3) + svgBox(345, 150, 120, 56, "QUEUE", `+ ${queued.length} WAITING`);
+  o += `<path class="evt" d="M405,206 V252"/>`;
+  o += `<g class="bx"><path class="cyl" d="M352,258 a53,9 0 0 0 106,0 a53,9 0 0 0 -106,0 v40 a53,9 0 0 0 106,0 v-40"/><text class="t1" x="405" y="285" text-anchor="middle">STORE</text><text class="t2" x="405" y="298" text-anchor="middle">RUNS · LIBRARY</text></g>`;
+  // run slots
+  const shown = Math.min(Math.max(max, 1), 3), slotH = 66, top = 92;
+  o += `<rect class="grp" x="500" y="68" width="575" height="${shown * (slotH + 12) + 70}"/><text class="t3" x="512" y="84">RUN SLOTS: ${max} (HARNESS2_MAX_RUNS) · ${live.length} BUSY</text>`;
+  o += svgNum(1058, 84, 4);
+  o += `<path class="main" d="M465,178 H488"/>`;
+  for (let i = 0; i < shown; i++) {
+    const y = top + i * (slotH + 12), r = live[i];
+    o += `<path class="main" d="M488,178 V${y + slotH / 2} H514"/>`;
+    o += `<g class="bx ${r ? "live" : "dash"}"><rect x="514" y="${y}" width="548" height="${slotH}"/></g>`;
+    o += `<text class="t1" x="524" y="${y + 15}">${r ? "RUN-" + esc(r.id.slice(4, 18)) : "FREE SLOT"}</text><text class="t2" x="1052" y="${y + 15}" text-anchor="end">${r ? esc((r.goal || "").slice(0, 48).toUpperCase()) : "OWN WORKSPACE, HARNESS COPY, MODELS"}</text>`;
+    const st = [["BASE", "SOLVER"], ["PROPOSE", "INV · DOM"], ["COMPOSE", "+ PROBE"], ["SELECT", "BLIND"], ["LEARN", "LESSON"]];
+    st.forEach(([a, b], j) => {
+      const x = 524 + j * 106;
+      o += svgBox(x, y + 24, 90, 34, a, b, r ? "" : "off");
+      if (j < 4) o += `<path class="data" d="M${x + 90},${y + 41} H${x + 104}"/>`;
+    });
+  }
+  const qy = top + shown * (slotH + 12);
+  o += svgBox(700, qy - 2, 190, 32, max > shown ? `+${max - shown} MORE SLOTS` : "+ QUEUED GOALS WAIT", queued.length ? `${queued.length} WAITING NOW` : "NONE WAITING", "dash");
+  // tool gate + models
+  o += svgBox(185, 340, 130, 50, "TOOL GATE", `${mode} · ${g.tool.blocked} BLOCKED`, "", g.mode === "off" ? "t2 tbad" : "t2 tok");
+  o += svgBox(345, 340, 130, 50, "MODELS", down ? `${down} DOWN · FAILING OVER` : `${hs.length} SEEN · HEALTHY`, "", down ? "t2 tbad" : "t2 tok");
+  o += `<path class="evt" d="M560,${qy + 8} V326 H250 V338"/><path class="evt" d="M640,${qy + 8} V365 H477"/>`;
+  o += `<text class="t2" x="552" y="320" text-anchor="end">EVERY SOLVER TOOL CALL</text><text class="t2" x="646" y="380">EVERY MODEL CALL</text>`;
+  // legend
+  o += `<g transform="translate(185,412)"><rect x="0" y="-8" width="16" height="10" fill="none" stroke="currentColor" class="ahp" style="fill:none;stroke:var(--ink)"/><text class="t2" x="22" y="1">COMPONENT</text><path class="main" d="M110,-3 H140"/><text class="t2" x="146" y="1">MAIN PATH</text><path class="data" d="M230,-3 H260"/><text class="t2" x="266" y="1">DATA</text><path class="evt" d="M310,-3 H340"/><text class="t2" x="346" y="1">EVENT</text></g>`;
+  // report loop
+  o += `<path class="main" d="M1075,200 H1090 V470 H71 V352"/>`;
+  o += svgNum(120, 470, 5) + `<text class="t2" x="138" y="464">REPORT — OUTPUT, ADOPTED HARNESS AND LESSON, ON THE SAME GOAL PAGE (HISTORY · COMPARE · DOWNLOAD)</text>`;
+  return o + `</svg>`;
+}
+function figure2() {
+  const p = statusCache.policy || {}, s = projectData.settings;
+  const st = [["GOAL", "IN"], ["GATE", "7 CHECKS"], ["QUEUE", `MAX ${p.max_runs || 1} AT ONCE`], ["BASE", `≤${s.solver_steps} STEPS`], ["PROPOSE", "INV + DOM"], ["COMPOSE", "MERGE + PROBE"], ["SELECT", "BLIND"], ["LEARN", "LIBRARY"], ["DONE", "REPORT"]];
+  const W = 104, G = 16, X = (i) => 8 + i * (W + G);
+  let o = `<svg viewBox="0 0 1090 230" role="img" aria-label="Run lifecycle">${svgDefs}`;
+  st.forEach(([a, b], i) => { o += svgBox(X(i), 40, W, 46, a, b); if (i < st.length - 1) o += `<path class="data" d="M${X(i) + W},63 H${X(i + 1)}"/>`; });
+  // annotations
+  o += `<path class="evt" d="M${X(1) + 52},86 V150"/><text class="t2" x="${X(1) + 10}" y="166">STOP: EVERY REASON</text><text class="t2" x="${X(1) + 10}" y="178">RETURNED AT ONCE</text>`;
+  o += `<path class="evt" d="M${X(3) + 30},150 V88"/><text class="t2" x="${X(3) - 30}" y="166">ROLLOUT FAILS: RETRY ONCE</text><text class="t2" x="${X(3) - 30}" y="178">AFTER ${p.rollout_retry_wait_s ?? 10} S · TOOL GATE ON EVERY CALL</text><text class="t2" x="${X(3) - 30}" y="190">SOLVER ${Math.round(s.solver_timeout / 60)} MIN · IMPROVER ${Math.round(s.improver_timeout / 60)} MIN</text>`;
+  o += `<path class="evt" d="M${X(4) + 52},86 V120"/><text class="t2" x="${X(4) + 10}" y="134">≤ 3 TRIES, ELSE</text><text class="t2" x="${X(4) + 10}" y="146">FALL BACK TO BASE</text>`;
+  o += `<path class="evt" d="M${X(8) + 52},40 V28 H${X(2) + 80} V38"/><text class="t2" x="${X(3) + 10}" y="23">RUN FAILS OR ENDS PARTIAL ON A TRANSIENT ERROR: RETRY ×${p.run_retries ?? 1} AFTER ${p.run_retry_wait_s ?? 30} S</text>`;
+  o += `<path class="evt" d="M${X(2) - 4},18 H${X(2) + 52} V38"/><text class="t2" x="${X(0)}" y="14">SERVER RESTART: AUTO-RESUME${p.auto_resume === false ? " (OFF)" : ""}, FINISHED ROLLOUTS REUSED</text>`;
+  o += `<path class="evt" d="M${X(6) + 52},86 V150"/><text class="t2" x="${X(6) - 6}" y="166">MODEL DOWN: NEXT IN CHAIN,</text><text class="t2" x="${X(6) - 6}" y="178">BREAKER 3 FAILS → 30 S…10 MIN</text>`;
+  return o + `</svg>`;
+}
+function renderOverview(runs) {
+  const s = projectData.settings, g = gateCache, p = statusCache.policy || {};
+  const rolesSet = !!(s.solver_model && s.improver_model && s.selector_model), healthy = Object.values(healthCache || {}).some(x => x.state === "healthy");
+  const step = (ok, txt, todo) => `<li class="${ok ? "done" : ""}">${txt} ${ok ? '<span class="ck">✓</span>' : `<span class="todo">· ${todo}</span>`}</li>`;
+  const modeRow = (m, a, b) => `<tr class="${g.mode === m ? "on" : ""}" onclick="setGateMode('${m}')" title="Switch the gate to ${m}"><td>${a}</td><td>${b}</td></tr>`;
+  $("#paper").innerHTML = `
+  <div class="ttl"><h2>Harness<sup>2</sup> Studio</h2><div class="tag">One gate · one queue · a recursion per goal · as little human attention as possible</div></div>
+  <div class="sec"><b>1</b><div><h3>Introduction.</h3><p>Harness² adapts an agent's harness to each goal. One process takes every goal in, checks it at a deterministic gate, and gives each accepted goal its own run slot, workspace and harness copy. Solver attempts are probed, an improver proposes and composes edits, and a blind selector adopts one output and writes a lesson for the next goal (figure 1).</p></div></div>
+  <div class="fig">${figure1(runs)}</div>
+  <div class="fig-cap"><b>Figure 1.</b> Layout: one gate, a queue of run slots, and replies on the same goal page.</div>
+  <div class="sec"><b>2</b><div><h3>How it works.</h3><p>(1) A goal arrives from the web UI or the CLI; a restart resumes interrupted runs. (2) The gate checks the goal, its inputs, the budget, and that every role has a reachable model chain; a stop returns every reason at once. (3) An accepted goal waits for a free run slot. (4) Each run executes the recursion in its own workspace; every solver tool call passes the tool gate, and every model call passes the circuit breakers. (5) Results return on the goal's page (figure 2).</p></div></div>
+  <div class="fig">${figure2()}</div>
+  <div class="fig-cap"><b>Figure 2.</b> Run lifecycle with time limits and recovery paths.</div>
+  <div class="pgrid">
+    <div>
+      <div class="sec" style="margin-top:4px"><b>3</b><div><h3>Data.</h3></div></div>
+      <table class="ptab"><caption>Table 1. Limits in force for <b>${esc(project)}</b></caption>
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Run slots (HARNESS2_MAX_RUNS)</td><td>${p.max_runs ?? 1} at once, rest queue</td></tr>
+        <tr><td>Solver steps / timeout</td><td>${s.solver_steps} steps · ${Math.round(s.solver_timeout / 60)} min</td></tr>
+        <tr><td>Improver steps / timeout</td><td>${s.improver_steps} steps · ${Math.round(s.improver_timeout / 60)} min</td></tr>
+        <tr><td>Rollout retry</td><td>once, after ${p.rollout_retry_wait_s ?? 10} s</td></tr>
+        <tr><td>Run retries</td><td>${p.run_retries ?? 1}, after ${p.run_retry_wait_s ?? 30} s</td></tr>
+        <tr><td>Circuit breaker</td><td>3 failures · 30 s doubling to 10 min</td></tr>
+        <tr><td>Agent self-checks</td><td>loop ×3 · errors ×4 · deadline rescue</td></tr>
+        <tr><td>Goal / inputs at the gate</td><td>≤ 20k chars · ≤ 200 files, 200 MB · k ≤ 4</td></tr>
+        <tr><td>Tool gate</td><td>${g.mode} · ${g.rules.length + g.custom_rules.filter(Boolean).length} rules · inputs ${g.protect_inputs ? "read-only" : "writable"}</td></tr>
+        <tr><td>Gate decisions so far</td><td>${g.intake.accepted} accepted · ${g.intake.stopped} stopped · ${g.tool.blocked} calls blocked · ${g.tool.would_block} would-block</td></tr>
+      </table>
+      <table class="ptab" style="margin-top:14px"><caption>Table 2. Tool-gate rules (shell commands and wired tools)</caption>
+        <tr><th>Rule</th><th>Blocks</th></tr>
+        ${g.rules.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.reason)}</td></tr>`).join("")}
+        <tr><td>inputs-readonly</td><td>writing, editing, deleting or overwriting a task input</td></tr>
+        <tr><td>harness-readonly</td><td>changing the installed harness during a run</td></tr>
+        ${g.custom_rules.filter(Boolean).map((r, i) => `<tr><td>custom-${i + 1}</td><td><code>${esc(r)}</code></td></tr>`).join("")}
+      </table>
+    </div>
+    <div>
+      <div class="ph" style="color:var(--ink);font-family:Georgia,serif;letter-spacing:.04em;margin-top:8px">DETAIL A: GATE MODE</div>
+      <table class="ptab modes"><tr><th colspan="2">TOOL CALLS THAT BREAK A RULE</th></tr>
+        ${modeRow("off", "OFF", "not checked")}
+        ${modeRow("observe", "OBSERVE", "run, recorded as “would block”")}
+        ${modeRow("enforce", "ENFORCE (DEFAULT)", "refused; the agent is told the rule and carries on")}
+      </table>
+      <div class="hint" style="font:11px var(--mono);margin:4px 0 0">Goals failing an intake check stop in every mode. The improver cannot edit the gate.</div>
+      <div class="gate-ed" style="margin-top:10px">
+        <label style="margin-top:4px"><input type="checkbox" id="gate-protect" style="width:auto;margin-right:6px" ${g.protect_inputs ? "checked" : ""}>Task inputs are read-only</label>
+        <label>Extra rules · one regex per line, matched against shell commands</label>
+        <textarea id="gate-rules" rows="3" placeholder="\\bnpm\\s+publish\\b">${esc(g.custom_rules.join("\n"))}</textarea>
+        <div class="actions" style="margin-top:8px"><button class="btn small" onclick="saveGate()">Save gate</button><span id="gate-msg" class="hint"></span></div>
+      </div>
+      <div class="caution" style="margin-top:16px"><h4>CAUTION</h4><p>The solver runs commands as the server's OS user. The gate blocks known-dangerous patterns and keeps inputs read-only, but it is not a sandbox. Run Harness² under a dedicated account that holds only its own credentials.</p></div>
+      <div class="bring"><div class="bh"><span>BRING-UP</span><span>OPERATOR</span></div><ol>
+        ${step(Object.keys(healthCache || {}).length > 0 || rolesSet, "MODELS - connect or detect local", "Models tab")}
+        ${step(rolesSet, "ROLES - solver, improver, selector chains", "set all three")}
+        ${step(g.mode !== "off", "GATE - OBSERVE first, read the “would block” rows", "gate is off")}
+        ${step(g.mode === "enforce", "GATE - ENFORCE when the rules look right", "switch to enforce")}
+        ${step(healthy, "DOCTOR - act on what needs you", "run a goal, then check")}
+      </ol></div>
+      ${g.intake.recent.length ? `<div class="ph" style="margin-top:14px">Recent gate decisions</div><div class="rows">${g.intake.recent.map(e => `<div class="r"><span class="dot ${e.decision === "accept" ? "ok" : "bad"}"></span><span class="k">${e.decision === "accept" ? "Accept" : "Stop"}</span><span class="v">${esc(e.goal || "")}${(e.reasons || []).length ? " — " + esc(e.reasons.join("; ")) : ""}</span><span class="s st">${esc((e.at || "").slice(11, 16))}</span></div>`).join("")}</div>` : ""}
+    </div>
+  </div>
+  <div class="fig id" style="margin-top:8px">H2-OVERVIEW · ${esc(project.toUpperCase())}</div>`;
+}
+window.setGateMode = async (m) => { projectData.settings.gate_mode = m; await saveGate(); };
+window.saveGate = async () => {
+  const s = Object.assign({}, projectData.settings);
+  if ($("#gate-rules")) { s.gate_rules = $("#gate-rules").value.split("\n").map(x => x.trim()).filter(Boolean); s.gate_protect_inputs = $("#gate-protect").checked; }
+  try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); await loadOverview(); msg("#gate-msg", "Gate saved: " + s.gate_mode + ".", true); }
+  catch (e) { msg("#gate-msg", e.message); }
 };
 
 async function loadLibrary() {
@@ -1025,7 +1316,7 @@ async function loadLibrary() {
 (async () => {
   try {
     await loadProjects(); await refreshProject(); stopHealthTable(); refreshHealth(); loadStatus();
-    show(load("h2.view") || "run");
+    show(load("h2.view") || "overview");
     const runs = await api("runs");
     const live = runs.runs.find(r => (r.status === "running" || r.status === "queued") && r.project === project);
     if (live) watch(live.id);

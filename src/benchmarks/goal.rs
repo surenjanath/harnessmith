@@ -59,6 +59,18 @@ pub struct GoalSettings {
     /// reused between an agent's turns); 2 is the reference setting.
     #[serde(default = "two")]
     pub parallelism: usize,
+    /// Guardrail gate on solver tool calls: "off" | "observe" | "enforce".
+    #[serde(default = "enforce")]
+    pub gate_mode: String,
+    /// Extra operator rules (regexes over shell commands), on top of the built-in ones.
+    #[serde(default)]
+    pub gate_rules: Vec<String>,
+    /// Task inputs are read-only to the solver.
+    #[serde(default = "yes")]
+    pub gate_protect_inputs: bool,
+}
+fn enforce() -> String {
+    "enforce".into()
 }
 fn two() -> usize {
     2
@@ -101,6 +113,9 @@ impl Default for GoalSettings {
             judge_model: role("judge"),
             effort: high(),
             parallelism: 2,
+            gate_mode: enforce(),
+            gate_rules: vec![],
+            gate_protect_inputs: true,
         }
     }
 }
@@ -298,6 +313,9 @@ impl BenchmarkAdapter for GoalAdapter {
                 timeout: timeout.unwrap_or(self.settings.solver_timeout),
                 allow_shell: self.settings.allow_shell,
                 inputs_fingerprint: Some(inputs),
+                gate_mode: self.settings.gate_mode.clone(),
+                gate_rules: self.settings.gate_rules.clone(),
+                gate_protect_inputs: self.settings.gate_protect_inputs,
             },
         )
     }

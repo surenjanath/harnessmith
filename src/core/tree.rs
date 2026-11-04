@@ -40,6 +40,9 @@ pub struct SurfaceSpec {
     pub hook_events: Vec<&'static str>,
     pub compile_skill_scripts: bool,
     pub reject_empty_always_on: bool,
+    /// Directory of wired tools (`<dir>/<name>.json`) the agent calls as first-class tools.
+    /// Only the native substrate has them; the reference surfaces leave this `None`.
+    pub tool_dir: Option<&'static str>,
     pub stubs: Vec<(&'static str, &'static str)>,
 }
 
@@ -50,6 +53,7 @@ struct Rx {
     script: Regex,
     script_ref: Regex,
     plugin: Option<Regex>,
+    tool: Option<Regex>,
 }
 
 fn rx(s: &SurfaceSpec) -> Rx {
@@ -64,6 +68,7 @@ fn rx(s: &SurfaceSpec) -> Rx {
         plugin: s
             .plugin_dir
             .map(|p| Regex::new(&format!(r"^{}/({NAME})\.ts$", regex::escape(p))).unwrap()),
+        tool: s.tool_dir.map(|d| Regex::new(&format!(r"^{}/({NAME})\.json$", regex::escape(d))).unwrap()),
     }
 }
 
@@ -97,7 +102,54 @@ pub fn is_allowed(surface: &SurfaceSpec, rel: &str) -> bool {
     {
         return true;
     }
-    r.plugin.map(|p| p.is_match(&rel)).unwrap_or(false)
+    r.plugin.map(|p| p.is_match(&rel)).unwrap_or(false) || r.tool.map(|t| t.is_match(&rel)).unwrap_or(false)
+}
+
+/// Built-in tool names a wired tool may not shadow.
+pub const BUILTIN_TOOLS: &[&str] = &["list_files", "read_file", "write_file", "edit_file", "delete_file", "finish", "bash", "skill", "task"];
+
+/// Check every `tools/<name>.json`: valid JSON, `name` matching the file, a description, a command,
+/// an object schema, and any `scripts/x.py` it runs present in the harness.
+fn check_tools(tree: &Tree, r: &Rx, errs: &mut Vec<String>) -> usize {
+    let Some(rt) = &r.tool else { return 0 };
+    let mut n = 0;
+    for (rel, src) in tree {
+        let Some(c) = rt.captures(rel) else { continue };
+        n += 1;
+        let stem = c[1].to_string();
+        let v: Value = match serde_json::from_str(src) {
+            Ok(v) => v,
+            Err(e) => {
+                errs.push(format!("{rel} is not valid JSON: {e}"));
+                continue;
+            }
+        };
+        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        if name != stem {
+            errs.push(format!("{rel}: `name` must be {stem:?} (the file name), got {name:?}"));
+        }
+        if BUILTIN_TOOLS.contains(&stem.as_str()) {
+            errs.push(format!("{rel}: {stem:?} is a built-in tool name; pick another"));
+        }
+        if v.get("description").and_then(|x| x.as_str()).map(|d| d.trim().is_empty()).unwrap_or(true) {
+            errs.push(format!("{rel}: needs a non-empty `description` saying when to call it"));
+        }
+        let cmd = v.get("command").and_then(|x| x.as_str()).unwrap_or("");
+        if cmd.trim().is_empty() {
+            errs.push(format!("{rel}: needs a `command` (run with bash in the workspace; arguments arrive as JSON on stdin)"));
+        }
+        if let Some(p) = v.get("parameters") {
+            if p.get("type").and_then(|t| t.as_str()) != Some("object") {
+                errs.push(format!("{rel}: `parameters` must be a JSON Schema with \"type\": \"object\""));
+            }
+        }
+        for c in r.script_ref.captures_iter(cmd) {
+            if !tree.contains_key(&c[1]) {
+                errs.push(format!("{rel} runs `{}` but that file is not in the harness", &c[1]));
+            }
+        }
+    }
+    n
 }
 
 pub fn skill_names(surface: &SurfaceSpec, tree: &Tree) -> Vec<String> {
@@ -417,6 +469,7 @@ pub fn validate(
         }
     }
     check_script_refs(surface, tree, &r, reserved_scripts, &mut errs);
+    let n_tools = check_tools(tree, &r, &mut errs);
     if !errs.is_empty() {
         bail!("{}", errs.join(" | "));
     }
@@ -432,6 +485,9 @@ pub fn validate(
     }
     if let Some(hf) = surface.hooks_file {
         out["hooks"] = json!(if tree.contains_key(hf) { 1 } else { 0 });
+    }
+    if r.tool.is_some() {
+        out["tools"] = json!(n_tools);
     }
     Ok(out)
 }

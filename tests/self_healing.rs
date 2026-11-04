@@ -88,6 +88,26 @@ fn self_healing_scenarios() {
         let warned = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("[self-check] You have now made this exact call 3 times")).unwrap_or(false));
         if warned { (200, reply_text("Changed approach.")) } else { (200, reply_tool("list_files", json!({"path": "."}))) }
     }));
+    let (p4, seen4) = server(Arc::new(|n, req: &Value| {
+        if n == 1 {
+            (200, reply_tool("csv_profile", json!({"path": "data.csv"})))
+        } else {
+            let msgs = req["messages"].as_array().unwrap();
+            let got = msgs.iter().any(|m| m["content"].as_str().map(|c| c.contains("3 rows x 2 columns") && c.contains("max 7")).unwrap_or(false));
+            (200, reply_text(if got { "profiled" } else { "no profile" }))
+        }
+    }));
+    let (p5, _seen5) = server(Arc::new(|n, req: &Value| {
+        if n == 1 {
+            (200, reply_tool("bash", json!({"command": "sudo rm -rf /var/x"})))
+        } else if n == 2 {
+            let blocked = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("[gate] Blocked") && c.contains("`sudo`")).unwrap_or(false));
+            (200, if blocked { reply_tool("write_file", json!({"path": "data.csv", "content": "overwritten"})) } else { reply_text("not blocked") })
+        } else {
+            let blocked = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("inputs-readonly")).unwrap_or(false));
+            (200, reply_text(if blocked { "respected the gate" } else { "input was overwritten" }))
+        }
+    }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -96,7 +116,7 @@ fn self_healing_scenarios() {
             (200, reply_tool("read_file", json!({"path": format!("notes{n}.txt")})))
         }
     }));
-    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3)]}));
+    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -139,4 +159,47 @@ fn self_healing_scenarios() {
     let kinds = trajectory_kinds(&d3.path().join("t3.jsonl"));
     assert!(kinds.contains(&"deadline_rescue".to_string()), "{kinds:?}");
     assert!(kinds.contains(&"error_streak".to_string()), "{kinds:?}");
+
+    // 4. Wired tools: a harness `tools/<name>.json` is offered to the model as a real tool and runs
+    //    its command with the call's arguments on stdin.
+    let ws4 = d.path().join("ws4");
+    let h4 = ws4.join(".harness");
+    for (rel, body) in harness2::substrate::native::default_base_tree() {
+        let dst = h4.join(&rel);
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::write(&dst, &body).unwrap();
+        if rel.starts_with("scripts/") {
+            std::fs::create_dir_all(ws4.join("scripts")).unwrap();
+            std::fs::write(ws4.join(&rel), &body).unwrap();
+        }
+    }
+    std::fs::write(ws4.join("data.csv"), "region,q1\nA,3\nB,7\nC,5\n").unwrap();
+    let mut cfg = AgentConfig::new("tooler/m", "agent", &ws4);
+    cfg.harness = Some(h4.clone());
+    let out = agent::run(&cfg, "go").unwrap();
+    let first = &seen4.lock().unwrap()[0];
+    let names: Vec<&str> = first["tools"].as_array().unwrap().iter().filter_map(|t| t["function"]["name"].as_str()).collect();
+    assert!(names.contains(&"csv_profile"), "{names:?}");
+    assert_eq!(out.final_text, "profiled", "the tool result should reach the model");
+    // and a harness without shell access does not get it
+    let mut cfg = AgentConfig::new("tooler/m", "agent", &ws4);
+    cfg.harness = Some(h4);
+    cfg.allow_shell = false;
+    assert!(!agent::tool_defs(&cfg).iter().any(|t| t.name == "csv_profile"));
+
+    // 5. Guardrail gate: a dangerous command and a write to a task input are refused, the agent is
+    //    told why, and the input is untouched.
+    let ws5 = d.path().join("ws5");
+    std::fs::create_dir_all(ws5.join("output")).unwrap();
+    std::fs::write(ws5.join("data.csv"), "a\n1\n").unwrap();
+    let mut cfg = AgentConfig::new("gated/m", "agent", &ws5);
+    let mut g = harness2::llm::gate::Gate::new("enforce", &[]);
+    g.protect_inputs(&ws5);
+    cfg.gate = Some(g);
+    cfg.trajectory = Some(d.path().join("t5.jsonl"));
+    let out = agent::run(&cfg, "go").unwrap();
+    assert_eq!(out.final_text, "respected the gate");
+    assert_eq!(std::fs::read_to_string(ws5.join("data.csv")).unwrap(), "a\n1\n");
+    let gates = std::fs::read_to_string(d.path().join("t5.jsonl")).unwrap().lines().filter(|l| l.contains("\"type\":\"gate\"")).count();
+    assert_eq!(gates, 2);
 }

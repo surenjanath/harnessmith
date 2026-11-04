@@ -145,6 +145,36 @@ Every heal shows on the pipeline map. A node shows a "healed ×n" badge, and the
 
 The History view also has a **compare** tab, which shows the first base attempt beside the adopted output, and download buttons for the output and the adopted harness. Run a goal shows a time and cost estimate before you start it, based on past runs when there are any.
 
+## Tools and the guardrail gate
+
+**Built-in tools.** The solver always has `list_files`, `read_file`, `write_file`, `edit_file`, `delete_file` and `finish`. It also has `bash` when the shell is allowed, `skill` and `task` (sub-agents) when a harness is installed, and the harness's hooks.
+
+**Wired tools.** Any harness can declare more tools, which the agent calls directly like `read_file`:
+
+```json
+// tools/csv_profile.json
+{
+  "name": "csv_profile",
+  "description": "Profile a CSV before analysing it: columns, types, nulls, min/max/mean/sum.",
+  "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+  "command": "python3 scripts/csv_profile.py",
+  "timeout_s": 60
+}
+```
+
+The command runs with bash in the workspace. The call's arguments arrive as JSON on stdin and as `$ARG_<NAME>` variables. Stdout is the result, and a non-zero exit is an error. Wired tools are part of the harness, so the improver can wire new ones when the solver keeps repeating a step. The validator checks each tool when a harness is proposed. New projects start with `csv_profile`, and **Base harness → Tools** adds it to existing projects or creates a new tool from a template. Wired tools follow the shell setting.
+
+**Guardrail gate.** The gate is a deterministic check owned by the operator. It is not part of the harness, so an adapted harness cannot switch it off.
+- **Intake:** each goal is checked before it is queued: size, inputs, budget, a reachable model chain for every role, and valid rules. A stopped goal gets every reason at once.
+- **Tool calls:** every solver call to `bash` or a wired tool is checked against built-in rules: `sudo`, `rm -rf /`, `curl | sh`, disk wipes, `git push`, credential reads and more. You can add your own regex rules per project. Task inputs and the installed harness are read-only.
+- **Modes** (Overview → Detail A): `off`; `observe`, which runs the call and records "would block"; and `enforce`, the default, which refuses the call and tells the agent the rule so it can work another way.
+
+Gate decisions appear on the pipeline map as a red feed, with a "gated ×n" badge on the affected step. The gate is not a sandbox: run Harness² under a dedicated OS account.
+
+**Overview** shows the whole system as a figure, with live counts: sources, gate, queue, run slots, store, tool gate and models. It also shows the run lifecycle with its time limits, the limits in force, the gate rules, and a bring-up checklist. The header has a light/dark toggle, and dark mode is black.
+
+![Overview](docs/img/overview.png)
+
 ## Goals from the command line
 
 ```bash

@@ -38,6 +38,8 @@ pub struct AgentConfig {
     /// directory is still empty (None: always), append `rescue_hint` to the next observation.
     pub rescue_dir: Option<PathBuf>,
     pub rescue_hint: String,
+    /// The operator's guardrail gate, checked before every tool call (None: no gate).
+    pub gate: Option<super::gate::Gate>,
 }
 
 impl AgentConfig {
@@ -57,6 +59,7 @@ impl AgentConfig {
             log_prefix: "    ".into(),
             rescue_dir: None,
             rescue_hint: String::new(),
+            gate: None,
         }
     }
 }
@@ -139,8 +142,93 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
                 parameters: obj(json!({"agent": {"type": "string"}, "prompt": {"type": "string"}}), &["agent", "prompt"]),
             });
         }
+        // Wired tools run commands, so they follow the shell setting.
+        if cfg.allow_shell {
+            t.extend(wired_tools(cfg.harness.as_ref().unwrap()).into_iter().map(|w| w.def));
+        }
     }
     t
+}
+
+/// A tool declared by the harness in `tools/<name>.json`.
+#[derive(Debug, Clone)]
+pub struct WiredTool {
+    pub def: ToolDef,
+    pub command: String,
+    pub timeout_s: u64,
+}
+
+/// Load the harness's wired tools; malformed files and built-in names are skipped (the
+/// validator reports them when the harness is proposed).
+pub fn wired_tools(harness: &Path) -> Vec<WiredTool> {
+    let mut out = vec![];
+    let Ok(rd) = std::fs::read_dir(harness.join("tools")) else { return out };
+    let mut paths: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map(|x| x == "json").unwrap_or(false)).collect();
+    paths.sort();
+    for p in paths {
+        let Ok(v) = serde_json::from_str::<Value>(&std::fs::read_to_string(&p).unwrap_or_default()) else { continue };
+        let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let command = v.get("command").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        if name.is_empty() || name != stem || command.trim().is_empty() || crate::core::tree::BUILTIN_TOOLS.contains(&name.as_str()) {
+            continue;
+        }
+        let params = v.get("parameters").cloned().filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("object")).unwrap_or_else(|| obj(json!({}), &[]));
+        out.push(WiredTool {
+            def: ToolDef { name, description: v.get("description").and_then(|x| x.as_str()).unwrap_or("").to_string(), parameters: params },
+            command,
+            timeout_s: v.get("timeout_s").and_then(|x| x.as_u64()).unwrap_or(120).clamp(1, 600),
+        });
+    }
+    out
+}
+
+fn find_wired(cfg: &AgentConfig, name: &str) -> Option<WiredTool> {
+    if !cfg.allow_shell {
+        return None;
+    }
+    wired_tools(cfg.harness.as_ref()?).into_iter().find(|t| t.def.name == name)
+}
+
+/// Run a wired tool: bash in the workspace, arguments as JSON on stdin and as `ARG_<NAME>`.
+fn run_wired(cfg: &AgentConfig, t: &WiredTool, args: &Value) -> Result<String> {
+    if let Some(req) = t.def.parameters.get("required").and_then(|r| r.as_array()) {
+        let missing: Vec<String> = req.iter().filter_map(|k| k.as_str()).filter(|k| args.get(*k).map(|v| v.is_null()).unwrap_or(true)).map(String::from).collect();
+        if !missing.is_empty() {
+            bail!("{} needs: {}", t.def.name, missing.join(", "));
+        }
+    }
+    let ws = &cfg.workspace;
+    let mut c = std::process::Command::new("bash");
+    c.arg("-c").arg(&t.command).current_dir(ws);
+    let mut extra: Vec<(String, String)> = vec![("TOOL_ARGS".into(), args.to_string())];
+    if let Some(h) = &cfg.harness {
+        extra.push(("HARNESS_DIR".into(), h.display().to_string()));
+    }
+    if let Some(m) = args.as_object() {
+        for (k, v) in m {
+            let key: String = k.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_uppercase() } else { '_' }).collect();
+            extra.push((format!("ARG_{key}"), v.as_str().map(String::from).unwrap_or_else(|| v.to_string())));
+        }
+    }
+    let mut env = config::scrub_env(None, &[]);
+    env.extend(extra);
+    config::apply_env(&mut c, &env);
+    let out = util::run_with_timeout(c, Some(&args.to_string()), Duration::from_secs(t.timeout_s))?;
+    let mut text = out.stdout;
+    if !out.stderr.trim().is_empty() {
+        text = format!("{text}\n[stderr]\n{}", out.stderr);
+    }
+    if out.timed_out {
+        text = format!("{text}\n(killed after {}s timeout)", t.timeout_s);
+    }
+    if util::char_len(&text) > 30_000 {
+        text = format!("{}\n…(output truncated)", util::take_chars(&text, 30_000));
+    }
+    if out.code != Some(0) {
+        bail!("{} failed (exit {})\n{text}", t.def.name, out.code.map(|c| c.to_string()).unwrap_or_else(|| "killed".into()));
+    }
+    Ok(if text.trim().is_empty() { "(no output)".into() } else { text })
 }
 
 /// Resolve a model-supplied path inside the workspace, refusing escapes.
@@ -397,7 +485,10 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             Ok(if r.final_text.trim().is_empty() { format!("(sub-agent returned nothing{})", if r.error.is_empty() { String::new() } else { format!(": {}", r.error) }) } else { r.final_text })
         }
         "finish" => Ok(s("answer")),
-        other => bail!("unknown tool {other:?}"),
+        other => match find_wired(cfg, other) {
+            Some(t) => run_wired(cfg, &t, a),
+            None => bail!("unknown tool {other:?}"),
+        },
     }
 }
 
@@ -650,6 +741,25 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         for call in &resp.calls {
             if cfg.verbose {
                 say!("{}· {}({})", cfg.log_prefix, call.name, summarize_args(&call.args));
+            }
+            if let Some(g) = &cfg.gate {
+                let wired = if crate::core::tree::BUILTIN_TOOLS.contains(&call.name.as_str()) { None } else { find_wired(cfg, &call.name).map(|w| w.command) };
+                if let Some(v) = g.check(&call.name, &call.args, wired.as_deref()) {
+                    let enforce = g.mode == super::gate::Mode::Enforce;
+                    let detail = json!({"tool": call.name, "call": format!("{}({})", call.name, summarize_args(&call.args)), "rule": v.rule, "reason": v.reason, "mode": g.mode.as_str()});
+                    traj.ev(json!({"type": "gate", "status": if enforce { "blocked" } else { "would_block" }, "detail": detail}));
+                    crate::log::event("gate", if enforce { "blocked" } else { "would_block" }, detail);
+                    say!("{}⛔ gate {} {}: {}", cfg.log_prefix, if enforce { "blocked" } else { "would block" }, v.rule, v.reason);
+                    if enforce {
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            content: format!("[gate] Blocked by the operator's guardrail gate (rule `{}`): {}. This rule cannot be changed from inside the run; reach the goal another way.", v.rule, v.reason),
+                            is_error: true,
+                        });
+                        continue;
+                    }
+                }
             }
             if let Some(reason) = run_hooks(cfg, "PreToolUse", &call.name, &call.args, None) {
                 traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": "error", "output": format!("blocked by PreToolUse hook: {reason}")}));

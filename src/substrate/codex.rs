@@ -32,6 +32,7 @@ pub fn codex_surface() -> SurfaceSpec {
             "PreToolUse", "PostToolUse", "PermissionRequest", "PreCompact", "PostCompact", "SessionStart",
             "SubagentStart", "SubagentStop", "UserPromptSubmit", "Stop",
         ],
+        tool_dir: None,
         compile_skill_scripts: true,
         reject_empty_always_on: true,
         stubs: vec![

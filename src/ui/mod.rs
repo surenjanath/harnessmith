@@ -189,6 +189,7 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/goals/:id/judge", post(judge_goal))
             .route("/api/projects/:p/library", get(get_library))
             .route("/api/projects/:p/estimate", get(estimate))
+            .route("/api/projects/:p/gate", get(gate_summary))
             .route("/api/projects/:p/goals/:id/download", get(download))
             .route("/api/runs", get(list_runs))
             .route("/api/runs/:id/log", get(run_log))
@@ -369,13 +370,22 @@ async fn get_project(AxPath(p): AxPath<String>) -> ApiResult {
             })
             .collect();
         let base = tree::read_tree(&a.surface(), &a.base_harness()?, None);
-        Ok(json!({"name": p, "settings": a.settings, "goals": goals, "base": base, "surface": a.surface().always_on}))
+        // Starter wired tools from the default harness, so older projects can add them.
+        let starter: std::collections::BTreeMap<String, String> = crate::substrate::native::default_base_tree()
+            .into_iter()
+            .filter(|(k, _)| k.starts_with("tools/") || k == "scripts/csv_profile.py")
+            .collect();
+        Ok(json!({"name": p, "settings": a.settings, "goals": goals, "base": base, "surface": a.surface().always_on, "starter_tools": starter}))
     })
     .await
 }
 
 async fn save_settings(AxPath(p): AxPath<String>, Json(s): Json<GoalSettings>) -> ApiResult {
     blocking(move || {
+        let bad = crate::llm::gate::check_rules(&s.gate_rules);
+        if !bad.is_empty() {
+            anyhow::bail!("these gate rules are not valid regexes: {}", bad.join(", "));
+        }
         let a = GoalAdapter::with_settings(&goal::project_dir(&p)?, s)?;
         a.save_settings()?;
         Ok(json!({"ok": true}))
@@ -520,10 +530,91 @@ async fn new_goal(AxPath(p): AxPath<String>, mut mp: Multipart) -> ApiResult {
     }
     blocking(move || {
         let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        intake_gate(&p, &a.settings, &text, &files, k)?;
         a.preflight()?;
         let id = a.add_task(&text, &domain, &rubric, &files)?;
         let run = start_run(&p, &id, k, parse_modes(&mode)?)?;
         Ok(json!({"goal_id": id, "run_id": run}))
+    })
+    .await
+}
+
+/// The intake gate: deterministic checks before a goal is accepted. Every decision is logged
+/// to `<runs>/gate_log.jsonl`; a stop returns every reason at once.
+fn intake_checks(s: &GoalSettings, text: &str, files: &[(String, Vec<u8>)], k: usize) -> Vec<(String, bool, String)> {
+    let mut c: Vec<(String, bool, String)> = vec![];
+    let n = text.trim().chars().count();
+    c.push(("goal".into(), n > 0 && n <= 20_000, if n == 0 { "the goal is empty".into() } else if n > 20_000 { format!("the goal is {n} chars; the limit is 20000 (attach long material as a file)") } else { format!("{n} chars") }));
+    let bytes: usize = files.iter().map(|(_, d)| d.len()).sum();
+    let bad_name = files.iter().find(|(f, _)| f.contains("..") || f.starts_with('/'));
+    c.push((
+        "inputs".into(),
+        files.len() <= 200 && bytes <= 200 << 20 && bad_name.is_none(),
+        if let Some((f, _)) = bad_name { format!("unsafe file name {f:?}") } else if files.len() > 200 { format!("{} files; the limit is 200", files.len()) } else if bytes > 200 << 20 { format!("{} MB of inputs; the limit is 200 MB", bytes >> 20) } else { format!("{} file(s), {} KB", files.len(), bytes / 1024) },
+    ));
+    let kmax = crate::config::env_int("HARNESS2_MAX_K", 4).unwrap_or(4).max(1) as usize;
+    c.push(("budget".into(), k <= kmax, if k <= kmax { format!("k={k}") } else { format!("k={k} is over the limit of {kmax} (HARNESS2_MAX_K)") }));
+    for (role, id) in [("solver", &s.solver_model), ("improver", &s.improver_model), ("selector", &s.selector_model)] {
+        let ok = match crate::llm::agent::resolve_chain(id) {
+            Ok(ch) if !ch.is_empty() => (true, format!("{} model(s) in chain", ch.len())),
+            Ok(_) => (false, "no model set".into()),
+            Err(e) => (false, util::take_chars(&format!("{e}"), 200)),
+        };
+        c.push((format!("{role} model"), ok.0, if id.trim().is_empty() { "not set (Models tab)".into() } else { ok.1 }));
+    }
+    let bad = crate::llm::gate::check_rules(&s.gate_rules);
+    c.push(("gate rules".into(), bad.is_empty(), if bad.is_empty() { format!("mode {} · {} custom rule(s)", crate::llm::gate::Mode::parse(&s.gate_mode).as_str(), s.gate_rules.iter().filter(|r| !r.trim().is_empty()).count()) } else { format!("invalid regex: {}", bad.join(", ")) }));
+    c
+}
+
+fn gate_log(entry: Value) {
+    let p = crate::config::get().runs.join("gate_log.jsonl");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+        use std::io::Write;
+        let _ = writeln!(f, "{entry}");
+    }
+}
+
+fn intake_gate(project: &str, s: &GoalSettings, text: &str, files: &[(String, Vec<u8>)], k: usize) -> Result<()> {
+    let checks = intake_checks(s, text, files, k);
+    let failed: Vec<String> = checks.iter().filter(|(_, ok, _)| !ok).map(|(n, _, d)| format!("{n}: {d}")).collect();
+    let decision = if failed.is_empty() { "accept" } else { "stop" };
+    gate_log(json!({"at": util::now_iso(), "project": project, "decision": decision, "goal": util::take_chars(text.trim(), 120), "reasons": failed}));
+    if !failed.is_empty() {
+        anyhow::bail!("Gate stopped this goal — {}", failed.join("; "));
+    }
+    Ok(())
+}
+
+/// Gate summary for the Overview: modes, rules, intake checks for the current settings, history.
+async fn gate_summary(AxPath(p): AxPath<String>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let s = &a.settings;
+        let checks: Vec<Value> = intake_checks(s, "preview", &[], 1).into_iter().filter(|(n, _, _)| n != "goal").map(|(n, ok, d)| json!({"name": n, "ok": ok, "detail": d})).collect();
+        let log = std::fs::read_to_string(crate::config::get().runs.join("gate_log.jsonl")).unwrap_or_default();
+        let entries: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|e| e["project"] == p.as_str()).collect();
+        let accepted = entries.iter().filter(|e| e["decision"] == "accept").count();
+        // Tool-gate decisions across this project's runs.
+        let (mut blocked, mut would) = (0usize, 0usize);
+        let ids: Vec<String> = RUNS.lock().map(|rs| rs.values().filter(|r| r.project == p).map(|r| r.id.clone()).collect()).unwrap_or_default();
+        for id in ids {
+            let body = std::fs::read_to_string(runs_dir().join(&id).join("events.jsonl")).unwrap_or_default();
+            for e in body.lines().filter(|l| l.contains("\"gate\"")).filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+                if e["kind"] == "gate" {
+                    if e["status"] == "blocked" { blocked += 1 } else { would += 1 }
+                }
+            }
+        }
+        Ok(json!({
+            "mode": crate::llm::gate::Mode::parse(&s.gate_mode).as_str(),
+            "protect_inputs": s.gate_protect_inputs,
+            "rules": crate::llm::gate::DEFAULT_RULES.iter().map(|(id, re, why)| json!({"id": id, "regex": re, "reason": why})).collect::<Vec<_>>(),
+            "custom_rules": s.gate_rules,
+            "checks": checks,
+            "intake": {"accepted": accepted, "stopped": entries.len() - accepted, "recent": entries.iter().rev().take(6).cloned().collect::<Vec<_>>()},
+            "tool": {"blocked": blocked, "would_block": would},
+        }))
     })
     .await
 }

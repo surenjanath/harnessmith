@@ -38,11 +38,13 @@ pub fn native_surface() -> SurfaceSpec {
         plugin_dir: None,
         hooks_file: Some("hooks.json"),
         hook_events: vec!["PreToolUse", "PostToolUse", "Stop"],
+        tool_dir: Some("tools"),
         compile_skill_scripts: false,
         reject_empty_always_on: false,
         stubs: vec![
             ("scripts/README.md", "<!-- c7: deterministic helpers, run with the `bash` tool as `python3 scripts/<name>.py`. Add one by emitting scripts/<name>.py. -->\n"),
             ("sub_agents/README.md", "<!-- c5: delegated sub-agents, invoked with the `task` tool in their OWN context. Add one as sub_agents/<name>/AGENT.md with frontmatter `mode: subagent` and `description:`. -->\n"),
+            ("tools/README.md", "<!-- c9: wired tools the agent calls directly, like read_file. Add one as tools/<name>.json: {\"name\": \"<name>\", \"description\": \"when to call it\", \"parameters\": {\"type\": \"object\", \"properties\": {...}, \"required\": [...]}, \"command\": \"python3 scripts/<name>.py\", \"timeout_s\": 120}. The command runs with bash in the workspace; the call's arguments arrive as JSON on stdin and as $ARG_<NAME> variables; stdout is the result and a non-zero exit is an error. Wire a tool when the agent keeps re-deriving the same step. -->\n"),
             ("skills/README.md", "<!-- c6: reusable workflows loaded on demand via the `skill` tool. Add one as skills/<name>/SKILL.md with frontmatter `name:` matching the directory and a `description:`. -->\n"),
         ],
     }
@@ -63,11 +65,47 @@ pub fn default_base_tree() -> tree::Tree {
     );
     t.insert("LongTermMEMORY.md".into(), String::new());
     t.insert(
+        "tools/csv_profile.json".into(),
+        "{\n  \"name\": \"csv_profile\",\n  \"description\": \"Profile a CSV file before analysing it: column names, inferred types, row count, nulls, and min/max/mean/sum for numeric columns. Call it first on any CSV input instead of reading the raw rows.\",\n  \"parameters\": {\n    \"type\": \"object\",\n    \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"CSV path relative to the workspace\"}},\n    \"required\": [\"path\"]\n  },\n  \"command\": \"python3 scripts/csv_profile.py\",\n  \"timeout_s\": 60\n}\n".into(),
+    );
+    t.insert("scripts/csv_profile.py".into(), CSV_PROFILE.into());
+    t.insert(
         "tool_descriptions/tool_guidance.md".into(),
-        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace, e.g. `python3 scripts/<name>.py`.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n".into(),
+        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace, e.g. `python3 scripts/<name>.py`.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n- Wired tools (listed under WIRED TOOLS) are called directly; prefer them over hand-rolled shell steps.\n".into(),
     );
     t
 }
+
+/// The starter wired tool's script: arguments as JSON on stdin, a readable profile on stdout.
+const CSV_PROFILE: &str = r#"import csv, json, sys
+
+args = json.load(sys.stdin)
+path = args["path"]
+with open(path, newline="", encoding="utf-8-sig") as f:
+    rows = list(csv.DictReader(f))
+if not rows:
+    print(f"{path}: no data rows")
+    sys.exit(0)
+cols = list(rows[0].keys())
+print(f"{path}: {len(rows)} rows x {len(cols)} columns")
+for c in cols:
+    vals = [(r.get(c) or "").strip() for r in rows]
+    present = [v for v in vals if v != ""]
+    nulls = len(vals) - len(present)
+    nums = []
+    for v in present:
+        try:
+            nums.append(float(v.replace(",", "")))
+        except ValueError:
+            break
+    if present and len(nums) == len(present):
+        mean = sum(nums) / len(nums)
+        print(f"- {c}: number · min {min(nums):g} · max {max(nums):g} · mean {mean:.4g} · sum {sum(nums):g} · nulls {nulls}")
+    else:
+        uniq = sorted(set(present))
+        sample = ", ".join(uniq[:5]) + (" ..." if len(uniq) > 5 else "")
+        print(f"- {c}: text · {len(uniq)} distinct · nulls {nulls} · e.g. {sample}")
+"#;
 
 const RUNTIME_RULES: &str = "# RUNTIME\nYour working directory is the workspace. Input files for the task, if any, are in it. Write deliverables under `output/`. Use relative paths.";
 
@@ -94,6 +132,11 @@ pub fn compose_system(harness: &Path) -> String {
     if !scripts.is_empty() {
         parts.push(format!("# HELPER SCRIPTS\nAvailable in `scripts/`: {}\nRun with `python3 scripts/<name>.py` via the `bash` tool.", scripts.join(", ")));
     }
+    let tools = super::super::llm::agent::wired_tools(harness);
+    if !tools.is_empty() {
+        let lines: Vec<String> = tools.iter().map(|t| format!("- `{}`: {}", t.def.name, t.def.description)).collect();
+        parts.push(format!("# WIRED TOOLS\nCall these directly, like any other tool, whenever they fit:\n{}", lines.join("\n")));
+    }
     parts.push(RUNTIME_RULES.into());
     parts.join("\n\n---\n\n")
 }
@@ -105,6 +148,9 @@ pub struct SolveOpts {
     pub timeout: u64,
     pub allow_shell: bool,
     pub inputs_fingerprint: Option<String>,
+    pub gate_mode: String,
+    pub gate_rules: Vec<String>,
+    pub gate_protect_inputs: bool,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -135,6 +181,11 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     cfg.log_prefix = "      ".into();
     cfg.rescue_dir = Some(ws.join("output"));
     cfg.rescue_hint = "output/ is still empty. Write your best complete deliverable there now with write_file (a partial answer beats none), then call finish.".into();
+    let mut gate = crate::llm::gate::Gate::new(&o.gate_mode, &o.gate_rules);
+    if o.gate_protect_inputs {
+        gate.protect_inputs(&ws);
+    }
+    cfg.gate = Some(gate);
     let out = agent::run(&cfg, task)?;
     util::write(&run_dir.join("final.md"), &out.final_text)?;
     // A session that died (transport error, cancellation) before producing anything is a dead
@@ -194,4 +245,32 @@ pub fn render_events(path: &Path, obs_trunc: usize, max_chars: usize, args_trunc
         }
     }
     cap_rendered(&lines, max_chars)
+}
+
+#[cfg(test)]
+mod wired_tool_tests {
+    use super::*;
+
+    #[test]
+    fn default_base_validates_with_its_wired_tool() {
+        let t = default_base_tree();
+        let census = tree::validate(&native_surface(), &t, true, None, &tree::reserved_default()).unwrap();
+        assert_eq!(census["tools"], 1);
+        assert!(tree::is_allowed(&native_surface(), "tools/csv_profile.json"));
+        assert!(!tree::is_allowed(&super::super::opencode::opencode_surface(), "tools/csv_profile.json"));
+    }
+
+    #[test]
+    fn bad_wired_tools_are_rejected_with_reasons() {
+        let mut t = default_base_tree();
+        t.insert("tools/bash.json".into(), r#"{"name":"bash","description":"x","command":"true"}"#.into());
+        t.insert("tools/nodesc.json".into(), r#"{"name":"other","command":"python3 scripts/missing.py"}"#.into());
+        t.insert("tools/broken.json".into(), "{not json".into());
+        let e = tree::validate(&native_surface(), &t, true, None, &tree::reserved_default()).unwrap_err().to_string();
+        assert!(e.contains("built-in tool name"), "{e}");
+        assert!(e.contains("`name` must be \"nodesc\""), "{e}");
+        assert!(e.contains("non-empty `description`"), "{e}");
+        assert!(e.contains("scripts/missing.py"), "{e}");
+        assert!(e.contains("not valid JSON"), "{e}");
+    }
 }
