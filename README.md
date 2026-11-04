@@ -78,6 +78,8 @@ sequential  base runs ─► round 1 inv/dom ─► checkpoint c1 ─► round 2
 
 Each card shows its state as it changes: which tool the agent is calling, step count, tokens, whether the improver *kept* or *edited* the harness (or fell back after an invalid proposal), and whether the probe delivered. The adopted output is marked ★. Click a card for its timeline: every agent turn, the proposal notes, rejected attempts and why, and the selector's reasoning. The header tracks elapsed time, solver runs and improver sessions against the 4k/3k budget, tokens, and cost. **Stop** cancels after the current model call.
 
+![Live pipeline map on a local model](docs/img/pipeline-live-local.png)
+
 Runs are saved under `runs/ui-runs/<id>/` (`run.json`, `log.txt`, `events.jsonl`), so the map and log survive a server restart. **History → Journey** replays the map for any past goal.
 
 ## Local models
