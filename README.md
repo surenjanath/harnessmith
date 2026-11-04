@@ -109,6 +109,12 @@ harness2 goal "Find the three regions with the largest decline in sales.csv and 
 
 Rollouts run on the **native substrate** (`nx`): this crate's own tool loop with `list_files`, `read_file`, `write_file`, `edit_file`, `delete_file`, `bash`, `skill`, `task` (sub-agents) and `finish`. File tools are sandboxed to the workspace, and `hooks.json` hooks (`PreToolUse`, `PostToolUse`, `Stop`) run inside the loop. Turn the shell tool off in project settings or with `HARNESS2_ALLOW_SHELL=0`. The improver and selector run on the native `api` channel by default; `opencode` and `claude_cli` are also available.
 
+To check a model on a task before paying for a full run, `harness2 solve` makes one solver attempt on the base harness and prints the output, steps, and tokens:
+
+```bash
+harness2 solve "Summarise sales.csv in output/brief.md" --file sales.csv --model ollama/qwen2.5:7b
+```
+
 An optional rubric (one criterion per line) is stored with the goal and never shown to any model. The **Judge** button, or `harness2 judge --bench goal --subset <project>`, grades the adopted output against it with the judge model.
 
 ## The benchmarks
@@ -177,7 +183,7 @@ cargo test
 ## Notes
 
 - The UI has no authentication and the agent can run shell commands. Keep it on 127.0.0.1.
-- What has been verified: the demo, the goal pipeline on the mock model and on a local OpenAI-compatible server (tool calls included), and the UI in a headless browser. The Anthropic and Gemini clients follow their public APIs but have not been run against live keys here. The JobBench, LAB and WorkBuddy adapters compile and are unit-tested, but have not been run against the installed benchmark datasets.
+- What has been verified: the demo, the goal pipeline on the mock model, a strict OpenAI-compatible test server, a real local model (Qwen2.5-3B through llama.cpp's server, end to end through the UI), and the UI in a headless browser. See [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md) for results and the roadmap. The Anthropic and Gemini clients follow their public APIs but have not been run against live keys here. The JobBench, LAB and WorkBuddy adapters compile and are unit-tested, but have not been run against the installed benchmark datasets.
 
 ## License
 

@@ -55,6 +55,8 @@ enum Cmd {
     Bridge(setup::BridgeArgs),
     /// Refine a harness for a goal you type, then deliver the selected output.
     Goal(GoalArgs),
+    /// One solver attempt on the base harness (no improvement loop): a quick model check.
+    Solve(SolveArgs),
     /// Manage model connections (list, add, test, remove).
     Models(ModelsArgs),
     /// Start the web UI.
@@ -104,6 +106,20 @@ pub struct GoalArgs {
     /// Grading criteria (one per line) for an optional post-hoc judge; never shown to models.
     #[arg(long, default_value = "")]
     pub rubric: String,
+}
+
+#[derive(Args)]
+struct SolveArgs {
+    goal: String,
+    /// `<connection>/<model>`
+    #[arg(long)]
+    model: String,
+    #[arg(long = "file")]
+    files: Vec<PathBuf>,
+    #[arg(long, default_value = "scratch")]
+    project: String,
+    #[arg(long, default_value_t = 20)]
+    steps: u32,
 }
 
 #[derive(Args)]
@@ -158,6 +174,7 @@ pub fn main() -> i32 {
         Cmd::Bridge(a) => setup::bridge_cmd(a),
         Cmd::Goal(a) => goal_cmd(a).map(|_| 0),
         Cmd::Models(a) => models(a).map(|_| 0),
+        Cmd::Solve(a) => solve(a),
         Cmd::Serve(a) => crate::ui::serve(&a.host, a.port).map(|_| 0),
         Cmd::JbOcRunner => crate::benchmarks::jb_oc_runner::main(),
     };
@@ -250,6 +267,26 @@ pub fn run_goal(adapter: &GoalAdapter, id: &str, k: usize, modes: Vec<&'static s
         }
     }
     Ok(out)
+}
+
+fn solve(a: SolveArgs) -> Result<i32> {
+    let root = goal::project_dir(&a.project)?;
+    let mut s = GoalAdapter::open(&root)?.settings;
+    s.solver_model = a.model.clone();
+    s.solver_steps = a.steps;
+    let adapter = GoalAdapter::with_settings(&root, s)?;
+    let mut files = vec![];
+    for f in &a.files {
+        files.push((f.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(f)?));
+    }
+    let id = adapter.add_task(&a.goal, "general", "", &files)?;
+    let t0 = std::time::Instant::now();
+    let rd = adapter.execute(&id, None, &format!("solve/{id}"), None)?;
+    let usage: serde_json::Value = std::fs::read_to_string(rd.join("usage.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    println!("\n===== {} in {:.0}s, {} steps, {} in / {} out tokens{} =====", rd.display(), t0.elapsed().as_secs_f64(), usage["steps"], usage["input_tokens"], usage["output_tokens"],
+        usage["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(", ended: {e}")).unwrap_or_default());
+    println!("{}", adapter.deliverable_text(&rd)?);
+    Ok(if adapter.delivered(&rd) { 0 } else { 2 })
 }
 
 fn models(a: ModelsArgs) -> Result<()> {

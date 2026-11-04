@@ -572,7 +572,7 @@ async function loadModels() {
   $("#conn-rows").innerHTML = conns.connections.length ? conns.connections.map(c => `<tr>
     <td><b>${esc(c.name)}</b><div class="hint">${esc(c.default_model || "")}</div></td><td>${esc(c.provider)}</td>
     <td class="muted" style="word-break:break-all">${esc(c.base_url || "(default)")}</td>
-    <td>${c.has_key ? '<span class="chip ok">set</span>' : '<span class="chip warn">none</span>'}</td>
+    <td>${c.has_key ? '<span class="chip ok">set</span>' : (c.provider === "ollama" || c.provider === "mock" || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(c.base_url || "")) ? '<span class="chip">not needed</span>' : '<span class="chip warn">none</span>'}</td>
     <td style="white-space:nowrap"><button class="btn small" onclick="editConn('${esc(c.name)}')">Edit</button> <button class="btn small" onclick="delConn('${esc(c.name)}')">×</button></td></tr>`).join("")
     : `<tr><td colspan="5" class="muted">No saved connections yet. Built-in prefixes still work if their API key is in the environment.</td></tr>`;
   await refreshProject();

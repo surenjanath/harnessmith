@@ -221,8 +221,60 @@ fn list_files(ws: &Path, dir: &Path) -> String {
     if out.is_empty() { "(no files)".into() } else { out.join("\n") }
 }
 
-/// Execute one tool call. Ok(text) is the observation; Err is reported to the model as an error.
+/// Required arguments per tool, so a call with missing ones gets a precise error.
+fn required(tool: &str) -> &'static [&'static str] {
+    match tool {
+        "read_file" | "delete_file" => &["path"],
+        "write_file" => &["path", "content"],
+        "edit_file" => &["path", "old_string", "new_string"],
+        "bash" => &["command"],
+        "skill" => &["name"],
+        "task" => &["agent", "prompt"],
+        _ => &[],
+    }
+}
+
+/// When a path does not exist: the closest file by name, and what is actually there.
+fn missing_path_hint(ws: &Path, wanted: &str) -> String {
+    let files: Vec<String> = util::files_sorted(ws).iter().map(|p| util::rel(ws, p)).filter(|r| !r.starts_with(".harness/")).collect();
+    let base = wanted.rsplit('/').next().unwrap_or(wanted).to_lowercase();
+    let close = files.iter().find(|f| f.rsplit('/').next().unwrap_or(f).to_lowercase() == base).or_else(|| {
+        files.iter().find(|f| !base.is_empty() && f.to_lowercase().contains(base.trim_end_matches(|c: char| !c.is_alphanumeric())))
+    });
+    let shown: Vec<&String> = files.iter().take(30).collect();
+    format!(
+        "{}Files in the workspace: {}{}",
+        close.map(|c| format!("Did you mean `{c}`? ")).unwrap_or_default(),
+        if shown.is_empty() { "(none)".to_string() } else { shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ") },
+        if files.len() > 30 { format!(" (+{} more)", files.len() - 30) } else { String::new() }
+    )
+}
+
+/// Execute one tool call, turning low-level failures into messages a model can act on.
 fn exec_tool(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
+    let missing: Vec<&str> = required(&call.name).iter().filter(|k| call.args.get(**k).map(|v| v.is_null()).unwrap_or(true)).cloned().collect();
+    if !missing.is_empty() {
+        bail!("{} needs {} (missing: {}). Arguments must be a JSON object.", call.name, required(&call.name).iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", "), missing.join(", "));
+    }
+    match exec_tool_raw(cfg, call) {
+        Ok(t) => Ok(t),
+        Err(e) => {
+            let ws = &cfg.workspace;
+            let msg = format!("{e:#}").replace(&format!("{}/", ws.display()), "").replace(&ws.display().to_string(), ".");
+            let p = call.args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let not_found = msg.contains("No such file") || msg.contains("not found") || msg.contains("no such file");
+            if not_found && matches!(call.name.as_str(), "read_file" | "edit_file" | "delete_file" | "list_files") {
+                bail!("{p:?} does not exist. {}", missing_path_hint(ws, p));
+            }
+            if not_found && call.name == "bash" {
+                bail!("{msg}\n{}", missing_path_hint(ws, ""));
+            }
+            bail!("{msg}")
+        }
+    }
+}
+
+fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
     let a = &call.args;
     let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let ws = &cfg.workspace;
@@ -230,6 +282,9 @@ fn exec_tool(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
         "list_files" => {
             let p = s("path");
             let dir = safe_path(ws, if p.is_empty() { "." } else { &p })?;
+            if !dir.exists() {
+                bail!("No such file or directory");
+            }
             Ok(list_files(ws, &dir))
         }
         "read_file" => {
@@ -553,6 +608,19 @@ mod tests {
         let total: usize = m.iter().map(|x| match x { Msg::Tools(r) => r[0].content.len(), _ => 4 }).sum();
         assert!(total < 40_000, "{total}");
         assert!(matches!(&m[0], Msg::User(t) if t == "task"));
+    }
+
+    #[test]
+    fn helpful_errors() {
+        let d = tempfile::tempdir().unwrap();
+        util::write(&d.path().join("regions.csv"), "a").unwrap();
+        let cfg = AgentConfig::new("mock/m", "", d.path());
+        let call = |name: &str, args: Value| exec_tool(&cfg, &ToolCall { id: "1".into(), name: name.into(), args, extra: None });
+        let e = call("read_file", json!({"path": "input/regions.csv"})).unwrap_err().to_string();
+        assert!(e.contains("Did you mean `regions.csv`?"), "{e}");
+        assert!(!e.contains(&d.path().display().to_string()), "{e}");
+        let e = call("write_file", json!({})).unwrap_err().to_string();
+        assert!(e.contains("write_file needs `path`, `content`"), "{e}");
     }
 
     #[test]

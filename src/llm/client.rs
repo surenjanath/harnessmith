@@ -191,18 +191,63 @@ pub fn text_tool_calls(text: &str, tools: &[ToolDef]) -> Vec<ToolCall> {
         let Some(name) = name.filter(|n| known(n)) else { return };
         let mut args = v.get("arguments").or_else(|| v.get("parameters")).or_else(|| v.get("function").and_then(|f| f.get("arguments"))).cloned().unwrap_or(json!({}));
         if let Value::String(s) = &args {
-            args = serde_json::from_str(s).unwrap_or(json!({}));
+            args = lenient_json(s).unwrap_or(json!({}));
         }
         out.push(ToolCall { id: format!("text_{}", out.len()), name: name.to_string(), args, extra: None });
     };
     for c in cands {
-        match serde_json::from_str::<Value>(&c) {
+        match lenient_json(&c).ok_or(()) {
             Ok(Value::Array(a)) => a.iter().for_each(&mut push),
             Ok(v) => push(&v),
             Err(_) => {}
         }
     }
     out
+}
+
+/// Parse JSON the way small models write it: raw newlines/tabs inside strings are escaped and
+/// trailing commas dropped before giving up.
+pub fn lenient_json(src: &str) -> Option<Value> {
+    if let Ok(v) = serde_json::from_str::<Value>(src) {
+        return Some(v);
+    }
+    let mut out = String::with_capacity(src.len() + 16);
+    let (mut in_str, mut esc) = (false, false);
+    for ch in src.chars() {
+        if in_str {
+            if esc {
+                esc = false;
+                if !matches!(ch, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') {
+                    out.pop(); // an invalid escape such as \' : keep the character, drop the backslash
+                }
+                out.push(ch);
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    esc = true;
+                    out.push(ch);
+                }
+                '"' => {
+                    in_str = false;
+                    out.push(ch);
+                }
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => out.push(' '),
+                c => out.push(c),
+            }
+        } else {
+            if ch == '"' {
+                in_str = true;
+            }
+            out.push(ch);
+        }
+    }
+    let re = regex::Regex::new(r",\s*([}\]])").unwrap();
+    let fixed = re.replace_all(&out, "$1").into_owned();
+    serde_json::from_str(&fixed).ok()
 }
 
 /// Ollama's native chat API: unlike its /v1 shim, it honours `num_ctx`, so long missions are
@@ -503,6 +548,12 @@ mod tests {
         let c = text_tool_calls("```json\n{\"name\": \"write_file\", \"arguments\": \"{\\\"path\\\": \\\"c\\\"}\"}\n```", &tools);
         assert_eq!(c[0].args["path"], "c");
         assert!(text_tool_calls("{\"name\": \"rm_rf\"}", &tools).is_empty());
+        // raw newline inside a string, and arguments given as a JSON string, as Qwen-3B writes it
+        let c = text_tool_calls("<tool_call>\n{\"name\": \"write_file\", \"arguments\": \"{\\\"content\\\":\\\"line1\nline2\\\",\\\"path\\\":\\\"s.py\\\"}\"}\n</tool_call>", &tools);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].args["path"], "s.py");
+        assert_eq!(c[0].args["content"], "line1\nline2");
+        assert_eq!(lenient_json("{\"a\": [1, 2,],}").unwrap()["a"][1], 2);
         assert!(text_tool_calls("just prose", &tools).is_empty());
         assert_eq!(strip_think("<think>hmm</think>\nanswer"), "answer");
     }
@@ -595,4 +646,18 @@ pub fn ping(conn: &Connection, model: &str) -> Result<String> {
     let msgs = vec![Msg::User("Reply with the single word: ready".into())];
     let r = chat(conn, model, &ChatReq { system: "", messages: &msgs, tools: &[], max_tokens: 64 }, Duration::from_secs(60))?;
     Ok(r.text.trim().to_string())
+}
+
+#[cfg(test)]
+mod real_reply {
+    /// The exact reply Qwen2.5-3B produced in a local test run, which strict JSON rejects.
+    #[test]
+    fn qwen_reply_with_raw_newlines_parses() {
+        let text = include_str!("../../tests/golden/qwen_broken_call.txt");
+        let tools = vec![super::ToolDef { name: "write_file".into(), description: String::new(), parameters: serde_json::json!({}) }];
+        let c = super::text_tool_calls(text, &tools);
+        assert_eq!(c.len(), 1, "{text}");
+        assert_eq!(c[0].args["path"], "scripts/regions_analysis.py");
+        assert!(c[0].args["content"].as_str().unwrap().contains("def find_percentage_change"));
+    }
 }
