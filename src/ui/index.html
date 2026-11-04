@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness² Studio</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #dde1e7;
+  --accent: #2f6fde; --accent-ink: #ffffff; --ok: #1f8a4c; --warn: #b26a00; --bad: #c23a3a;
+  --code: #f1f3f6; --chip: #eef2fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111418; --panel: #191d23; --ink: #e6e9ee; --muted: #9aa3af; --line: #2a3039;
+    --accent: #5b8ff0; --accent-ink: #0b0d10; --ok: #47c37f; --warn: #e0a040; --bad: #ef6b6b;
+    --code: #20252d; --chip: #1f2737; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+header h1 sup { font-size: 11px; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { background: none; border: 0; padding: 7px 12px; border-radius: 7px; color: var(--muted); cursor: pointer; font: inherit; }
+nav button.on { background: var(--chip); color: var(--ink); font-weight: 600; }
+.spacer { flex: 1; }
+select, input, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; width: 100%; }
+textarea { resize: vertical; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+.panel h2 { font-size: 15px; margin: 0 0 8px; }
+.panel h3 { font-size: 13px; margin: 14px 0 6px; }
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 14px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 7px 13px; border-radius: 7px; cursor: pointer; font: inherit; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.small { padding: 3px 9px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+pre { background: var(--code); padding: 10px 12px; border-radius: 7px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 6px 0; max-height: 520px; }
+pre.log { max-height: 420px; min-height: 120px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--chip); font-size: 12px; }
+.chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
+.tabs2 { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.tabs2 button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 99px; padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+.tabs2 button.on { background: var(--chip); color: var(--ink); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+.goal-item { padding: 10px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.goal-item:hover .gtitle { color: var(--accent); }
+.gtitle { font-weight: 600; }
+.err { color: var(--bad); white-space: pre-wrap; }
+.okmsg { color: var(--ok); }
+details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; }
+.kv div:nth-child(odd) { color: var(--muted); }
+.steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
+.steps span { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.steps span.done { color: var(--ok); border-color: var(--ok); }
+.steps span.cur { color: var(--accent); border-color: var(--accent); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Harness<sup>2</sup> Studio</h1>
+  <nav id="nav">
+    <button data-v="run" class="on">Run a goal</button>
+    <button data-v="models">Models</button>
+    <button data-v="history">History</button>
+    <button data-v="harness">Base harness</button>
+    <button data-v="library">Library</button>
+  </nav>
+  <div class="spacer"></div>
+  <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
+  <button class="btn small" id="newproj" title="New project">+ Project</button>
+</header>
+<main>
+
+<!-- RUN -->
+<section id="v-run">
+  <div class="panel">
+    <h2>What should the agent do?</h2>
+    <textarea id="g-text" rows="5" placeholder="e.g. Read the attached sales.csv, find the three regions with the largest quarter-over-quarter decline, and write a one-page brief with a table to output/brief.md"></textarea>
+    <div class="row">
+      <div><label>Input files (optional)</label><input type="file" id="g-files" multiple></div>
+      <div><label>Domain (groups goals for learning)</label><input id="g-domain" placeholder="general"></div>
+      <div><label>Recursion</label><select id="g-mode"><option value="parallel">Parallel (wider)</option><option value="sequential">Sequential (deeper)</option><option value="both">Both</option></select></div>
+      <div><label>Budget k</label><select id="g-k"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+    </div>
+    <details><summary>Optional grading criteria (never shown to the agent)</summary>
+      <textarea id="g-rubric" rows="3" placeholder="One criterion per line. Used only by the Judge button after the run, with the judge model."></textarea>
+    </details>
+    <div class="hint" id="g-budget"></div>
+    <div class="hint" id="g-models"></div>
+    <div class="actions">
+      <button class="btn primary" id="g-go">Start</button>
+      <span id="g-msg"></span>
+    </div>
+  </div>
+  <div class="panel hidden" id="live">
+    <h2 id="live-title">Running…</h2>
+    <div class="steps" id="live-steps"></div>
+    <pre class="log" id="live-log"></pre>
+    <div class="actions"><button class="btn small" id="live-open">Open result</button><span id="live-status"></span></div>
+  </div>
+  <div class="panel">
+    <h2>How it works</h2>
+    <p class="muted" style="margin:0">The <b>solver</b> model attempts the goal with the project's base harness (system prompt, guardrails, memory, tool guidance, skills, sub-agents, scripts, hooks). The <b>improver</b> model reads those attempts and proposes harness edits along two dimensions: how the agent works (INV) and what a practitioner knows (DOM). Each edit is probed with a fresh attempt, and a composer merges what the evidence supports. The <b>selector</b> then picks the best final output without seeing which harness made it, and writes a lesson into the project library for the next goal. Budget per goal: 4k solver runs and 3k improver sessions.</p>
+  </div>
+</section>
+
+<!-- MODELS -->
+<section id="v-models" class="hidden">
+  <div class="grid2">
+    <div class="panel">
+      <h2>Connections</h2>
+      <p class="hint">A model id is <code>connection/model</code>. Built-in prefixes work from environment variables without setup: <span id="builtins"></span>.</p>
+      <table><thead><tr><th>Name</th><th>Provider</th><th>Endpoint</th><th>Key</th><th></th></tr></thead><tbody id="conn-rows"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2 id="cf-title">Add a connection</h2>
+      <div class="row">
+        <div><label>Name</label><input id="cf-name" placeholder="work"></div>
+        <div><label>Provider</label><select id="cf-provider">
+          <option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="ollama">Ollama (local)</option><option value="mock">Mock (offline test)</option></select></div>
+      </div>
+      <label>Base URL <span class="muted" id="cf-base-hint"></span></label><input id="cf-base" placeholder="leave empty for the provider default">
+      <div class="row">
+        <div><label>API key env var (preferred)</label><input id="cf-keyenv" placeholder="OPENAI_API_KEY"></div>
+        <div><label>…or API key</label><input id="cf-key" type="password" placeholder="stored in connections.json"></div>
+      </div>
+      <div class="row">
+        <div><label>Default model</label><input id="cf-model" list="cf-models" placeholder="gpt-4.1"><datalist id="cf-models"></datalist></div>
+        <div><label>Max output tokens</label><input id="cf-maxtok" type="number" placeholder="8192"></div>
+      </div>
+      <div class="row">
+        <div><label>$ / 1M input tokens</label><input id="cf-pin" type="number" step="0.01" placeholder="0"></div>
+        <div><label>$ / 1M output tokens</label><input id="cf-pout" type="number" step="0.01" placeholder="0"></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="cf-save">Save</button>
+        <button class="btn" id="cf-list">Fetch models</button>
+        <button class="btn" id="cf-test">Test</button>
+        <button class="btn" id="cf-clear">Clear</button>
+        <span id="cf-msg"></span>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Roles for this project</h2>
+    <p class="hint">Pick a model id for each role, e.g. <code>openai/gpt-4.1</code>, <code>anthropic/claude-sonnet-4-5</code>, <code>ollama/qwen3</code> or one of your connections. The improver and selector can be stronger (or cheaper) than the solver.</p>
+    <div class="row">
+      <div><label>Solver (does the task)</label><input id="r-solver" list="all-models"></div>
+      <div><label>Improver (edits the harness)</label><input id="r-improver" list="all-models"></div>
+      <div><label>Selector (picks the output)</label><input id="r-selector" list="all-models"></div>
+      <div><label>Judge (optional, rubric grading)</label><input id="r-judge" list="all-models"></div>
+    </div>
+    <datalist id="all-models"></datalist>
+    <details><summary>Advanced</summary>
+      <div class="row">
+        <div><label>Improver channel</label><select id="s-channel"><option value="api">Native (any connected model)</option><option value="opencode">OpenCode CLI</option><option value="claude_cli">Claude Code CLI</option></select></div>
+        <div><label>Solver max steps</label><input id="s-ssteps" type="number"></div>
+        <div><label>Improver max steps</label><input id="s-isteps" type="number"></div>
+        <div><label>Solver timeout (s)</label><input id="s-stime" type="number"></div>
+        <div><label>Improver timeout (s)</label><input id="s-itime" type="number"></div>
+        <div><label>Effort</label><select id="s-effort"><option>low</option><option>medium</option><option>high</option></select></div>
+        <div><label>Shell tool for the agent</label><select id="s-shell"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
+        <div><label>Sub-agents</label><select id="s-subs"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
+      </div>
+    </details>
+    <div class="actions">
+      <button class="btn primary" id="r-save">Save roles</button>
+      <button class="btn" id="r-test">Test all three</button>
+      <span id="r-msg"></span>
+    </div>
+  </div>
+</section>
+
+<!-- HISTORY -->
+<section id="v-history" class="hidden">
+  <div class="grid2">
+    <div class="panel"><h2>Goals</h2><div id="goal-list" class="muted">Loading…</div></div>
+    <div class="panel" id="goal-detail"><h2>Select a goal</h2><p class="muted">Results, the adopted harness and what changed appear here.</p></div>
+  </div>
+</section>
+
+<!-- HARNESS -->
+<section id="v-harness" class="hidden">
+  <div class="panel">
+    <h2>Base harness</h2>
+    <p class="hint">Where every goal in this project starts. Edit files in place; add a skill as <code>skills/&lt;name&gt;/SKILL.md</code> (with <code>name:</code> and <code>description:</code> frontmatter), a helper as <code>scripts/&lt;name&gt;.py</code>, a sub-agent as <code>sub_agents/&lt;name&gt;/AGENT.md</code>, or hooks in <code>hooks.json</code>.</p>
+    <div class="tabs2" id="h-files"></div>
+    <div class="row"><div><label>Path</label><input id="h-path"></div></div>
+    <label>Contents</label><textarea id="h-body" rows="16" style="font-family: ui-monospace, monospace; font-size: 12.5px"></textarea>
+    <div class="actions">
+      <button class="btn" id="h-apply">Apply to this file</button>
+      <button class="btn" id="h-del">Remove file</button>
+      <button class="btn primary" id="h-save">Save harness</button>
+      <span id="h-msg"></span>
+    </div>
+  </div>
+</section>
+
+<!-- LIBRARY -->
+<section id="v-library" class="hidden">
+  <div class="panel"><h2>Experience library</h2><p class="hint">Lessons the selector wrote after each adopted harness. Later goals in the same project and domain read these before proposing edits.</p><div id="lib"></div></div>
+</section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+let project = "default", projectData = null, conns = null, liveRun = null, liveFrom = 0, liveTimer = null, baseTree = {};
+function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+async function api(path, opts = {}) {
+  const r = await fetch("/api/" + path, opts);
+  const j = await r.json().catch(() => ({error: "bad response"}));
+  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  return j;
+}
+const jpost = (path, body, method = "POST") => api(path, {method, headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+function msg(el, text, ok) { const e = $(el); e.className = ok ? "okmsg" : "err"; e.textContent = text; }
+
+function show(v) {
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  document.querySelectorAll("main > section").forEach(s => s.classList.toggle("hidden", s.id !== "v-" + v));
+  store("h2.view", v);
+  if (v === "models") loadModels();
+  if (v === "history") loadHistory();
+  if (v === "harness") loadHarness();
+  if (v === "library") loadLibrary();
+}
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
+
+async function loadProjects() {
+  const p = await api("projects");
+  const saved = load("h2.project");
+  if (saved && !p.projects.includes(saved)) p.projects.push(saved);
+  project = saved || "default";
+  $("#project").innerHTML = p.projects.map(n => `<option ${n === project ? "selected" : ""}>${esc(n)}</option>`).join("");
+}
+$("#project").onchange = () => { project = $("#project").value; store("h2.project", project); refreshProject(); show(load("h2.view") || "run"); };
+$("#newproj").onclick = () => {
+  const n = prompt("New project name (letters, digits, - _ .)");
+  if (!n) return;
+  if (!/^[A-Za-z0-9_.-]+$/.test(n)) return alert("Use letters, digits, '-', '_' or '.'");
+  const o = document.createElement("option"); o.textContent = n; $("#project").appendChild(o); $("#project").value = n;
+  project = n; store("h2.project", n); refreshProject();
+};
+
+async function refreshProject() {
+  projectData = await api("projects/" + encodeURIComponent(project));
+  const s = projectData.settings;
+  const roles = [["Solver", s.solver_model], ["Improver", s.improver_model], ["Selector", s.selector_model]];
+  $("#g-models").innerHTML = roles.map(([r, m]) => `${r}: <code>${esc(m || "not set")}</code>`).join(" · ") + (roles.some(r => !r[1]) ? ` — <a href="#" onclick="show('models');return false">set models</a>` : "");
+  updateBudget();
+}
+
+function updateBudget() {
+  const k = +$("#g-k").value, mode = $("#g-mode").value;
+  const modes = mode === "both" ? 2 : 1;
+  const runs = k + modes * 3 * k, sessions = modes * 3 * k + (k > 1 ? modes : 0) + modes;
+  $("#g-budget").textContent = `About ${runs} solver runs and ${sessions} improver/selector sessions for this goal.`;
+}
+$("#g-k").onchange = updateBudget; $("#g-mode").onchange = updateBudget;
+
+$("#g-go").onclick = async () => {
+  const text = $("#g-text").value.trim();
+  if (!text) return msg("#g-msg", "Write a goal first.");
+  const fd = new FormData();
+  fd.append("goal", text); fd.append("domain", $("#g-domain").value); fd.append("rubric", $("#g-rubric").value);
+  fd.append("k", $("#g-k").value); fd.append("mode", $("#g-mode").value);
+  for (const f of $("#g-files").files) fd.append("files", f, f.name);
+  $("#g-go").disabled = true; msg("#g-msg", "Starting…", true);
+  try {
+    const r = await api("projects/" + encodeURIComponent(project) + "/goals", {method: "POST", body: fd});
+    msg("#g-msg", "Started.", true);
+    watch(r.run_id);
+  } catch (e) { msg("#g-msg", e.message); }
+  $("#g-go").disabled = false;
+};
+
+const STAGES = [["base", /rolling \d+ base/], ["propose", /proposing \d+ candidates|round \d+ proposing/], ["probe", /probing|rollout .*\/(inv|dom)\d/], ["compose", /composing/], ["select", /\[select\./], ["learn", /\[experience\./], ["done", /^Finished|^FAILED/]];
+function watch(runId) {
+  liveRun = runId; liveFrom = 0; $("#live").classList.remove("hidden"); $("#live-log").textContent = "";
+  $("#live-title").textContent = "Running…"; $("#live-status").textContent = "";
+  let reached = -1;
+  const render = () => { $("#live-steps").innerHTML = STAGES.map(([n], i) => `<span class="${i < reached ? "done" : i === reached ? "cur" : ""}">${n}</span>`).join(""); };
+  render();
+  clearInterval(liveTimer);
+  liveTimer = setInterval(async () => {
+    try {
+      const r = await api(`runs/${runId}/log?from=${liveFrom}`);
+      if (r.lines.length) {
+        const pre = $("#live-log"), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+        pre.textContent += r.lines.join("\n") + "\n";
+        if (atEnd) pre.scrollTop = pre.scrollHeight;
+        for (const l of r.lines) STAGES.forEach(([, re], i) => { if (re.test(l) && i > reached) reached = i; });
+        render();
+      }
+      liveFrom = r.next;
+      $("#live-open").onclick = () => { show("history"); openGoal(r.goal_id); };
+      if (r.status !== "running") {
+        clearInterval(liveTimer);
+        $("#live-title").textContent = r.status === "done" ? "Finished" : r.status === "failed" ? "Failed" : "Finished with problems";
+        $("#live-status").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : "";
+        reached = STAGES.length; render();
+      }
+    } catch (e) { $("#live-status").textContent = e.message; }
+  }, 1200);
+}
+
+// ---------- models ----------
+async function loadModels() {
+  conns = await api("connections");
+  $("#builtins").innerHTML = conns.builtins.map(b => `<code>${b}/…</code>`).join(" ");
+  $("#conn-rows").innerHTML = conns.connections.length ? conns.connections.map(c => `<tr>
+    <td><b>${esc(c.name)}</b><div class="hint">${esc(c.default_model || "")}</div></td><td>${esc(c.provider)}</td>
+    <td class="muted" style="word-break:break-all">${esc(c.base_url || "(default)")}</td>
+    <td>${c.has_key ? '<span class="chip ok">set</span>' : '<span class="chip warn">none</span>'}</td>
+    <td style="white-space:nowrap"><button class="btn small" onclick="editConn('${esc(c.name)}')">Edit</button> <button class="btn small" onclick="delConn('${esc(c.name)}')">×</button></td></tr>`).join("")
+    : `<tr><td colspan="5" class="muted">No saved connections yet. Built-in prefixes still work if their API key is in the environment.</td></tr>`;
+  await refreshProject();
+  const s = projectData.settings;
+  $("#r-solver").value = s.solver_model; $("#r-improver").value = s.improver_model; $("#r-selector").value = s.selector_model; $("#r-judge").value = s.judge_model;
+  $("#s-channel").value = s.improver_channel; $("#s-ssteps").value = s.solver_steps; $("#s-isteps").value = s.improver_steps;
+  $("#s-stime").value = s.solver_timeout; $("#s-itime").value = s.improver_timeout; $("#s-effort").value = s.effort;
+  $("#s-shell").value = String(s.allow_shell); $("#s-subs").value = String(s.allow_subagents);
+  const ids = new Set();
+  conns.connections.forEach(c => { if (c.default_model) ids.add(`${c.name}/${c.default_model}`); });
+  ["openai/gpt-4.1", "anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro", "ollama/qwen3", "mock/mock-1"].forEach(x => ids.add(x));
+  $("#all-models").innerHTML = [...ids].map(i => `<option value="${esc(i)}">`).join("");
+}
+const BASES = {openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com", ollama: "http://localhost:11434/v1", mock: ""};
+$("#cf-provider").onchange = () => { $("#cf-base-hint").textContent = BASES[$("#cf-provider").value] ? "(default " + BASES[$("#cf-provider").value] + ")" : ""; };
+function connForm() {
+  const num = (s) => s.value === "" ? null : +s.value;
+  return {name: $("#cf-name").value.trim(), provider: $("#cf-provider").value, base_url: $("#cf-base").value.trim(), api_key: $("#cf-key").value,
+    api_key_env: $("#cf-keyenv").value.trim(), default_model: $("#cf-model").value.trim(), input_price: +($("#cf-pin").value || 0),
+    output_price: +($("#cf-pout").value || 0), max_tokens: num($("#cf-maxtok")), temperature: null};
+}
+window.editConn = (name) => {
+  const c = conns.connections.find(x => x.name === name); if (!c) return;
+  $("#cf-title").textContent = "Edit " + name;
+  $("#cf-name").value = c.name; $("#cf-provider").value = c.provider; $("#cf-base").value = c.base_url; $("#cf-key").value = c.api_key;
+  $("#cf-keyenv").value = c.api_key_env; $("#cf-model").value = c.default_model; $("#cf-maxtok").value = c.max_tokens ?? "";
+  $("#cf-pin").value = c.input_price || ""; $("#cf-pout").value = c.output_price || ""; $("#cf-provider").onchange();
+};
+window.delConn = async (name) => { if (!confirm("Remove connection " + name + "?")) return; await api("connections/" + encodeURIComponent(name), {method: "DELETE"}); loadModels(); };
+$("#cf-clear").onclick = () => { ["#cf-name", "#cf-base", "#cf-key", "#cf-keyenv", "#cf-model", "#cf-maxtok", "#cf-pin", "#cf-pout"].forEach(s => $(s).value = ""); $("#cf-title").textContent = "Add a connection"; };
+$("#cf-save").onclick = async () => {
+  try { await jpost("connections", connForm()); msg("#cf-msg", "Saved.", true); loadModels(); } catch (e) { msg("#cf-msg", e.message); }
+};
+$("#cf-list").onclick = async () => {
+  const f = connForm(); if (!f.name) return msg("#cf-msg", "Save the connection first.");
+  msg("#cf-msg", "Fetching…", true);
+  try { const r = await api(`connections/${encodeURIComponent(f.name)}/models`); $("#cf-models").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join(""); msg("#cf-msg", `${r.models.length} models available — pick one in “Default model”.`, true); }
+  catch (e) { msg("#cf-msg", e.message); }
+};
+$("#cf-test").onclick = async () => {
+  const f = connForm(); if (!f.name) return msg("#cf-msg", "Save the connection first.");
+  msg("#cf-msg", "Testing…", true);
+  try { const r = await jpost("connections/test", {model: f.name + (f.default_model ? "/" + f.default_model : "")}); msg("#cf-msg", `OK in ${r.ms} ms: “${r.reply.slice(0, 80)}”`, true); }
+  catch (e) { msg("#cf-msg", e.message); }
+};
+function settingsForm() {
+  const s = Object.assign({}, projectData.settings);
+  s.solver_model = $("#r-solver").value.trim(); s.improver_model = $("#r-improver").value.trim() || s.solver_model;
+  s.selector_model = $("#r-selector").value.trim() || s.improver_model; s.judge_model = $("#r-judge").value.trim();
+  s.improver_channel = $("#s-channel").value; s.solver_steps = +$("#s-ssteps").value || 60; s.improver_steps = +$("#s-isteps").value || 80;
+  s.solver_timeout = +$("#s-stime").value || 1800; s.improver_timeout = +$("#s-itime").value || 1800; s.effort = $("#s-effort").value;
+  s.allow_shell = $("#s-shell").value === "true"; s.allow_subagents = $("#s-subs").value === "true";
+  return s;
+}
+$("#r-save").onclick = async () => {
+  try {
+    const s = settingsForm();
+    await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT");
+    await jpost("roles", {solver: s.solver_model, improver: s.improver_model, selector: s.selector_model, judge: s.judge_model}, "PUT");
+    msg("#r-msg", "Saved. New projects start with these defaults too.", true); refreshProject();
+  } catch (e) { msg("#r-msg", e.message); }
+};
+$("#r-test").onclick = async () => {
+  const s = settingsForm(); const out = [];
+  msg("#r-msg", "Testing…", true);
+  for (const [role, m] of [["solver", s.solver_model], ["improver", s.improver_model], ["selector", s.selector_model]]) {
+    if (!m) { out.push(`${role}: not set`); continue; }
+    try { const r = await jpost("connections/test", {model: m}); out.push(`${role} ✓ ${r.ms} ms`); } catch (e) { out.push(`${role} ✗ ${e.message}`); }
+  }
+  msg("#r-msg", out.join("  ·  "), !out.some(x => x.includes("✗") || x.includes("not set")));
+};
+
+// ---------- history ----------
+function stateChip(st) {
+  if (st.running) return '<span class="chip warn">running</span>';
+  if (!st.summary) return '<span class="chip">not run</span>';
+  const s = st.summary.status;
+  return `<span class="chip ${s === "ok" || s === "skipped" ? "ok" : "bad"}">${esc(s)}</span> <span class="muted">k=${st.summary.k} ${esc((st.summary.modes || []).map(m => m === "agg" ? "parallel" : "sequential").join("+"))}</span>`;
+}
+async function loadHistory() {
+  await refreshProject();
+  const g = projectData.goals;
+  $("#goal-list").innerHTML = g.length ? g.map(x => `<div class="goal-item" onclick="openGoal('${esc(x.id)}')">
+    <div class="gtitle">${esc(x.prompt.slice(0, 140))}${x.prompt.length > 140 ? "…" : ""}</div>
+    <div class="hint">${stateChip(x.state)} · ${esc(x.domain)} · ${esc((x.created_at || "").slice(0, 16).replace("T", " "))}</div></div>`).join("")
+    : '<p class="muted">No goals yet. Start one from “Run a goal”.</p>';
+}
+let detail = null, detailTab = {};
+window.openGoal = async (id) => {
+  $("#goal-detail").innerHTML = '<p class="muted">Loading…</p>';
+  try { detail = await api(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(id)}`); renderGoal(); }
+  catch (e) { $("#goal-detail").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+};
+function renderGoal() {
+  const d = detail, t = d.task;
+  let h = `<h2>${esc(t.prompt.slice(0, 200))}</h2><div class="hint">${stateChip(d.state)} · domain ${esc(t.domain)}</div>
+    <div class="actions"><button class="btn small" onclick="rerun()">Run again</button>
+    ${t.rubric ? '<button class="btn small" onclick="judgeIt()">Judge with rubric</button>' : ""}
+    ${d.state.running ? `<button class="btn small" onclick="show('run');watch('${d.state.running}')">Watch live</button>` : ""}<span id="gd-msg"></span></div>`;
+  if (d.judged) h += `<h3>Judge</h3>` + d.judged.map(r => `<div>${esc(r.mode === "agg" ? "parallel" : "sequential")}: ${r.graded ? `<b>${r.n_passed}/${r.n_criteria}</b>` : `<span class="muted">ungraded (${esc(r.error)})</span>`}</div>`).join("");
+  for (const ns of d.namespaces) {
+    for (const [mode, r] of Object.entries(ns.results)) {
+      const key = ns.namespace + mode, tab = detailTab[key] || "output";
+      const sum = ns.summary.modes[mode] || {};
+      h += `<h3>${mode === "agg" ? "Parallel" : "Sequential"} · k=${ns.summary.k} · adopted <code>${esc(r.label || "—")}</code></h3>`;
+      h += `<div class="tabs2">${["output", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
+      if (tab === "output") {
+        const files = Object.entries(r.files || {});
+        h += files.length ? files.map(([n, b]) => `<div class="hint"><b>${esc(n)}</b></div><pre>${esc(b)}</pre>`).join("") : '<p class="muted">No output files.</p>';
+        if (r.run_dir) h += `<div class="hint">Files on disk: <code>${esc(r.run_dir)}/workspace/output</code></div>`;
+        if (r.usage && r.usage.steps) h += `<div class="hint">${r.usage.steps} steps · ${r.usage.input_tokens} in / ${r.usage.output_tokens} out tokens${r.usage.cost_usd ? ` · $${r.usage.cost_usd.toFixed(4)}` : ""}</div>`;
+      } else if (tab === "why") {
+        h += `<div class="kv"><div>Selection</div><div>${esc(r.why || "—")}</div>`;
+        const e = r.experience || {};
+        for (const f of ["cue", "lesson", "evidence", "confidence"]) if (e[f]) h += `<div>${f}</div><div>${esc(e[f])}</div>`;
+        h += `</div>` + (r.edits ? `<h3>What each edit did</h3><pre>${esc(r.edits)}</pre>` : "");
+      } else if (tab === "harness") {
+        const df = r.diff || {}; const changed = [...(df.added || []), ...(df.modified || [])];
+        h += `<div class="hint">Changed vs base: ${changed.length ? changed.map(c => `<code>${esc(c)}</code>`).join(" ") : "nothing (KEEP_BASE)"}${(df.removed || []).length ? " · removed " + df.removed.map(esc).join(", ") : ""}</div>`;
+        for (const [p, b] of Object.entries(r.harness || {})) {
+          if (!b.trim()) continue;
+          const mark = changed.includes(p) ? ' <span class="chip warn">changed</span>' : "";
+          h += `<details ${mark ? "open" : ""}><summary><code>${esc(p)}</code>${mark}</summary><pre>${esc(b)}</pre></details>`;
+        }
+        h += `<div class="actions"><button class="btn small" onclick='adoptBase(${JSON.stringify(JSON.stringify(r.harness))})'>Use as project base harness</button></div>`;
+      } else if (tab === "stages") {
+        h += `<table><thead><tr><th>Stage</th><th>Result</th><th>Notes</th></tr></thead><tbody>` + (sum.stages || []).map(s => `<tr><td><code>${esc(s.label)}</code> <span class="muted">${esc(s.dim)}</span></td>
+          <td>${s.fell_back ? '<span class="chip bad">fell back</span>' : s.kept_base ? '<span class="chip">kept</span>' : '<span class="chip ok">edited</span>'}</td>
+          <td><details><summary>${esc((s.notes || s.error || "").slice(0, 90))}</summary><pre>${esc(s.notes || s.error)}</pre></details></td></tr>`).join("") + `</tbody></table>`;
+      } else {
+        h += `<pre>${esc(r.trajectory || "(none)")}</pre>`;
+      }
+    }
+  }
+  if (!d.namespaces.length) h += '<p class="muted">No results yet.</p>';
+  $("#goal-detail").innerHTML = h;
+}
+window.rerun = async () => {
+  try { const r = await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/rerun`, {k: +$("#g-k").value, mode: $("#g-mode").value}); show("run"); watch(r.run_id); }
+  catch (e) { msg("#gd-msg", e.message); }
+};
+window.judgeIt = async () => {
+  msg("#gd-msg", "Judging…", true);
+  try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/judge`, {}); openGoal(detail.task.id); }
+  catch (e) { msg("#gd-msg", e.message); }
+};
+window.adoptBase = async (s) => {
+  if (!confirm("Replace this project's base harness with the adopted one?")) return;
+  try { await jpost(`projects/${encodeURIComponent(project)}/base`, JSON.parse(s), "PUT"); msg("#gd-msg", "Base harness updated.", true); }
+  catch (e) { msg("#gd-msg", e.message); }
+};
+
+// ---------- harness ----------
+let hSel = null;
+async function loadHarness() {
+  await refreshProject();
+  baseTree = Object.assign({}, projectData.base);
+  renderHarnessFiles(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
+}
+function renderHarnessFiles() {
+  $("#h-files").innerHTML = Object.keys(baseTree).sort().map(p => `<button class="${p === hSel ? "on" : ""}" onclick="selectFile('${esc(p)}')">${esc(p)}</button>`).join("") + `<button onclick="selectFile('')">+ new file</button>`;
+}
+window.selectFile = (p) => { hSel = p; $("#h-path").value = p || ""; $("#h-body").value = p ? baseTree[p] : ""; renderHarnessFiles(); };
+$("#h-apply").onclick = () => { const p = $("#h-path").value.trim(); if (!p) return msg("#h-msg", "Give the file a path."); if (hSel && hSel !== p) delete baseTree[hSel]; baseTree[p] = $("#h-body").value; hSel = p; renderHarnessFiles(); msg("#h-msg", "Applied (not saved yet).", true); };
+$("#h-del").onclick = () => { if (hSel) { delete baseTree[hSel]; hSel = null; renderHarnessFiles(); selectFile(Object.keys(baseTree)[0]); msg("#h-msg", "Removed (not saved yet).", true); } };
+$("#h-save").onclick = async () => {
+  $("#h-apply").onclick();
+  try { const r = await jpost(`projects/${encodeURIComponent(project)}/base`, baseTree, "PUT"); msg("#h-msg", `Saved ${r.files} files.`, true); loadHarness(); }
+  catch (e) { msg("#h-msg", e.message); }
+};
+
+async function loadLibrary() {
+  const r = await api(`projects/${encodeURIComponent(project)}/library`);
+  $("#lib").innerHTML = r.entries.length ? r.entries.map(e => `<h3><code>${esc(e.path)}</code></h3><pre>${esc(e.body)}</pre>`).join("") : '<p class="muted">Empty. The selector adds an entry when a goal yields a lesson that the evidence supports.</p>';
+}
+
+(async () => {
+  try {
+    await loadProjects(); await refreshProject();
+    show(load("h2.view") || "run");
+    const runs = await api("runs");
+    const live = runs.runs.find(r => r.status === "running" && r.project === project);
+    if (live) watch(live.id);
+  } catch (e) { document.body.insertAdjacentHTML("afterbegin", `<p class="err" style="padding:12px">${esc(e.message)}</p>`); }
+})();
+</script>
+</body>
+</html>

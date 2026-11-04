@@ -1,0 +1,98 @@
+{
+ "JOBBENCH_BASE": {
+  "__BenchPrompts__": {
+   "work": "Professional workplace analysis across occupations. The agent receives a mixed workspace of data, documents, databases, reference material and instructions, then produces one or more immediately usable artifacts such as spreadsheets, reports, reconciliations, plans or technical files. Source fidelity, reproducible computation and professional conventions all matter; prose alone is not a substitute for a requested file.",
+   "domain_word": "occupational domain",
+   "deliverable_word": "work product",
+   "inv_levers": "- inventory inputs by format and authority; inspect more than the first obvious file and record how tables, identifiers and versions relate\n- use programmatic extraction and calculation for structured data, preserve intermediate counts and assumptions, and reconcile totals before drafting conclusions\n- turn the request into an output manifest with exact paths, sheets, columns and sections; write viable artifacts early and improve them incrementally\n- reopen every produced file with an independent reader and verify non-empty computed values, formats, formulas, links and cross-file consistency",
+   "dom_levers": "- encode the occupation's decision procedure, source hierarchy, calculation method, standard deliverable structure and quality-control checks—not a task's names or numbers\n- distinguish authoritative inputs from derived data and resolve conflicting sources explicitly\n- verify standards, regulations, formulas and current reference values from supplied material or an authorised source; expose uncertainty when verification is unavailable\n- make every recommendation traceable to a calculation, source location or stated professional rule",
+   "yardstick": "Did the run discover the full workspace, establish source-of-truth relationships, perform calculations reproducibly, satisfy the requested schemas and filenames, preserve traceability, and reopen the final files rather than trusting that a write succeeded?",
+   "selection_checks": "Prefer the work product that delivers every requested artifact and schema; uses all material sources with an explicit hierarchy; shows reproducible calculations and denominators; preserves identifiers, units, dates and formulas; supports claims with source locations; and can be used or imported directly without filling blanks or repairing file structure.",
+   "selection_lead": "COVERAGE OF WHAT WAS NAMED. Count what the instructions explicitly ask to be produced, computed, stated or explained, and pick the candidate that answers the most of those points. A specific value, threshold, category or name that the source supports is worth more than a careful statement that the information was unavailable, and material beyond what was asked costs nothing here -- an omitted requirement is the failure that matters. Verify specifics against `context/source/` and reject the ones it contradicts, but do not prefer vagueness merely because a specific is hard to confirm.",
+   "selection_conformance": "value_only",
+   "prompt_pack": "tts"
+  }
+ },
+ "JOBBENCH_DOMAINS": {
+  "Business / Financial Ops": "DOMAIN LENS — BUSINESS / FINANCIAL OPERATIONS. Begin with reconciliation and definitions, then apply the supplied policy, regulatory or decision rules. Show denominators, periods, units, threshold logic and sensitivity; keep recommendations distinct from computed facts.",
+  "Other (Legal·Sales·Sci·Edu)": "DOMAIN LENS — LEGAL / SALES / SCIENCE / EDUCATION. This grouping is heterogeneous, so the profession overlay controls. In every case identify the governing framework, exact output convention and source hierarchy before applying a legal, commercial or academic method.",
+  "Office / Admin Support": "DOMAIN LENS — OFFICE / ADMINISTRATIVE SUPPORT. Preserve systems of record, exact strings, templates and formulas. Resolve duplicate entities and conflicting records through an explicit precedence rule, then produce an audit trail that another operator can follow.",
+  "Computer / Mathematical": "DOMAIN LENS — COMPUTER / MATHEMATICAL. Define the population, variables, interfaces or system boundary precisely. Use executable calculations or diagnostics, test assumptions and edge cases, and report enough intermediate evidence for the result to be reproduced.",
+  "Architecture / Engineering": "DOMAIN LENS — ARCHITECTURE / ENGINEERING. Track units, geometry, sign conventions, operating conditions, safety factors and governing standards. Use the exact supplied method and reference data, show intermediate calculations and perform independent magnitude and compliance checks.",
+  "Management": "DOMAIN LENS — MANAGEMENT. Reconcile operational and financial baselines before comparing options. Make capacity, cost, risk, dependency and time-horizon assumptions explicit; connect recommendations to quantified evidence and an implementable owner or next step.",
+  "Arts / Media": "DOMAIN LENS — ARTS / MEDIA. Synthesize disparate source material without changing its meaning, respect the supplied style or production constraints, separate public-facing content from internal notes, and preserve source attribution and transformation traceability."
+ },
+ "JOBBENCH_PROFESSIONS": {
+  "biostatisticians": "PROFESSION LENS — Define cohort, endpoint and denominator; handle missingness, subgroup size, assumptions and sensitivity; make statistical work reproducible and cite supplied guidance precisely.",
+  "bookkeeping_accounting_and_auditing_clerks": "PROFESSION LENS — Preserve ledger identity, period and account treatment; reconcile source transactions to control totals; expose unmatched items and keep formulas intact.",
+  "civil_engineers": "PROFESSION LENS — Preserve geometry, units and item definitions; use supplied design or cost standards; show corrections, quantities, assumptions and safety or constructability checks.",
+  "computer_and_information_research_scientists": "PROFESSION LENS — State experimental or model assumptions, data lineage and comparison baselines; use reproducible code and distinguish measured behavior from interpretation.",
+  "computer_and_information_systems_managers": "PROFESSION LENS — Map systems, ownership, dependencies, controls, incidents and cost horizons; reconcile inventories before making governance or investment recommendations.",
+  "computer_user_support_specialists": "PROFESSION LENS — Reproduce the symptom, establish environment and scope, follow evidence through logs and configuration, give safe ordered remediation and verify the result.",
+  "court_clerks": "PROFESSION LENS — Preserve case identity, dates, status vocabulary, fee or filing rules and record provenance; use exact schemas and flag unresolved conflicts rather than silently normalising them.",
+  "customer_service_representatives": "PROFESSION LENS — Reconstruct the customer timeline and account state, apply supplied policy consistently, quantify usage or charges, and provide an actionable resolution with required notices.",
+  "data_entry_keyers": "PROFESSION LENS — Apply an explicit source precedence, validate codes and required fields, resolve duplicates and retain an exception log for every value that cannot be reconciled safely.",
+  "financial_managers_branch_or_department": "PROFESSION LENS — Reconcile balances and classifications, calculate ratios from explicit periods and denominators, compare with supplied references and separate observed deterioration from forecast risk.",
+  "human_resources_specialists": "PROFESSION LENS — Apply policy and thresholds consistently across people, preserve privacy, distinguish eligibility from recommendation and document the evidence behind every classification.",
+  "lawyers": "PROFESSION LENS — Fix jurisdiction, date, issue and authority hierarchy; state the governing rule, apply it to sourced facts, address counterarguments and produce practical advice rather than an abstract survey.",
+  "licensing_examiners_and_inspectors": "PROFESSION LENS — Verify entity identity, eligibility, duplicates, required documents and exceptions against the supplied rules; preserve a review trail and route ambiguous cases rather than guessing.",
+  "management_analysts": "PROFESSION LENS — Establish a clean operational baseline, reconcile sources, define each metric and comparison group, test constraints and turn findings into quantified implementable actions.",
+  "mechanical_engineering_technicians": "PROFESSION LENS — Preserve signal units, sampling conditions and equipment geometry; compute diagnostic frequencies or limits from supplied parameters and distinguish symptom from root cause.",
+  "mechanical_engineers": "PROFESSION LENS — Apply the supplied design method under the correct geometry, material and operating conditions; show lookup provenance, intermediate factors, units and independent safety checks.",
+  "medical_and_health_services_managers": "PROFESSION LENS — Reconcile service, payer, staffing and financial definitions; protect sensitive information, apply supplied reimbursement or policy rules and show operational consequences.",
+  "medical_secretaries": "PROFESSION LENS — Preserve patient identity, laterality, dates, authorisation and code specificity; apply privacy and routing rules, retain exact required language and escalate unsafe ambiguity.",
+  "online_merchants": "PROFESSION LENS — Reconcile catalog and transaction data, define ranking and exclusion logic, preserve platform-compatible formatting and connect merchandising actions to measured evidence.",
+  "personal_financial_advisors": "PROFESSION LENS — Reconcile holdings and account types first; make tax, timing and risk assumptions explicit; run scenario calculations and avoid applying a strategy where the account structure defeats it.",
+  "petroleum_engineers": "PROFESSION LENS — Normalise well identifiers and time series, preserve units and operating context, fit the appropriate supplied physical model and report parameter uncertainty and forecast limitations.",
+  "police_fire_and_ambulance_dispatchers": "PROFESSION LENS — Reconstruct incident chronology and resource state, apply the supplied triage and dispatch protocol exactly, preserve canonical incident terms and make safety-critical conflicts explicit.",
+  "producers": "PROFESSION LENS — Reconcile budget, schedule, labour and production constraints; distinguish committed from conditional resources and validate that the plan satisfies every timing and rest requirement.",
+  "purchasing_agents_except_wholesale_retail_and_farm_products": "PROFESSION LENS — Normalise quantities and specifications, calculate fully loaded cost including conditional freight or installation, test compliance and document award trade-offs.",
+  "reporters_and_correspondents": "PROFESSION LENS — Build a source log, reconcile conflicting datasets, distinguish observation from allegation or inference, quantify carefully and preserve publication-ready attribution.",
+  "sales_agents_securities_and_commodities": "PROFESSION LENS — Reconcile trades, accounts, fees and reversals bidirectionally; apply supplied suitability and compliance rules with exact thresholds and retain an exception trail.",
+  "sales_representatives_wholesale_and_manufacturing_technical_and_scientific_products": "PROFESSION LENS — Match customer requirements to verified product specifications, calculate lifecycle economics on comparable assumptions and separate documented capability from sales inference.",
+  "secretaries_and_administrative_assistants_except_legal_medical_and_executive": "PROFESSION LENS — Preserve directive precedence, calendars, identities and exact template language; reconcile records, protect sensitive data and produce an operational handoff with unresolved items visible.",
+  "social_science_research_assistants": "PROFESSION LENS — Define variables and populations, harmonise identifiers and coding, document imputation or exclusions, run reproducible analysis and separate association from causal claim.",
+  "sociology_teachers_postsecondary": "PROFESSION LENS — Apply the supplied syllabus and weighting rules exactly, preserve transparent calculations, identify intervention cases consistently and write feedback grounded in the submitted work.",
+  "statisticians": "PROFESSION LENS — Define estimand, population and denominator; inspect distributions and missingness, use the appropriate model, validate assumptions and provide reproducible tables with uncertainty.",
+  "supply_chain_managers": "PROFESSION LENS — Reconcile demand, inventory, capacity, lanes and time periods; model physical constraints and cost scenarios, expose cross-shipping or bottlenecks and assign practical next steps.",
+  "technical_writers": "PROFESSION LENS — Reconcile source, examples, configuration and observed behavior; preserve exact interface names, remove internal-only noise, follow the supplied style and make transformation decisions traceable.",
+  "training_and_development_specialists": "PROFESSION LENS — Map audience, competency, risk and learning objective; align content, assessment and follow-up measures, apply supplied policy and make the deliverable executable by facilitators.",
+  "web_administrators": "PROFESSION LENS — Establish topology, configuration source of truth and failure timeline; validate changes safely, preserve rollback instructions and connect recommendations to logs and observable system behavior."
+ },
+ "_INSTALL_MODE": {
+  "oc": "workspace_agents_md",
+  "cx": "codex_root"
+ },
+ "_DEFAULT_TIMEOUT": {
+  "oc": 2400,
+  "cx": 3600
+ },
+ "_MAX_CHARS_PER_FILE": 200000,
+ "_VISION_EXTS": [
+  "gif",
+  "jpeg",
+  "jpg",
+  "png",
+  "webp"
+ ],
+ "_MAX_VISION": 8,
+ "_EXTRACT_DRIVER": "import importlib.util, json, sys\nfrom pathlib import Path\n\njudge_py, run_dir = sys.argv[1], Path(sys.argv[2])\nspec = importlib.util.spec_from_file_location(\"_jb_judge_extractor\", judge_py)\nmod = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(mod)\nfiles = {}\nfor f in sorted(p for p in run_dir.rglob(\"*\") if p.is_file()):\n    rel = str(f.relative_to(run_dir))\n    try:\n        files[rel] = str(mod.convert_file_to_text(f))\n    except Exception as exc:                       # per-file tool failure, recorded in place\n        files[rel] = f\"(extraction failed: {type(exc).__name__}: {exc})\"\nprint(json.dumps({\n    \"files\": files,\n    \"flat\": str(mod.extract_all_file_contents(run_dir)),\n    \"images\": [str(p) for p in mod.collect_image_paths(run_dir)],\n}))\n",
+ "_EXTRACT_CACHE": {},
+ "_JUDGE_FAILURE_PREFIXES": [
+  "opus judge failed",
+  "failed after",
+  "failed to get judge response",
+  "judge raised an exception:"
+ ],
+ "__all__": [
+  "JobBenchAdapter",
+  "make_spec",
+  "jobbench_prompts",
+  "compose_agent_body",
+  "render_opencode_tree",
+  "OC_RUNNER",
+  "CX_RUNNER",
+  "OC_BASE_HARNESS",
+  "CX_BASE_HARNESS"
+ ]
+}

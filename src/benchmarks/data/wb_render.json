@@ -1,0 +1,52 @@
+{
+ "ALLOWLIST": {
+  "office": [
+   "verifier/raw_artifacts/**",
+   "verifier/agent.patch"
+  ],
+  "web": [
+   "verifier/agent.workspace.tar.gz"
+  ],
+  "code": [
+   "verifier/agent.patch"
+  ],
+  "sec": [
+   "artifacts/logs/artifacts/**"
+  ]
+ },
+ "FORBIDDEN": [
+  "verifier/artifact_text/**",
+  "verifier/artifact_manifest.json",
+  "verifier/evaluator_artifact_manifest.json",
+  "verifier/score.json",
+  "verifier/reward.json",
+  "verifier/reward.txt",
+  "verifier/results.xml",
+  "verifier/test_output.txt",
+  "verifier/eval_result.json",
+  "verifier/evidence/**",
+  "verifier/judge_evidence/**"
+ ],
+ "_PROVENANCE_HEAD": [
+  "verifier-owned",
+  "verifier-extracted",
+  "verifier-generated",
+  "for the judge",
+  "judge rubric",
+  "judge modality",
+  "deterministic verifier status"
+ ],
+ "_PROVENANCE_HEAD_CHARS": 4000,
+ "_VERDICT_ANY": [
+  "deterministic checks:",
+  "pass_rate",
+  "passed_count",
+  "failed_checks",
+  "test_pass_rate"
+ ],
+ "_PROVENANCE_NAME_PREFIXES": [
+  "judge_evidence"
+ ],
+ "_XLSX_NO_CACHE": "(no cached value; a data_only reader sees this cell as EMPTY)",
+ "_HAVE": {}
+}

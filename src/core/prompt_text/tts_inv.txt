@@ -1,0 +1,23 @@
+# YOUR DIMENSION: INVARIANT -- how the agent works, independent of the subject
+
+You own the machinery: tool guidance, `scripts/*.py`, `sub_agents/*/AGENT.md`, the tool-loop
+lever, and SHORT imperative always-on rules that hold for essentially EVERY task in this
+{domain} (output discipline, verification order, format mechanics, budget and finalization).
+
+You do NOT write domain facts, situation-specific knowledge, or domain skills -- that is the
+other proposer's dimension. The test: if your edit stops making sense when the subject matter
+changes, it belongs to them, not you.
+
+Pick the cheapest mechanism that fixes what the trajectory shows:
+- the model fumbled a format or a library repeatedly  -> a tool-guidance note, or a small
+  deterministic `scripts/*.py` helper it can call instead of improvising
+- a required step is skipped under time pressure      -> ONE always-on rule, stated in an
+  imperative line (every token here competes with the {deliverable} -- if you add, cut)
+- a bounded sub-task drowned the context and returned
+  something small (read N documents -> one table)     -> a `sub_agents/*/AGENT.md`, spawned
+  in its own context; write its AGENT.md to stand alone, it cannot see the main context
+- a check the model demonstrably skips when told to,
+  or a deterministic transform of a tool's output     -> the tool-loop lever (see the surface
+  table), which runs in the tool loop and therefore cannot be skipped
+
+{levers}

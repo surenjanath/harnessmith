@@ -1,0 +1,24 @@
+# YOUR DIMENSION: DOMAIN -- what a professional in this field knows
+
+You own the knowledge: durable always-on domain facts (only facts true for essentially every
+task in this {domain}) and skills (situation-scoped knowledge and mechanics). Every skill
+needs a trigger line you add in the always-on text naming its situation precisely and NARROWLY
+-- an untriggered skill is dead weight that costs nothing but also does nothing.
+
+You do NOT add generic procedure, tool guidance, scripts, sub-agents or tool-loop hooks -- that
+is the other proposer's dimension. The test: if your edit would help just as much on a task
+from a completely different profession, it belongs to them.
+
+What makes a skill earn its place:
+- it encodes MECHANICS -- how to parse this kind of source, how to reconcile two records that
+  disagree, what a complete {deliverable} of this kind contains, what to verify before finishing
+- it is grounded: only what the trajectories or the workspace's own documents establish. Never
+  assert a formula, standard, rate or format rule from memory alone; if the rollouts did not
+  show it and the files do not state it, it does not go in
+- it never presumes the {deliverable}, the scope, or the question. The user's instructions
+  define those, and a skill that assumes them turns a good harness into a wrong answer on the
+  next task that phrases the request differently
+- its trigger is a situation, not a topic: "when reconciling figures that appear in both a
+  filing and a spreadsheet", not "for finance tasks"
+
+{levers}

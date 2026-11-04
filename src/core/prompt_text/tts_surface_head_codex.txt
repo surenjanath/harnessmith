@@ -1,0 +1,46 @@
+# EDITABLE HARNESS SURFACE
+
+You may write ONLY these paths. Anything else is off the editable surface: it is dropped before
+your work is used, however good it is.
+
+| path | component | when it is in context |
+|---|---|---|
+| `AGENTS.md` | c1/c3/c4/c6 persona, rules, durable facts, tool prose | ALWAYS ON -- the ONLY always-on file, injected whole into EVERY turn |
+| `.agents/skills/<name>/SKILL.md` | c6 reusable workflow | name+description advertised; the BODY is read ON DEMAND |
+| `.agents/skills/<name>/scripts/*` | helper carried with its skill | run via Bash |
+| `sub_agents/<name>/AGENT.md` | c5 delegated agent role | spawned in its OWN context, returns text |
+| `scripts/<name>.py` | c7 deterministic helper | run ON DEMAND via Bash as `python scripts/<name>.py` |
+| `.codex/hooks.json` | c8 lifecycle hooks | fire INSIDE the tool loop, on every matching tool call |
+
+## The two on-demand levers that are easy to get wrong
+
+`sub_agents/<name>/AGENT.md` -- frontmatter needs a `description:`; the runner installs each as
+a named agent role, spawned in a SEPARATE context. It sees only what its own file and the spawn
+instruction say, never the main conversation, and it returns text. Worth it for exactly one
+shape of problem -- a bounded sub-task whose inputs are large and whose ANSWER is small. A bad
+trade when the output is as big as the input -- and where spawning is unavailable, do not
+write one.
+
+`.codex/hooks.json` -- ONE JSON file, Claude-Code hook schema: a top-level "hooks" object maps
+an event (`PreToolUse`, `PostToolUse`, `SessionStart`) to matcher entries -- a "matcher" such
+as "Bash" plus a "hooks" list of "command"-type entries. Each hook is a shell command receiving
+the event as JSON on stdin; a `PostToolUse` command printing a JSON "decision" of "block" with
+a "reason" sends that reason back to the model. Unlike everything else here it acts in the tool
+loop rather than in the prompt, which is the only way to enforce something the model cannot
+skip. Keep commands fast and non-interactive; put real logic in a `scripts/` helper the hook
+calls.
+
+Both levers are rare in the harnesses adopted so far. Read that as a gap in what has been tried,
+not as a verdict -- but still add one only where a trajectory shows the failure it would fix.
+
+Hard rules, each one learned from a previous failure:
+- The single most common failure of this harness family is producing NO deliverable because the
+  model exhausted its output budget on reasoning. Always-on prose makes that WORSE. Prefer an
+  on-demand skill over new always-on prose; if you add always-on text, cut something else --
+  `AGENTS.md` is hard-capped, and NEVER left empty: it is the only always-on file, so an empty
+  one is a harness that does not exist.
+- A skill's literal directory name must appear in `AGENTS.md` as a trigger, or the skill is
+  never opened. Scripts run via Bash.
+- `scripts/*.py` filenames must be snake_case and must compile under py_compile.
+- Never write `harness.yaml` or other runtime-owned files: they are not on the editable
+  surface.

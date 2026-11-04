@@ -1,0 +1,2 @@
+7. VALUES ARE VALUES. A value the request asks for must be PRESENT AS A VALUE. An artifact that leaves the reader to recompute it -- a spreadsheet formula in place of the number, a placeholder to be filled, a described-but-not-performed calculation -- has not delivered that value.
+

@@ -1,0 +1,99 @@
+{
+ "_BASE_DONE": [],
+ "LAB_BASE": {
+  "__BenchPrompts__": {
+   "work": "Professional legal work for a supervising lawyer: analysing matter records, reviewing and drafting instruments, and preparing research or advice in the exact files requested. The source documents and instructions control. The result must be matter-ready: complete, internally consistent, traceable to the record, and usable by another lawyer without repair.",
+   "domain_word": "practice area",
+   "deliverable_word": "legal deliverable",
+   "inv_levers": "- inventory the matter files before choosing a reading order; map each requested output and issue to the sources likely to control it\n- use the environment's documented binary-document extraction path, preserve pinpoint locations, and distinguish unread material from material that says nothing\n- establish an output plan early, write every exact requested filename before the budget is at risk, then reopen each artifact and check that it parses\n- reconcile names, dates, amounts, defined terms and cross-document conflicts with a recorded source hierarchy instead of silently choosing one version",
+   "dom_levers": "- identify the correct legal work product and the audience-dependent structure it needs\n- separate source text, matter fact, legal inference, risk assessment and recommendation; do not present one as another\n- test parties, authority, jurisdiction, effective dates, conditions, exceptions, timing, remedies, definitions and cross-references where they matter to the assignment\n- verify authorities and jurisdiction-sensitive propositions from available primary material or an authorised research path; never manufacture a citation or rule",
+   "yardstick": "Did the run identify the controlling matter record, perform the legal operation the instructions called for, preserve traceability for important propositions, produce every named file in usable form, and inspect the finished artifact before stopping?",
+   "selection_checks": "Prefer the work product that uses the correct instrument or memo form; covers every requested issue and output; states matter facts, calculations and quoted provisions consistently with the supplied record; distinguishes uncertainty from conclusion; gives actionable analysis rather than document summary; and is internally coherent enough for a lawyer to review rather than reconstruct."
+  }
+ },
+ "LAB_WORK_TYPES": {
+  "analyze": "WORK TYPE — ANALYSE. Build an issue inventory before writing. For each material issue, connect the governing source language and facts to the consequence, severity or decision, then state a practical recommendation. Reconcile related documents and calculations; a long summary that never performs the requested analysis is not complete.",
+  "review": "WORK TYPE — REVIEW. Establish the baseline document and the proposed or competing text. Identify each consequential change or defect, explain its legal and operational effect, and recommend accept, reject or revise with precise replacement language when requested. Preserve the requested markup, comparison and output conventions.",
+  "draft": "WORK TYPE — DRAFT. Confirm the correct instrument, parties, authority and intended legal effect before drafting. Check definitions, operative provisions, conditions, exceptions, dates, remedies, exhibits, cross-references, signature blocks and execution formalities as applicable. Every clause must fit the matter rather than read like generic filler.",
+  "research": "WORK TYPE — RESEARCH. Define the question, jurisdiction, relevant date and source hierarchy first. Prefer primary authority, verify currency through the available research path, distinguish binding from persuasive material, apply the authorities to the matter facts, and expose contrary authority, gaps and assumptions."
+ },
+ "LAB_PRACTICE_AREAS": {
+  "antitrust-competition": "PRACTICE LENS — ANTITRUST / COMPETITION. Define the relevant conduct, parties, market and jurisdictions before applying any framework. Track filing or process timing, theories of harm, evidence for market power and practical remedy or clearance implications separately.",
+  "arbitration-international-dispute-resolution": "PRACTICE LENS — ARBITRATION. Keep the arbitration agreement, governing law, seat, rules, tribunal authority, procedural timetable and enforcement posture distinct. Tie every procedural recommendation to the controlling instrument or rule supplied for the matter.",
+  "banking-finance": "PRACTICE LENS — BANKING / FINANCE. Map parties, facilities, commitments, conditions, security, priority, covenants, representations, draw mechanics, payment terms, defaults and remedies. Reconcile defined terms and amounts across the full document set.",
+  "bankruptcy-restructuring": "PRACTICE LENS — RESTRUCTURING. Track the entity, claim or contract, procedural posture, priority, collateral, stay or avoidance implications, deadlines and required approvals. Separate legal entitlement from likely recovery and implementation risk.",
+  "capital-markets": "PRACTICE LENS — CAPITAL MARKETS. Reconcile issuer, security, offering structure, disclosure, eligibility, approvals, closing conditions and distribution restrictions. Check that risk factors and disclosure are specific to the supplied facts and consistent across documents.",
+  "contracts": "PRACTICE LENS — CONTRACTS. Build a clause map covering parties, scope, obligations, pricing, conditions, change control, term, termination, liability, indemnity, confidentiality, assignment, notices and dispute terms as relevant. Follow definitions and exceptions before stating an obligation or remedy.",
+  "corporate-governance": "PRACTICE LENS — CORPORATE GOVERNANCE. Confirm entity type, governing documents, decision-making body, authority, quorum, voting threshold, conflicts, approvals, records and filing steps. Do not assign an act to a board, holder or officer without checking authority.",
+  "corporate-ma": "PRACTICE LENS — M&A. Connect diligence findings to transaction mechanics: parties, structure, signing and closing sequence, approvals, consents, conditions, covenants, purchase-price effects, risk allocation and post-closing obligations. Quantify exposure from the record.",
+  "data-privacy-cybersecurity": "PRACTICE LENS — PRIVACY / CYBERSECURITY. Map data, actors, systems, jurisdictions, purpose, authority, transfer, retention, security controls and incident duties. Separate contractual, regulatory and operational requirements and avoid asserting a regime without confirming scope.",
+  "diligence": "PRACTICE LENS — DILIGENCE. Use a complete document and issue inventory, record what was and was not reviewed, trace findings to exact sources, distinguish absence of evidence from a clean finding, rank materiality consistently and connect each risk to a next action.",
+  "emerging-companies-venture-capital": "PRACTICE LENS — EMERGING COMPANIES / VENTURE. Reconcile charter, capitalization, securities, investor rights, board and holder approvals, vesting, protective provisions and financing documents. Test economics and governance together rather than reviewing forms in isolation.",
+  "employment-labor": "PRACTICE LENS — EMPLOYMENT / LABOR. Identify worker population, jurisdiction, status, policy and timeline. Separate contractual promises, statutory duties and company practice; handle protected information carefully and make recommendations operationally implementable.",
+  "energy-natural-resources": "PRACTICE LENS — ENERGY / NATURAL RESOURCES. Map assets, rights, operators, jurisdictions, permits, production or supply obligations, environmental duties, pricing, measurement, transport and decommissioning risk. Reconcile technical schedules with operative terms.",
+  "environmental-esg": "PRACTICE LENS — ENVIRONMENTAL / ESG. Identify facility or activity, jurisdiction, permit or standard, reporting period, source data and responsible party. Distinguish legal compliance, contractual allocation and voluntary representation; verify metrics and boundaries.",
+  "funds-asset-management": "PRACTICE LENS — FUNDS / ASSET MANAGEMENT. Reconcile vehicle, manager, investors, mandate, economics, allocations, conflicts, valuation, liquidity, governance, side arrangements and reporting. Test consistency across governing and subscription materials.",
+  "healthcare-life-sciences": "PRACTICE LENS — HEALTHCARE / LIFE SCIENCES. Identify product or service, actors, data, jurisdiction, approval or reimbursement pathway, promotional or research limits and patient impact. Verify specialised requirements from supplied or authorised sources.",
+  "immigration": "PRACTICE LENS — IMMIGRATION. Build a person-specific chronology and status record, identify the requested classification or benefit, eligibility, documentary proof, filing sequence, dependencies and deadlines. Never fill an evidentiary gap with assumption.",
+  "insurance": "PRACTICE LENS — INSURANCE. Map insured, policy, period, coverage grant, definitions, limits, retentions, conditions, exclusions, endorsements, notice and claimed loss. Analyse coverage and factual causation separately before stating the likely outcome.",
+  "intellectual-property": "PRACTICE LENS — INTELLECTUAL PROPERTY. Identify the asset, ownership chain, scope, territory, term, registration or evidence, licences, restrictions, improvements, enforcement and third-party rights. Keep different IP regimes and chain-of-title questions distinct.",
+  "international-trade-sanctions": "PRACTICE LENS — TRADE / SANCTIONS. Establish parties, ownership and control, goods or services, route, jurisdictions, relevant date, licences and end use. Verify current restrictions from authorised sources and state screening assumptions rather than guessing.",
+  "litigation-dispute-resolution": "PRACTICE LENS — LITIGATION. Build claims, elements, defenses, burden, evidence and procedural posture from the record. Maintain a reliable chronology and citation trail; connect each factual proposition to proof and each requested action to the applicable procedure.",
+  "real-estate": "PRACTICE LENS — REAL ESTATE. Reconcile parties, property description, title, interests, diligence, financing, conditions, adjustments, closing, possession, use restrictions and post-closing duties. Confirm dates and defined property across every instrument.",
+  "structured-finance-securitization": "PRACTICE LENS — STRUCTURED FINANCE. Map assets, originator, transfer chain, vehicle, waterfall, credit support, triggers, eligibility, servicing, representations and reporting. Reconcile defined calculations and priority rules across transaction documents.",
+  "tax": "PRACTICE LENS — TAX. Fix taxpayer, entity, jurisdiction, transaction, tax period and factual assumptions first. Show computational steps, distinguish character, timing and reporting, and verify current law or rates from authorised materials instead of memory.",
+  "trusts-estates-private-client": "PRACTICE LENS — TRUSTS / ESTATES / PRIVATE CLIENT. Map family and fiduciary relationships, assets, governing instruments, capacity, authority, dispositive plan, conditions, tax and administration. Check names, shares, contingencies and execution formalities carefully.",
+  "white-collar-defense-investigations": "PRACTICE LENS — INVESTIGATIONS. Define scope, custodians, chronology, evidence provenance, legal theories, privilege, preservation and reporting audience. Separate established fact, conflicting evidence and inference; protect the integrity of the investigation record."
+ },
+ "CODEX_BASE_BODY": "You are an AI agent completing a professional work assignment inside a workspace.\nThe assignment message gives the absolute paths that apply to this run.\n\n## Workspace layout\n\n- `documents/` -- the assignment's source documents (the data room). Treat it as\n  read-only: never modify, move, or delete anything under it.\n- `output/` -- the deliverable directory. Every deliverable must be written to\n  `output/<filename>` explicitly (or to its absolute path). Files left anywhere\n  else are not part of the delivered work.\n- `scripts/` -- helper scripts, run as `python3 scripts/<name>.py`.\n\n## Reading documents\n\n`.docx`, `.pdf`, `.pptx`, and `.xlsx` files are binary. To read one, run\n\n    python3 scripts/read_doc.py <path>\n\nwhich prints the extracted text. Plain text, markdown, and code files can be read\ndirectly with shell tools such as `cat`.\n\n## Doing the work\n\n- Produce exactly the deliverable files the assignment names, with the exact\n  filenames it asks for.\n- Build binary deliverables (.docx/.xlsx/.pptx) programmatically with Python,\n  then verify each produced file is non-empty and re-opens cleanly (for example\n  by reading it back with `python3 scripts/read_doc.py`) before finishing.\n- Ground the work in `documents/`: keep every figure, name, and claim traceable\n  to a source document, and say so explicitly where the record is silent.\n",
+ "_EXTRACT_SRC": "\nimport json, sys\nfrom pathlib import Path\n\n# Imported at driver top, not inside extract(): a reader that cannot be imported at all\n# must exit non-zero here so deliverable_files raises, rather than degrading per file.\nfrom evaluation.scoring import _read_file_as_text\n\nTEXT_SUFFIXES = {\".md\", \".txt\", \".csv\", \".json\", \".xml\", \".html\", \".py\",\n                 \".yaml\", \".yml\", \".tsv\"}\n# The LAB judge's _read_file_as_text reads the WHOLE file, so a capped improver/selector\n# view can be blinded to content the judge grades. CAP=0 means uncapped; the caller passes\n# the cap (config.LAB_DELIV_CAP, fixed at 60_000).\nCAP = int(sys.argv[2]) if len(sys.argv) > 2 else 0\n\ndef extract(p):\n    try:\n        return _read_file_as_text(p)\n    except Exception:                          # per-FILE fallback only; a missing reader is\n        if p.suffix.lower() in TEXT_SUFFIXES:  # a hard, visible failure at import above\n            try:\n                return p.read_text(encoding=\"utf-8\", errors=\"replace\")\n            except OSError as exc:\n                return f\"(error reading {p.name}: {exc})\"\n        return f\"(binary file: {p.name}, {p.stat().st_size} bytes)\"\n\nbase = Path(sys.argv[1])\nout = {}\nif base.is_dir():\n    for p in sorted(q for q in base.rglob(\"*\") if q.is_file()):\n        text = extract(p)\n        if CAP and len(text) > CAP:\n            text = text[:CAP] + f\"\\n\\n... [truncated, {len(text) - CAP} more chars]\"\n        out[p.relative_to(base).as_posix()] = text\njson.dump(out, sys.stdout)\n",
+ "_BASE_BODY_SRC": "\nimport sys\nfrom harness.run import DEFAULT_SKILLS\nfrom opencode.render import compose_prompt, ENV_DELTA\nbody = compose_prompt(list(DEFAULT_SKILLS), skill_mode=sys.argv[1])\ndelta = ENV_DELTA.rstrip()\nif delta and body.rstrip().endswith(delta):\n    body = body.rstrip()[: -len(delta)].rstrip() + \"\\n\"\nsys.stdout.write(body)\n",
+ "_RENDER_CHECK_SRC": "\nimport json, sys, tempfile\nfrom pathlib import Path\ntry:\n    from opencode.render import render_tree\n    with tempfile.TemporaryDirectory() as td:\n        rendered = render_tree(Path(td) / \"ws\", sys.argv[1], skill_mode=sys.argv[2])\n    missing = [m for m in (\"output/\", \"read_doc.py\") if m not in rendered.prompt]\n    print(json.dumps({\"ok\": not missing, \"missing\": missing, \"error\": \"\"}))\nexcept Exception as exc:\n    print(json.dumps({\"ok\": False, \"missing\": [],\n                      \"error\": f\"{type(exc).__name__}: {exc}\"}))\n",
+ "_JUDGE_KEYS": [
+  [
+   [
+    "vertex/"
+   ],
+   []
+  ],
+  [
+   [
+    "claude"
+   ],
+   [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"
+   ]
+  ],
+  [
+   [
+    "gemini"
+   ],
+   [
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY"
+   ]
+  ],
+  [
+   [
+    "gpt",
+    "o1",
+    "o3",
+    "o4",
+    "o5"
+   ],
+   [
+    "OPENAI_API_KEY"
+   ]
+  ]
+ ],
+ "__all__": [
+  "LabAdapter",
+  "lab_spec",
+  "lab_prompts",
+  "LAB_BASE",
+  "CODEX_BASE_BODY",
+  "JUDGE_MODEL"
+ ]
+}

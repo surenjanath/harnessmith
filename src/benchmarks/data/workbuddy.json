@@ -1,0 +1,87 @@
+{
+ "SUBSTRATES": [
+  "oc",
+  "cx"
+ ],
+ "_BASE_DONE": [],
+ "TRAJ_MAX_CHARS": 2000000,
+ "_HARBOR_NAME_MAX": 32,
+ "WORKBUDDY_BASES": {
+  "code": {
+   "__BenchPrompts__": {
+    "work": "Software maintenance in a real repository from a concise user request. The work product is a focused repository change, not an explanatory document. Surrounding code, public interfaces and the repository's own test suite are the available specification; preserve compatible behavior outside the requested change.",
+    "domain_word": "role",
+    "deliverable_word": "repository change",
+    "inv_levers": "- translate terse instructions, including non-English requests, into observable behavior before editing\n- reproduce or localise the behavior, read neighboring code and tests, then make the smallest idiomatic change\n- run the narrowest relevant repository tests after the edit and a broader compatible check when affordable\n- inspect the final diff for accidental files, API drift, generated noise and unfinished diagnostics",
+    "dom_levers": "- encode reusable mechanics for the role or change family: tracing control flow, preserving error contracts, testing data transformations, reviewing configuration or validating an API\n- learn conventions from the repository in front of the agent rather than asserting a library API from memory\n- preserve public names, error shapes, ordering, determinism and edge-case behavior implied by adjacent code",
+    "yardstick": "Did it understand the requested observable behavior, locate the responsible code, reproduce or test the issue, keep the change scoped and idiomatic, run meaningful checks and review the diff?",
+    "selection_checks": "Prefer the change that directly satisfies the request, follows local design and style, preserves unrelated public behavior and error contracts, includes or updates appropriate tests when the request warrants them, avoids broad rewrites, and contains no generated or unfinished debris."
+   }
+  },
+  "web": {
+   "__BenchPrompts__": {
+    "work": "Building or repairing a self-contained web artifact from supplied assets and requirements. The delivered package must load in the stated environment and communicate through its rendered, interactive result; source code that never builds or renders is unfinished work.",
+    "domain_word": "web-work category",
+    "deliverable_word": "web artifact",
+    "inv_levers": "- inventory starter code, public assets, runtime and exact output paths before choosing a stack\n- establish a runnable skeleton early, then inspect the rendered result at target viewport sizes\n- check build/load errors, console output, missing assets and each named interaction; keep delivery self-contained\n- verify keyboard, focus, state transitions and responsive behavior where the request makes them relevant",
+    "dom_levers": "- encode mechanics for the component family: data visualisation, durable UI state, accessible controls, document conversion, analytical reporting or frontend tests\n- treat labels, axes, units, visual hierarchy, semantics and interaction feedback as functional information\n- derive content and data from supplied assets; never substitute plausible sample content",
+    "yardstick": "Did it deliver at the exact runnable path, load without errors or missing assets, render the supplied content legibly, implement every named interaction and inspect the result rather than source alone?",
+    "selection_lead": "DOES IT WORK. Judge the artifact as something that RUNS, before anything about its shape or tidiness. Where a candidate directory holds rendered evidence, OPEN IT FIRST -- it shows what the artifact actually produced. Then read the source for what the images cannot show: does every named interaction have a handler that is actually wired up, is state re-rendered after it changes, are events bound to elements that exist, do referenced assets and paths resolve, would anything here throw on load? A candidate that renders and behaves correctly beats a tidier one that does not, and a broken interaction outweighs any number of cosmetic or inventory differences.",
+    "selection_checks": "Prefer the artifact that runs directly from the required path; renders without blank states, broken assets or console failures; preserves supplied data and meaning; implements every requested state and interaction; remains readable and usable across relevant viewports and input methods; and feels complete rather than like a static mock-up."
+   }
+  },
+  "office": {
+   "__BenchPrompts__": {
+    "work": "Office and workspace operations over supplied files: extracting, reconciling, transforming or documenting data and producing exact spreadsheets, documents, JSON, reports or other requested files. Execution boundaries in the request—such as read-only or offline work—are part of the job.",
+    "domain_word": "office-work category",
+    "deliverable_word": "workspace artifact",
+    "inv_levers": "- inventory every supplied source and restriction, establish the authoritative copy and record deduplication or filtering rules before calculating\n- create exact requested files, sheet names, columns and schemas early; use code for repeatable transformation and arithmetic when allowed\n- preserve source files, formulas, encodings and read-only boundaries; do not invent an external call the task forbids\n- reopen outputs with an independent reader and verify formulas, types, non-empty values, totals and cross-format consistency",
+    "dom_levers": "- encode reusable mechanics for document extraction, evidence-backed repository explanation, data cleaning, reconciliation, aggregation and office-file construction\n- make source locations and transformation lineage reviewable\n- preserve exact field order, naming, units, date rules and null semantics requested by the user",
+    "yardstick": "Did it obey the workspace boundary, use every material source, apply cleaning and calculation rules reproducibly, write the exact artifacts and validate their contents and structure after writing?",
+    "selection_checks": "Prefer the artifacts that obey read/write and network boundaries; contain every required file, sheet, column and section; preserve source meaning and formulas; apply stated filters, joins and calculations correctly; expose missing or conflicting data; and reopen successfully in their real format."
+   }
+  }
+ },
+ "WORKBUDDY_DOMAINS": {
+  "code": {
+   "developer": "ROLE LENS — DEVELOPER. Preserve public interfaces and local architecture; trace callers and tests before changing implementation; prefer a small maintainable patch over a parallel abstraction.",
+   "algo": "ROLE LENS — ALGORITHM / DATA. State invariants, ordering and complexity; test boundary cases, determinism, leakage and numeric behavior; use fixtures that expose the transformation rather than examples that merely pass.",
+   "pm": "ROLE LENS — PRODUCT. Turn the request into explicit user-visible behavior and stable data contracts; preserve export schemas, policy precedence and edge-case handling; validate usefulness with representative inputs.",
+   "ops": "ROLE LENS — OPERATIONS. Prioritise failure recovery, portability, cleanup, resource ownership, configuration precedence and observable diagnostics; test the failure path as well as the happy path.",
+   "qa": "ROLE LENS — QUALITY. Reproduce the defect, isolate the smallest behavior contract, add regression coverage against the real module rather than reimplementing it, and verify that error messages and negative cases remain stable."
+  },
+  "web": {
+   "data-visualization": "CATEGORY LENS — DATA VISUALISATION. Preserve data values and definitions; verify scales, units, axes, legends, tooltips and empty states; keep comparisons readable and accessible without relying on color alone.",
+   "page-interaction": "CATEGORY LENS — PAGE INTERACTION. Model state transitions explicitly, including refresh or persistence rules, validation, disabled and error states, keyboard operation and feedback after every action.",
+   "analytical-report": "CATEGORY LENS — ANALYTICAL REPORT. Build one traceable evidence chain from supplied logs, metrics or feedback to a narrow finding, impact, remediation, validation and release recommendation; do not produce a generic dashboard.",
+   "page-implementation": "CATEGORY LENS — PAGE IMPLEMENTATION. Honour the required runtime and packaging path, build before delivery, remove external dependency surprises and test the page from a clean static-server start.",
+   "visual-design": "CATEGORY LENS — VISUAL DESIGN. Use coherent tokens, hierarchy, spacing, typography, contrast and responsive composition; preserve visible focus and semantic states, and make variants complete systems rather than color swaps.",
+   "document-conversion": "CATEGORY LENS — DOCUMENT CONVERSION. Preserve source structure and meaning—headings, tables, code, links and media notes—without summarising; provide a concrete transformation ledger for non-trivial choices.",
+   "code-testing": "CATEGORY LENS — FRONTEND TESTING. Import and exercise the real component or a thin adapter, cover named positive and negative cases with meaningful fixtures, keep the package runnable offline and prove the suite executes."
+  },
+  "office": {
+   "doc-ops": "CATEGORY LENS — DOCUMENT OPERATIONS. Extract exact fields with source locations, preserve canonical names and schema order, separate missing from zero or not-applicable, and keep generated documents readable as well as machine-usable.",
+   "automation-workdir": "CATEGORY LENS — WORKSPACE EXPLORATION. Respect read-only and offline boundaries, examine source, docs, configuration, schema, examples and outputs together, and support every interface or behavior claim with a workspace path.",
+   "data-file-ops": "CATEGORY LENS — DATA FILE OPERATIONS. Define deduplication, null filtering, join keys, periods, denominators and aggregation rules first; reconcile control totals and deliver populated workbooks with exact requested sheets."
+  }
+ },
+ "EPHEMERAL_PREFIX": "_ab-",
+ "_label_locks": {},
+ "__all__": [
+  "WbAdapter",
+  "Subset",
+  "SUBSETS",
+  "SCOREABLE",
+  "SUBSTRATES",
+  "spec_for",
+  "workbuddy_prompts",
+  "WORKBUDDY_BASES",
+  "WORKBUDDY_DOMAINS",
+  "resolve_task",
+  "score_from_payload",
+  "run_batch",
+  "sweep_orphans",
+  "label_sanitize",
+  "TRAJ_MAX_CHARS"
+ ]
+}

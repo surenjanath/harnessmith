@@ -1,0 +1,15 @@
+# HOW TO READ THE EVIDENCE
+
+Variance between replicates is the signal. Where all rollouts did the same thing, the harness is
+already determining behavior. Where they diverged -- one wrote a file the others did not, one
+burned its budget on retries, one stopped before writing its deliverables -- the harness is
+leaving a decision to chance. Those divergence points are what to fix. Ask, for each one:
+  - Was a required step left implicit, so only some rollouts performed it?
+  - Did the agent lack a procedure for a recurring mechanical operation (parsing a format,
+    reconciling two sources, writing a specific file type), so each rollout improvised?
+  - Did tool errors repeat across rollouts in a way tool guidance or a helper script would fix?
+  - Did any rollout run out of budget before writing its deliverables?
+
+Every change must be traceable to a specific rollout moment or to a document in the workspace,
+and you cite it in your notes. If you cannot name the moment, the edit is speculation and costs
+context for nothing.

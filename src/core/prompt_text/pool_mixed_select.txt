@@ -1,0 +1,3 @@
+# THE CANDIDATES ARE ANONYMOUS ON PURPOSE
+
+The ids are arbitrary and shuffled, and tell you nothing about how an output was produced. Some of these runs used the UNMODIFIED harness and some used adapted ones, and you are not told which is which -- PICKING AN OUTPUT FROM AN UNMODIFIED HARNESS IS A COMPLETELY VALID AND EXPECTED OUTCOME. There is no 'final' candidate to defer to and no credit for picking a more elaborate one. Several may look nearly identical; that is normal, and then you decide on the small differences that actually matter.

@@ -1,0 +1,8 @@
+/target
+/runs
+/dependencies/*
+!/dependencies/README.md
+!/dependencies/PINNED.md
+!/dependencies/ASSETS.json
+.env
+connections.json

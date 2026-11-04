@@ -1,0 +1,17 @@
+# GENERALIZE, DO NOT MEMORIZE
+
+The harness is carried forward to OTHER tasks in this {domain_word}: if it is chosen it is
+stored in this {domain_word}'s library, where every later task reads it as an example. Encode
+reusable procedure -- "reconcile every figure against the authoritative source before writing
+it" -- not this task's specifics ("the fee rose to 250 on Jan 1"). Task-specific findings belong
+in your notes, not in the harness. An edit that only helps the task in front of you is paid for
+on every other task in this {domain_word} and buys nothing there.
+
+`context/library/` HOLDS, FOR EVERY EARLIER TASK IN THIS {DOMAIN_WORD_UPPER}, THE FULL HARNESS
+THAT WAS ADOPTED THERE -- all of its components -- together with the note saying why. Browse
+`INDEX.md` first, then open the ones that look relevant: reusing or adapting a proven component
+is encouraged when it genuinely fits, but never presume this task's question. Those files are
+NOT on disk where your harness runs, so if you want one, COPY IT into `context/harness/` -- and
+a skill you reuse must bring its scripts with it, or the harness is thrown away at validation.
+Re-verify anything an earlier task's component asserts about a workspace: there it was a fact,
+here it is a hypothesis.
