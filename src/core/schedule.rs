@@ -394,7 +394,7 @@ fn dead(label: &str, rid: &str, dead_dir: &Path, error: &str) -> RunView {
 }
 
 /// Roll the pending (label, run_id) reference executions, natively batched when possible.
-fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String, String)], dead_dir: &Path) -> BTreeMap<String, RunView> {
+fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String, String)], dead_dir: &Path, width: usize) -> BTreeMap<String, RunView> {
     let mut rolled = BTreeMap::new();
     if pending.is_empty() {
         return rolled;
@@ -424,17 +424,21 @@ fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String,
             return rolled;
         }
     }
-    let width = pending.len().min(ROLLOUT_PARALLEL);
+    let width = pending.len().min(width.max(1));
     let got = util::par_map(pending.to_vec(), width, |(label, rid)| {
+        crate::log::at(&label, "run");
+        crate::log::event("rollout", "start", json!({"run_id": rid}));
         say!("  [{label}] base rollout {rid}");
         match adapter.execute(task_id, None, &rid, None) {
             Ok(rd) => {
                 let d = adapter.delivered(&rd);
                 say!("  [{label}] base rollout done (delivered={d})");
+                crate::log::event("rollout", "done", recursion::rollout_info(&rd, d));
                 RunView::new(&label, &rid, rd, true, d, "")
             }
             Err(e) => {
                 say!("  [{label}] base rollout failed: {e}");
+                crate::log::event("rollout", "failed", json!({"error": util::take_chars(&format!("{e}"), 600)}));
                 dead(&label, &rid, dead_dir, &format!("{e}"))
             }
         }
@@ -446,7 +450,7 @@ fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, selector: &dyn Propose, n: &Namespace, runs_root: &Path, mode_lib: Option<&Library>, base_tree: &Tree, pool_policy: &str, res: &mut TaskResult) -> Result<()> {
+fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, selector: &dyn Propose, n: &Namespace, runs_root: &Path, mode_lib: Option<&Library>, base_tree: &Tree, pool_policy: &str, width: usize, res: &mut TaskResult) -> Result<()> {
     let work_dir = n.task_dir(runs_root, task_id);
     let lib_dir = mode_lib.and_then(|l| l.context_dir());
     let nn = n.clone();
@@ -464,8 +468,8 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
             run_id_of: &run_id_of,
             base_tree: base_tree.clone(),
             library_dir: lib_dir,
-            propose_workers: recursion::PHASE_WIDTH,
-            rollout_workers: recursion::PHASE_WIDTH,
+            propose_workers: width.max(1),
+            rollout_workers: width.max(1),
         },
     )?;
     res.modes.insert(mode.into(), r.to_json());
@@ -519,11 +523,14 @@ pub struct RunOpts {
     pub tag: String,
     pub selector: Option<Arc<dyn Propose>>,
     pub pool_policy: String,
+    /// How many stages / rollouts run at once (the reference uses 2). Use 1 with a single
+    /// local model so its prompt cache is reused across an agent's turns.
+    pub width: usize,
 }
 
 impl Default for RunOpts {
     fn default() -> Self {
-        RunOpts { modes: MODES.to_vec(), seed: None, tag: String::new(), selector: None, pool_policy: "finals".into() }
+        RunOpts { modes: MODES.to_vec(), seed: None, tag: String::new(), selector: None, pool_policy: "finals".into(), width: ROLLOUT_PARALLEL }
     }
 }
 
@@ -562,8 +569,14 @@ pub fn run_task(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, prop: &
     std::fs::create_dir_all(&work)?;
     let summary_path = work.join("summary.json");
     res.inputs = task_inputs(adapter, task_id);
+    crate::log::set_mode("");
+    crate::log::at("", "");
+    crate::log::event("task", "start", json!({"task_id": task_id, "k": k, "modes": o.modes}));
     if summary_path.is_file() && resume(&summary_path, task_id, k, adapter, runs_root, &o.modes, o.seed, &o.tag, libs, &mut res)? {
         say!("  [{task_id}] resumed from summary.json");
+        crate::log::set_mode("");
+        crate::log::at("", "");
+        crate::log::event("task", "done", json!({"status": "skipped"}));
         return Ok(res);
     }
     let surface = adapter.surface();
@@ -571,7 +584,7 @@ pub fn run_task(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, prop: &
     let labels: Vec<String> = (1..=k).map(|i| format!("base{i}")).collect();
     let pending: Vec<(String, String)> = labels.iter().map(|l| (l.clone(), base_ns.run_id(task_id, l))).collect();
     say!("[{task_id}] rolling {k} base execution(s)");
-    let rolled = roll_bases(task_id, adapter, &pending, &work.join("missing"));
+    let rolled = roll_bases(task_id, adapter, &pending, &work.join("missing"), o.width);
     let base: Vec<RunView> = labels.iter().map(|l| rolled[l].clone()).collect();
     res.base = base.iter().map(|b| json!({"label": b.label, "run_id": b.run_id, "run_dir": b.run_dir.to_string_lossy()})).collect();
     if !base.iter().any(|b| b.ok) {
@@ -585,11 +598,12 @@ pub fn run_task(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, prop: &
             res.selections.insert((*m).into(), s.to_json());
         }
         write_summary(&summary_path, &res)?;
+        crate::log::event("task", "done", json!({"status": res.status, "errors": res.errors}));
         return Ok(res);
     }
     for mode in &o.modes {
         let n = Namespace::new(&bench, &sub, mode, k, o.seed, &o.tag);
-        if let Err(e) = run_one_mode(mode, task_id, k, &base, adapter, prop.as_ref(), selector.as_ref(), &n, runs_root, libs.get(*mode), &base_tree, &o.pool_policy, &mut res) {
+        if let Err(e) = run_one_mode(mode, task_id, k, &base, adapter, prop.as_ref(), selector.as_ref(), &n, runs_root, libs.get(*mode), &base_tree, &o.pool_policy, o.width, &mut res) {
             let err = format!("{e}");
             say!("  [{task_id}] {mode} failed: {err}");
             res.modes.insert((*mode).into(), json!({"ok": false, "error": err, "traceback": util::tail_chars(&format!("{e:?}"), 1500)}));
@@ -605,6 +619,9 @@ pub fn run_task(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, prop: &
     }
     res.status = merged_status(&res.to_json());
     write_summary(&summary_path, &res)?;
+    crate::log::set_mode("");
+    crate::log::at("", "");
+    crate::log::event("task", "done", json!({"status": res.status, "errors": res.errors}));
     Ok(res)
 }
 

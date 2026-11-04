@@ -21,6 +21,8 @@
 //!   GET    projects/{p}/library
 //!   GET    runs                           background runs
 //!   GET    runs/{id}/log?from=N           log lines from N
+//!   GET    runs/{id}/events?from=N        structured pipeline events from N
+//!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
 use crate::benchmarks::goal::{self, GoalAdapter, GoalSettings};
@@ -43,7 +45,7 @@ use std::sync::Mutex;
 
 const INDEX: &str = include_str!("index.html");
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RunInfo {
     id: String,
     project: String,
@@ -58,6 +60,31 @@ struct RunInfo {
 }
 
 static RUNS: Lazy<Mutex<BTreeMap<String, RunInfo>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
+
+/// Where each UI run keeps run.json, log.txt and events.jsonl.
+fn runs_dir() -> PathBuf {
+    crate::config::get().runs.join("ui-runs")
+}
+
+fn save_run(r: &RunInfo) {
+    let _ = util::write(&runs_dir().join(&r.id).join("run.json"), serde_json::to_string_pretty(r).unwrap_or_default());
+}
+
+/// Reload earlier runs so their logs and pipelines survive a restart.
+fn load_runs() {
+    let mut runs = RUNS.lock().unwrap();
+    for e in std::fs::read_dir(runs_dir()).into_iter().flatten().flatten() {
+        let Ok(t) = std::fs::read_to_string(e.path().join("run.json")) else { continue };
+        let Ok(mut r) = serde_json::from_str::<RunInfo>(&t) else { continue };
+        if r.status == "running" {
+            r.status = "interrupted".into();
+            r.error = "the server stopped while this run was in progress; run it again to resume from what finished".into();
+            save_run(&r);
+        }
+        hlog::register(&r.id, hlog::Sink::load(e.path()));
+        runs.insert(r.id.clone(), r);
+    }
+}
 
 struct ApiError(anyhow::Error);
 impl IntoResponse for ApiError {
@@ -77,6 +104,7 @@ async fn blocking<F: FnOnce() -> Result<Value> + Send + 'static>(f: F) -> ApiRes
 }
 
 pub fn serve(host: &str, port: u16) -> Result<()> {
+    load_runs();
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
         let app = Router::new()
@@ -87,6 +115,7 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/connections/:name", delete(delete_connection))
             .route("/api/connections/:name/models", get(list_models))
             .route("/api/roles", put(save_roles))
+            .route("/api/discover", get(discover))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/:p", get(get_project))
             .route("/api/projects/:p/settings", put(save_settings))
@@ -98,6 +127,8 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/library", get(get_library))
             .route("/api/runs", get(list_runs))
             .route("/api/runs/:id/log", get(run_log))
+            .route("/api/runs/:id/events", get(run_events))
+            .route("/api/runs/:id/cancel", post(cancel_run))
             .layer(axum::extract::DefaultBodyLimit::max(200 * 1024 * 1024));
         let listener = tokio::net::TcpListener::bind((host, port)).await?;
         let addr = listener.local_addr()?;
@@ -181,6 +212,10 @@ async fn list_models(AxPath(name): AxPath<String>) -> ApiResult {
         Ok(json!({"models": client::list_models(&c)?}))
     })
     .await
+}
+
+async fn discover() -> ApiResult {
+    blocking(|| Ok(json!({"found": client::discover_local()}))).await
 }
 
 async fn save_roles(Json(roles): Json<BTreeMap<String, String>>) -> ApiResult {
@@ -290,8 +325,10 @@ fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -
         k,
         modes: modes.iter().map(|m| schedule::mode_name(m).to_string()).collect(),
     };
+    save_run(&info);
     RUNS.lock().unwrap().insert(id.clone(), info);
-    let sink = hlog::named(&id);
+    let sink = hlog::Sink::persistent(runs_dir().join(&id));
+    hlog::register(&id, sink.clone());
     let (rid, gid) = (id.clone(), goal_id.to_string());
     std::thread::spawn(move || {
         hlog::set_current(Some(sink));
@@ -305,12 +342,17 @@ fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -
                 r.status = if v["status"] == "ok" || v["status"] == "skipped" { "done".into() } else { "partial".into() };
                 let errs: Vec<String> = v["errors"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
                 r.error = errs.join("; ");
+                if hlog::named(&rid).is_cancelled() {
+                    r.status = "cancelled".into();
+                }
+                save_run(r);
                 drop(runs);
                 crate::say!("Finished: {}", v["status"]);
             }
             Err(e) => {
-                r.status = "failed".into();
+                r.status = if hlog::named(&rid).is_cancelled() { "cancelled".into() } else { "failed".into() };
                 r.error = format!("{e}");
+                save_run(r);
                 drop(runs);
                 crate::say!("FAILED: {e}");
             }
@@ -415,7 +457,8 @@ async fn get_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
         if let Ok(s) = std::fs::read_to_string(a.task_dir(&id).join("judged.json")) {
             judged = serde_json::from_str(&s).unwrap_or(json!(null));
         }
-        Ok(json!({"task": t, "base": base, "namespaces": namespaces, "state": goal_status(&a, &id), "judged": judged}))
+        let runs: Vec<Value> = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id).rev().map(|r| json!({"id": r.id, "status": r.status, "started": r.started, "k": r.k, "modes": r.modes})).collect();
+        Ok(json!({"task": t, "base": base, "namespaces": namespaces, "state": goal_status(&a, &id), "judged": judged, "runs": runs}))
     })
     .await
 }
@@ -461,7 +504,7 @@ async fn list_runs() -> ApiResult {
         .unwrap()
         .values()
         .rev()
-        .map(|r| json!({"id": r.id, "project": r.project, "goal_id": r.goal_id, "goal": r.goal, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "lines": hlog::named(&r.id).len()}))
+        .map(|r| json!({"id": r.id, "project": r.project, "goal_id": r.goal_id, "goal": r.goal, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "lines": hlog::named(&r.id).len(), "events": hlog::named(&r.id).n_events()}))
         .collect();
     Ok(Json(json!({"runs": runs})))
 }
@@ -485,5 +528,24 @@ async fn run_log(AxPath(id): AxPath<String>, Query(q): Query<LogQ>) -> Response 
         .into_response()
 }
 
-#[allow(dead_code)]
-fn _paths(_: PathBuf) {}
+async fn run_events(AxPath(id): AxPath<String>, Query(q): Query<LogQ>) -> Response {
+    let Some(info) = RUNS.lock().unwrap().get(&id).cloned() else {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": "unknown run"}))).into_response();
+    };
+    let from = q.from.unwrap_or(0);
+    let evs = hlog::named(&id).events_from(from);
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"from": from, "next": from + evs.len(), "events": evs, "run": info})),
+    )
+        .into_response()
+}
+
+async fn cancel_run(AxPath(id): AxPath<String>) -> ApiResult {
+    let running = RUNS.lock().unwrap().get(&id).map(|r| r.status == "running").unwrap_or(false);
+    if !running {
+        return Err(anyhow::anyhow!("run {id} is not running").into());
+    }
+    hlog::named(&id).cancel();
+    Ok(Json(json!({"ok": true, "note": "stopping after the current model call"})))
+}

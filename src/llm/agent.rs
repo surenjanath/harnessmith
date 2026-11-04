@@ -343,26 +343,54 @@ fn summarize_args(v: &Value) -> String {
     util::take_chars(&s.replace('\n', " "), 100)
 }
 
-/// Shrink old tool observations when the conversation grows past `budget` chars.
+/// A reply that tried to call a tool in text but could not be parsed.
+fn looks_like_broken_call(text: &str) -> bool {
+    let t = text.trim();
+    t.contains("<tool_call>") || t.starts_with("<|python_tag|>") || ((t.starts_with('{') || t.starts_with("```json")) && t.contains("\"name\"") && (t.contains("\"arguments\"") || t.contains("\"parameters\"")))
+}
+
+/// Keep the conversation inside `budget` chars: first shrink older observations, then, if one
+/// recent observation alone is too big for the window (a large file read on a small local
+/// model), cap that one too. The task message and the model's own turns are never cut.
 fn compact(messages: &mut [Msg], budget: usize) {
-    let size = |m: &Msg| match m {
-        Msg::User(t) => t.len(),
-        Msg::Assistant { text, calls } => text.len() + calls.iter().map(|c| c.args.to_string().len()).sum::<usize>(),
-        Msg::Tools(rs) => rs.iter().map(|r| r.content.len()).sum(),
+    fn size(m: &Msg) -> usize {
+        match m {
+            Msg::User(t) => t.len(),
+            Msg::Assistant { text, calls } => text.len() + calls.iter().map(|c| c.args.to_string().len()).sum::<usize>(),
+            Msg::Tools(rs) => rs.iter().map(|r| r.content.len()).sum(),
+        }
+    }
+    let shrink = |r: &mut ToolResult, keep: usize, note: &str| -> usize {
+        if r.content.len() <= keep + 200 {
+            return 0;
+        }
+        let before = r.content.len();
+        r.content = format!("{}\n…({note})", util::take_chars(&r.content, keep));
+        before.saturating_sub(r.content.len())
     };
     let mut total: usize = messages.iter().map(size).sum();
     let n = messages.len();
     for m in messages.iter_mut().take(n.saturating_sub(6)) {
         if total <= budget {
+            return;
+        }
+        if let Msg::Tools(rs) = m {
+            for r in rs.iter_mut() {
+                total -= shrink(r, 1500, "older observation elided to save context; re-run the tool if you need it");
+            }
+        }
+    }
+    if total <= budget {
+        return;
+    }
+    let cap = (budget / 3).max(2000);
+    for m in messages.iter_mut().rev() {
+        if total <= budget {
             break;
         }
         if let Msg::Tools(rs) = m {
             for r in rs.iter_mut() {
-                if r.content.len() > 2000 {
-                    let before = r.content.len();
-                    r.content = format!("{}\n…(older observation elided to save context; re-run the tool if you need it)", util::take_chars(&r.content, 1500));
-                    total -= before - r.content.len();
-                }
+                total -= shrink(r, cap, "observation truncated to fit the model's context window; page through it with read_file offset/limit");
             }
         }
     }
@@ -386,9 +414,18 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let mut messages = vec![Msg::User(task.to_string())];
     let mut out = AgentOutcome::default();
     let t0 = Instant::now();
-    let max_tokens = conn.max_tokens.unwrap_or(cfg.max_tokens);
+    let max_tokens = conn.max_tokens.unwrap_or(cfg.max_tokens).min(conn.window() / 2).max(256);
+    // Chars of conversation the window can hold (~3 chars/token), minus system and reply room.
+    let budget = ((conn.window().saturating_sub(max_tokens) as usize) * 3).saturating_sub(cfg.system.len()).clamp(8_000, 600_000);
     let mut stop_blocks = 0;
+    let mut nudges = 0;
+    let event = |status: &str, extra: Value| crate::log::event("step", status, extra);
     loop {
+        if crate::log::cancelled() {
+            out.error = "cancelled by user".into();
+            traj.ev(json!({"type": "error", "message": out.error}));
+            break;
+        }
         if out.steps >= cfg.max_steps {
             out.error = format!("step budget of {} exhausted", cfg.max_steps);
             traj.ev(json!({"type": "error", "message": out.error}));
@@ -401,7 +438,7 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             break;
         }
         out.steps += 1;
-        compact(&mut messages, 600_000);
+        compact(&mut messages, budget);
         let resp = match client::chat(&conn, &model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens }, left.max(Duration::from_secs(30))) {
             Ok(r) => r,
             Err(e) => {
@@ -417,6 +454,27 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             traj.ev(json!({"type": "assistant", "text": resp.text}));
         }
         traj.ev(json!({"type": "usage", "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens}));
+        event("turn", json!({
+            "step": out.steps, "depth": cfg.depth, "in": out.input_tokens, "out": out.output_tokens,
+            "tools": resp.calls.iter().map(|c| format!("{}({})", c.name, summarize_args(&c.args))).collect::<Vec<_>>(),
+            "say": util::take_chars(resp.text.trim(), 160),
+        }));
+        if resp.calls.is_empty() && resp.text.trim().is_empty() && nudges < 2 && out.steps < cfg.max_steps {
+            nudges += 1;
+            messages.push(Msg::Assistant { text: String::new(), calls: vec![] });
+            messages.push(Msg::User("Your last reply was empty. Continue: call a tool, or give your final answer.".into()));
+            continue;
+        }
+        if resp.calls.is_empty() && looks_like_broken_call(&resp.text) && nudges < 3 && out.steps < cfg.max_steps {
+            nudges += 1;
+            traj.ev(json!({"type": "error", "message": "unparseable tool call in reply; asked the model to retry"}));
+            messages.push(Msg::Assistant { text: resp.text.clone(), calls: vec![] });
+            messages.push(Msg::User(format!(
+                "Your last reply looks like a tool call, but it is not valid JSON{}, so nothing was executed. Call the tool again with a valid JSON object of arguments. For long file contents, write the file in smaller parts (write_file, then edit_file).",
+                if resp.stop == "length" || resp.stop == "max_tokens" { " (it was cut off at the output-token limit)" } else { "" }
+            )));
+            continue;
+        }
         messages.push(Msg::Assistant { text: resp.text.clone(), calls: resp.calls.clone() });
         if resp.calls.is_empty() {
             if let Some(reason) = run_hooks(cfg, "Stop", "", &json!({}), None).filter(|_| stop_blocks < 3) {
@@ -468,6 +526,7 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     }
     traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd,
         "input_tokens": out.input_tokens, "output_tokens": out.output_tokens}));
+    event("end", json!({"steps": out.steps, "in": out.input_tokens, "out": out.output_tokens, "usd": out.cost_usd, "error": out.error, "depth": cfg.depth}));
     Ok(out)
 }
 
@@ -482,6 +541,26 @@ mod tests {
         assert!(safe_path(ws, "/etc/passwd").is_err());
         assert!(safe_path(ws, "/tmp/ws/ok.md").is_ok());
     }
+    #[test]
+    fn compact_fits_window() {
+        let big = "x".repeat(50_000);
+        let mut m = vec![Msg::User("task".into())];
+        for i in 0..8 {
+            m.push(Msg::Assistant { text: String::new(), calls: vec![] });
+            m.push(Msg::Tools(vec![ToolResult { id: format!("{i}"), name: "read_file".into(), content: big.clone(), is_error: false }]));
+        }
+        compact(&mut m, 30_000);
+        let total: usize = m.iter().map(|x| match x { Msg::Tools(r) => r[0].content.len(), _ => 4 }).sum();
+        assert!(total < 40_000, "{total}");
+        assert!(matches!(&m[0], Msg::User(t) if t == "task"));
+    }
+
+    #[test]
+    fn broken_calls_detected() {
+        assert!(looks_like_broken_call("<tool_call> {\"name\": \"write_file\", \"arguments\": \"{bad"));
+        assert!(!looks_like_broken_call("The answer is 25%."));
+    }
+
     #[test]
     fn frontmatter() {
         assert_eq!(strip_frontmatter("---\nname: x\n---\nbody"), "body");

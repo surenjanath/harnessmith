@@ -233,7 +233,7 @@ pub fn run_goal(adapter: &GoalAdapter, id: &str, k: usize, modes: Vec<&'static s
     let runs_root = common::runs_root_for(adapter);
     let lib_root = common::library_root_for(adapter, k, None, "")?;
     let prop = goal_proposer(adapter, runs_root.join("_audit"))?;
-    let o = RunOpts { modes: modes.clone(), ..Default::default() };
+    let o = RunOpts { modes: modes.clone(), width: adapter.settings.parallelism.max(1), ..Default::default() };
     let domain = adapter.domain_of(id);
     let surface = adapter.surface();
     let libs: std::collections::BTreeMap<String, crate::core::library::Library> = modes
@@ -285,6 +285,8 @@ fn models(a: ModelsArgs) -> Result<()> {
                 output_price: 0.0,
                 max_tokens: None,
                 temperature: None,
+                context_window: None,
+                max_concurrency: None,
             });
             connections::save(&reg)?;
             println!("saved {}", connections::path().display());

@@ -67,6 +67,39 @@ harness2 models role solver local/qwen3-32b
 
 Connections are saved to `connections.json` (override with `HARNESS2_CONNECTIONS`). Prefer `api_key_env` over a literal key; the file is written with mode 0600. Loopback and `NO_PROXY` hosts bypass `HTTPS_PROXY`.
 
+## Watching a run: the pipeline map
+
+While a goal runs, **Run a goal** draws its pipeline live, one lane per recursion mode:
+
+```text
+parallel    base runs ─► INV/DOM candidates (edit + probe) ─► compositions (edit + probe) ─► select (blind) ─► learn
+sequential  base runs ─► round 1 inv/dom ─► checkpoint c1 ─► round 2 inv/dom ─► c2 … ─► select ─► learn
+```
+
+Each card shows its state as it changes: which tool the agent is calling, step count, tokens, whether the improver *kept* or *edited* the harness (or fell back after an invalid proposal), and whether the probe delivered. The adopted output is marked ★. Click a card for its timeline: every agent turn, the proposal notes, rejected attempts and why, and the selector's reasoning. The header tracks elapsed time, solver runs and improver sessions against the 4k/3k budget, tokens, and cost. **Stop** cancels after the current model call.
+
+Runs are saved under `runs/ui-runs/<id>/` (`run.json`, `log.txt`, `events.jsonl`), so the map and log survive a server restart. **History → Journey** replays the map for any past goal.
+
+## Local models
+
+The UI's **Detect local servers** probes Ollama (11434), LM Studio (1234), llama.cpp (8080/8081), vLLM (8000), text-generation-webui (5000) and LocalAI (8088), and adds what it finds. Or add one by hand:
+
+```bash
+harness2 models add ollama --provider ollama --default-model qwen2.5:7b
+```
+
+```bash
+harness2 models add lms --provider openai --base-url http://localhost:1234/v1 --default-model qwen2.5-7b-instruct
+```
+
+What the runtime does for small local models:
+
+- **Ollama uses its native `/api/chat`**, which honours `num_ctx`. Ollama's `/v1` shim silently cuts prompts to a 2-4k window, and a Harness² mission alone is longer than that. Set **Context window** on the connection (default 32768 for Ollama).
+- **Tool calls written as text are recovered.** `<tool_call>{…}</tool_call>` (Qwen/Hermes), `<|python_tag|>{…}` (Llama), and fenced or bare JSON with `name` + `arguments` become real tool calls. A reply that looks like a call but doesn't parse gets a retry prompt instead of ending the session.
+- `<think>` blocks are stripped, empty replies get a nudge to continue, and old observations are trimmed to fit the context window.
+- **Max parallel requests** per connection (default 1 for Ollama) queues requests instead of timing them out. With one local model serving every role, also set **Parallel stages = 1** (Models → Advanced) so the server's prompt cache is reused across an agent's turns. Otherwise interleaved sessions re-evaluate the whole prompt every turn.
+- A rollout whose session died before producing anything (server error, cancel) is reported as failed and is not cached, so a rerun tries it again.
+
 ## Goals from the command line
 
 ```bash

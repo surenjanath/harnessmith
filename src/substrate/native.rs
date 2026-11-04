@@ -135,6 +135,13 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     cfg.log_prefix = "      ".into();
     let out = agent::run(&cfg, task)?;
     util::write(&run_dir.join("final.md"), &out.final_text)?;
+    // A session that died (transport error, cancellation) before producing anything is a dead
+    // rollout: report it and leave it UNMARKED, so a rerun rolls it again instead of serving an
+    // empty attempt as evidence.
+    let died = !out.error.is_empty() && !out.error.contains("budget") && out.final_text.trim().is_empty() && deliverables(run_dir).is_empty();
+    if died || out.error.contains("cancelled") {
+        anyhow::bail!("solver session failed: {}", out.error);
+    }
     if deliverables(run_dir).is_empty() && !out.final_text.trim().is_empty() {
         util::write(&ws.join("output/answer.md"), &out.final_text)?;
     }

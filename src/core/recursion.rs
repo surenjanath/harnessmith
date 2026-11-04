@@ -161,6 +161,14 @@ pub struct StageArgs<'a> {
 /// Build evidence, propose an edit, and retry an invalid proposal once.
 pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArgs) -> Stage {
     let surface = adapter.surface();
+    crate::log::at(&a.label, "edit");
+    crate::log::event("stage", "start", json!({"dim": a.dim}));
+    if crate::log::cancelled() {
+        let mut s = Stage::fallback(&a.label, &a.dim, &a.fallback);
+        s.error = "cancelled by user".into();
+        crate::log::event("stage", "fell_back", json!({"dim": a.dim, "error": s.error}));
+        return s;
+    }
     say!("  [{}] {} stage: building evidence", a.label, a.dim);
     let built = context::build(
         &a.ctx_dir.join(&a.label),
@@ -179,6 +187,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
             let mut s = Stage::fallback(&a.label, &a.dim, &a.fallback);
             s.error = util::take_chars(&format!("could not build evidence: {e}"), 400);
             say!("  [{}] fell back: {}", a.label, s.error);
+            crate::log::event("stage", "fell_back", json!({"dim": a.dim, "error": s.error}));
             return s;
         }
     };
@@ -236,6 +245,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
         if !e.is_empty() {
             err = e;
             say!("  [{}] proposal rejected: {}", a.label, util::take_chars(&err, 240));
+            crate::log::event("stage", "retry", json!({"dim": a.dim, "attempt": attempt, "error": util::take_chars(&err, 600)}));
             let _ = tree::write_tree(&surface, &new, &ctree.root.join("harness"), true);
             continue;
         }
@@ -245,6 +255,11 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
             .map(|c| c[1].trim().to_string())
             .unwrap_or_else(|| reply.text.trim().to_string());
         say!("  [{}] accepted{}", a.label, if kept { " (KEEP_BASE)" } else { "" });
+        let changed = tree::diff_summary(&surface, &a.fallback, &new);
+        crate::log::event("stage", "done", json!({
+            "dim": a.dim, "kept_base": kept, "attempts": spent_calls, "usd": spent_usd, "cached": all_cached,
+            "notes": util::take_chars(&notes, 1500), "changed": changed,
+        }));
         return Stage {
             label: a.label,
             dim: a.dim,
@@ -260,6 +275,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
         };
     }
     say!("  [{}] fell back to the inherited harness: {}", a.label, util::take_chars(&err, 240));
+    crate::log::event("stage", "fell_back", json!({"dim": a.dim, "error": util::take_chars(&err, 600), "execution_failed": execution_failed}));
     let mut s = Stage::fallback(&a.label, &a.dim, &a.fallback);
     s.error = util::take_chars(&err, 400);
     s.usd = spent_usd;
@@ -287,19 +303,40 @@ fn roll(adapter: &dyn BenchmarkAdapter, task_id: &str, label: &str, t: Option<&T
         }
     }
     let run_id = run_id_of(label);
+    crate::log::at(label, "run");
+    if crate::log::cancelled() {
+        crate::log::event("rollout", "failed", json!({"error": "cancelled by user"}));
+        return RunView::new(label, &run_id, work_dir.join("missing"), false, false, "cancelled by user");
+    }
+    crate::log::event("rollout", "start", json!({"run_id": run_id}));
     say!("  [{label}] rollout {run_id}");
     match adapter.execute(task_id, hdir.as_deref(), &run_id, None) {
         Ok(rd) => {
             let exists = rd.exists();
             let delivered = exists && adapter.delivered(&rd);
             say!("  [{label}] rollout done (delivered={delivered})");
+            crate::log::event("rollout", "done", rollout_info(&rd, delivered));
             RunView::new(label, &run_id, rd, exists, delivered, if exists { "" } else { "adapter returned a missing run directory" })
         }
         Err(e) => {
             say!("  [{label}] rollout failed: {e}");
+            crate::log::event("rollout", "failed", json!({"error": util::take_chars(&format!("{e}"), 600)}));
             RunView::new(label, &run_id, work_dir.join("missing"), false, false, &format!("{e}"))
         }
     }
+}
+
+/// What the UI shows about a finished rollout: delivery, and usage when the substrate records it.
+pub fn rollout_info(rd: &Path, delivered: bool) -> Value {
+    let usage: Value = std::fs::read_to_string(rd.join("usage.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    json!({"delivered": delivered, "run_dir": rd, "usage": usage})
+}
+
+fn check_cancel() -> Result<()> {
+    if crate::log::cancelled() {
+        bail!("cancelled by user");
+    }
+    Ok(())
 }
 
 /// Roll independent harnesses concurrently, then record them in the caller's order.
@@ -354,6 +391,9 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
     let ctx_dir = a.work_dir.join("context");
     let bp = resolve_prompts(adapter, task_id);
     let base_dir = tree::write_tree(&surface, &a.base_tree, &a.work_dir.join("harnesses/base"), true)?;
+    crate::log::set_mode("agg");
+    crate::log::at("", "");
+    crate::log::event("mode", "start", json!({"k": k}));
     say!("[parallel k={k}] {task_id}: proposing {} candidates", 2 * k);
 
     let mut specs = vec![];
@@ -390,6 +430,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
         result.stages.push(s.clone());
         result.trees.insert(s.label.clone(), s.tree.clone());
     }
+    check_cancel()?;
     say!("[parallel k={k}] {task_id}: probing {} candidates", stages.len());
     let rolled = roll_many(
         adapter,
@@ -407,6 +448,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
         .map(|s| (s.label.clone(), a.work_dir.join("harnesses").join(&s.label), result.rollouts.get(&s.label).cloned()))
         .collect();
     let decisions: BTreeMap<String, String> = stages.iter().map(|s| (s.label.clone(), s.decision())).collect();
+    check_cancel()?;
     say!("[parallel k={k}] {task_id}: composing {k} finals");
     let agg_jobs: Vec<(String, String)> = (1..=k)
         .map(|i| prompts::aggregate(&bp, sname, k, i).map(|j| (format!("agg{i}"), j)))
@@ -447,6 +489,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
     );
     result.rollouts.extend(rolled);
     result.similarity = Some(tree::diversity(&aggs.iter().map(|s| (s.label.clone(), s.tree.clone())).collect()));
+    check_cancel()?;
     ledger.assert_identity()?;
     result.ledger = Some(ledger);
     Ok(result)
@@ -469,7 +512,11 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
     let bp = resolve_prompts(adapter, task_id);
     let mut current = a.base_tree.clone();
     let mut history: Vec<PoolEntry> = vec![];
+    crate::log::set_mode("seq");
+    crate::log::at("", "");
+    crate::log::event("mode", "start", json!({"k": k}));
     for t in 1..=k {
+        check_cancel()?;
         let current_label = if t > 1 { format!("c{}", t - 1) } else { "base".into() };
         let current_dir = tree::write_tree(&surface, &current, &a.work_dir.join("harnesses").join(&current_label), true)?;
         say!("[sequential k={k}] {task_id}: round {t} proposing");
@@ -516,6 +563,7 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
         for s in &stages {
             round_pool.push((s.label.clone(), a.work_dir.join("harnesses").join(&s.label), result.rollouts.get(&s.label).cloned()));
         }
+        check_cancel()?;
         let ck = format!("c{t}");
         let comp_job = if k == 1 { prompts::aggregate(&bp, sname, 1, 1)? } else { prompts::compose_round(&bp, sname, t, k)? };
         say!("[sequential k={k}] {task_id}: round {t} composing {ck}");
@@ -547,6 +595,7 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
         current = comp.tree;
     }
     result.finals = (1..=k).map(|i| format!("c{i}")).collect();
+    check_cancel()?;
     ledger.assert_identity()?;
     result.ledger = Some(ledger);
     Ok(result)

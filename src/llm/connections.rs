@@ -44,6 +44,13 @@ pub struct Connection {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f64>,
+    /// The model's context window in tokens. Ollama is asked for this window (`num_ctx`);
+    /// the agent loop trims old observations to stay inside it.
+    #[serde(default)]
+    pub context_window: Option<u32>,
+    /// Max simultaneous requests to this endpoint (default: 1 for Ollama, unlimited otherwise).
+    #[serde(default)]
+    pub max_concurrency: Option<usize>,
 }
 
 impl Connection {
@@ -55,6 +62,16 @@ impl Connection {
             return std::env::var(&self.api_key_env).unwrap_or_default();
         }
         String::new()
+    }
+
+    /// Effective concurrency limit.
+    pub fn concurrency(&self) -> usize {
+        self.max_concurrency.filter(|n| *n > 0).unwrap_or(if self.provider == "ollama" { 1 } else { 64 })
+    }
+
+    /// Effective context window in tokens (a conservative default when unknown).
+    pub fn window(&self) -> u32 {
+        self.context_window.filter(|n| *n > 0).unwrap_or(if self.provider == "ollama" { 32_768 } else { 200_000 })
     }
 
     pub fn base(&self) -> String {
@@ -76,7 +93,7 @@ pub fn default_base(provider: &str) -> &'static str {
         "openai" => "https://api.openai.com/v1",
         "anthropic" => "https://api.anthropic.com",
         "gemini" => "https://generativelanguage.googleapis.com",
-        "ollama" => "http://localhost:11434/v1",
+        "ollama" => "http://localhost:11434",
         _ => "",
     }
 }
@@ -141,6 +158,8 @@ fn builtin(name: &str) -> Option<Connection> {
         output_price: 0.0,
         max_tokens: None,
         temperature: None,
+        context_window: None,
+        max_concurrency: None,
     };
     Some(match name {
         "openai" => mk("openai", "", "OPENAI_API_KEY"),

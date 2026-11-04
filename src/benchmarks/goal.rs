@@ -55,6 +55,13 @@ pub struct GoalSettings {
     pub judge_model: String,
     #[serde(default = "high")]
     pub effort: String,
+    /// Stages and rollouts run at once. 1 suits a single local model (its prompt cache is
+    /// reused between an agent's turns); 2 is the reference setting.
+    #[serde(default = "two")]
+    pub parallelism: usize,
+}
+fn two() -> usize {
+    2
 }
 fn api() -> String {
     "api".into()
@@ -93,6 +100,7 @@ impl Default for GoalSettings {
             allow_subagents: true,
             judge_model: role("judge"),
             effort: high(),
+            parallelism: 2,
         }
     }
 }

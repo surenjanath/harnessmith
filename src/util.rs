@@ -107,20 +107,21 @@ where
     if width <= 1 || items.len() <= 1 {
         return items.into_iter().map(&f).collect();
     }
-    let sink = crate::log::current();
+    let ctx = crate::log::ctx();
     let n = items.len();
     let queue = std::sync::Mutex::new(items.into_iter().enumerate().collect::<Vec<_>>().into_iter());
     let results: std::sync::Mutex<Vec<Option<R>>> =
         std::sync::Mutex::new((0..n).map(|_| None).collect());
     std::thread::scope(|s| {
         for _ in 0..width {
-            let sink = sink.clone();
+            let ctx = ctx.clone();
             let (queue, results, f) = (&queue, &results, &f);
             s.spawn(move || {
-                crate::log::set_current(sink);
+                crate::log::set_ctx(ctx.clone());
                 loop {
                     let next = queue.lock().unwrap().next();
                     let Some((i, item)) = next else { break };
+                    crate::log::set_ctx(ctx.clone());
                     let r = f(item);
                     results.lock().unwrap()[i] = Some(r);
                 }

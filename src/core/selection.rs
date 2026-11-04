@@ -231,6 +231,8 @@ pub fn run_selection(task_id: &str, k: usize, mode: &str, candidates: &BTreeMap<
     sel.n_candidates = pool.len();
     if pool.is_empty() {
         sel.error = "no candidate produced an artifact".into();
+        crate::log::at("select", "select");
+        crate::log::event("select", "failed", json!({"error": sel.error, "dropped": sel.dropped}));
         return Ok(sel);
     }
     sel.id_map = assign_ids(&pool.keys().cloned().collect::<Vec<_>>(), task_id, k, mode);
@@ -254,6 +256,8 @@ pub fn run_selection(task_id: &str, k: usize, mode: &str, candidates: &BTreeMap<
     ]
     .join("\n\n");
     context::assert_no_grader_verdicts(&root, context::GRADER_VERDICT_MARKERS)?;
+    crate::log::at("select", "select");
+    crate::log::event("select", "start", json!({"n": pool.len(), "ids": sel.id_map}));
     crate::say!("  [select.{mode}{k}] choosing among {} candidates: {ids}", pool.len());
     let outcome: Result<(), (String, f64)> = match prop.call(&mission, Some(&root), &format!("select.{mode}{k}"), CallOpts::default()) {
         Err(ProposerError { message, cost_usd, .. }) => Err((message, cost_usd)),
@@ -286,6 +290,7 @@ pub fn run_selection(task_id: &str, k: usize, mode: &str, candidates: &BTreeMap<
     sel.chosen_is_base = is_base(&sel.chosen_label);
     let rd = pool.get(&sel.chosen_label).map(|r| r.run_dir.to_string_lossy().to_string()).unwrap_or_default();
     crate::say!("  [select.{mode}{k}] chose {} ({}){}", sel.chosen_id, sel.chosen_label, if sel.fallback { " [fallback]" } else { "" });
+    crate::log::event("select", "done", json!({"chosen": sel.chosen_label, "id": sel.chosen_id, "fallback": sel.fallback, "why": util::take_chars(&sel.why, 800), "error": sel.error}));
     persist(&mut sel, &root, &rd);
     Ok(sel)
 }
@@ -319,6 +324,8 @@ pub fn trivial_selection(task_id: &str, k: usize, mode: &str, candidates: &BTree
     std::fs::create_dir_all(&root)?;
     let rd = pool[&label].run_dir.to_string_lossy().to_string();
     persist(&mut sel, &root, &rd);
+    crate::log::at("select", "select");
+    crate::log::event("select", "done", json!({"chosen": label, "id": "A", "trivial": true, "why": sel.why}));
     Ok(sel)
 }
 
@@ -370,10 +377,13 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
     util::rmtree(&exp_root);
     util::copy_tree_filtered(root, &exp_root, |rel| !rel.split('/').any(|p| p == "selection.json"))?;
     context::assert_no_grader_verdicts(&exp_root, context::GRADER_VERDICT_MARKERS)?;
+    crate::log::at("learn", "learn");
+    crate::log::event("learn", "start", json!({}));
     crate::say!("  [experience.{}{}] reflecting on the adopted harness", sel.mode, sel.k);
     let reply = match prop.call(&mission, Some(&exp_root), &format!("experience.{}{}", sel.mode, sel.k), CallOpts::default()) {
         Err(e) => {
             sel.usd += e.cost_usd;
+            crate::log::event("learn", "failed", json!({"error": util::take_chars(&e.message, 600)}));
             return Ok(Map::new());
         }
         Ok(r) => r,
@@ -383,7 +393,10 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
     if let Some(e) = &edits {
         util::write(&root.join("edits.md"), format!("{e}\n"))?;
     }
-    let Some(m) = EXP.captures(&reply.text) else { return Ok(Map::new()) };
+    let Some(m) = EXP.captures(&reply.text) else {
+        crate::log::event("learn", "done", json!({"entry": false}));
+        return Ok(Map::new());
+    };
     let mut out = Map::new();
     for line in m[1].trim().lines() {
         if let Some((key, val)) = line.split_once(':') {
@@ -394,8 +407,10 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
         }
     }
     if !["cue", "lesson", "evidence"].iter().all(|k| out.get(*k).and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
+        crate::log::event("learn", "done", json!({"entry": false}));
         return Ok(Map::new());
     }
+    crate::log::event("learn", "done", json!({"entry": true, "cue": out.get("cue"), "lesson": out.get("lesson")}));
     if let Some(e) = edits {
         out.insert("edits".into(), json!(e));
     }
