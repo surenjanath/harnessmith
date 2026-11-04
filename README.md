@@ -1,6 +1,18 @@
-# Harness² (Rust)
+# harnessmith
 
-A Rust port of [google-research/harness2](https://github.com/google-research/harness2), *Recursive Agent Harnessing for an Open World*, plus a model-agnostic agent runtime and a web UI where you connect models and hand the system a goal.
+**Self-improving, self-healing agent harnesses in Rust.** Harnessmith gives an agent a goal, then improves the agent's harness for that goal and keeps the run going when models or servers fail. It has a web UI, works with local and API models, and includes a guardrail gate, wired tools and project memory.
+
+It is a Rust port of [google-research/harness2](https://github.com/google-research/harness2), *Recursive Agent Harnessing for an Open World*. It adds a model-agnostic agent runtime and a web UI where you connect models and hand the system a goal. The command-line tool is still called `harness2`. This is an independent project, not an official Google product.
+
+```bash
+cargo build --release
+```
+
+```bash
+./target/release/harness2 serve --port 8765
+```
+
+Then open http://127.0.0.1:8765. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
 
 A **harness** is everything around a model that makes it an agent: system prompt, guardrails, memory, tool guidance, skills, sub-agents, scripts, and in-loop hooks or plugins. Harness² improves that harness for each task, with no ground-truth feedback:
 
