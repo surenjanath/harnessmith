@@ -130,6 +130,11 @@ fn self_healing_scenarios() {
             (200, reply_text(if denied { "denied" } else { "ran anyway" }))
         }
     }));
+    let (p9, seen9) = server(Arc::new(|_n, _req: &Value| {
+        (200, json!({"content": [{"type": "tool_use", "id": "t1", "name": "list_files", "input": {"path": "."}}], "stop_reason": "tool_use",
+            "usage": {"input_tokens": 1000, "output_tokens": 100, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 2000}}))
+    }));
+    let (p10, seen10) = server(Arc::new(|_n, _req: &Value| (200, reply_text("cheap done"))));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -138,7 +143,9 @@ fn self_healing_scenarios() {
             (200, reply_tool("read_file", json!({"path": format!("notes{n}.txt")})))
         }
     }));
-    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6), conn("mcp", p7), conn("asker", p8)]}));
+    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6), conn("mcp", p7), conn("asker", p8),
+        json!({"name": "pricey", "provider": "anthropic", "base_url": format!("http://127.0.0.1:{p9}"), "default_model": "m", "api_key": "x", "input_price": 3.0, "output_price": 15.0, "daily_usd": 0.01}),
+        conn("cheap", p10)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -268,4 +275,21 @@ fn self_healing_scenarios() {
     let out = agent::run(&cfg, "go").unwrap();
     judge.join().unwrap();
     assert_eq!(out.final_text, "denied");
+
+    // 9. Prompt caching and spending caps: Anthropic requests carry cache breakpoints, cached tokens
+    //    are priced at 10%, and once a connection passes its daily cap the chain fails over.
+    let ws9 = d.path().join("ws9");
+    std::fs::create_dir_all(&ws9).unwrap();
+    let mut cfg = AgentConfig::new("pricey/m, cheap/m", "agent", &ws9);
+    cfg.allow_shell = false;
+    let out = agent::run(&cfg, "go").unwrap();
+    assert_eq!(out.final_text, "cheap done");
+    assert_eq!(out.served_by, "cheap/m");
+    let req = seen9.lock().unwrap()[0].clone();
+    assert_eq!(req["system"][0]["cache_control"]["type"], "ephemeral", "system prompt is a cache breakpoint");
+    assert!(req["tools"].as_array().unwrap().last().unwrap()["cache_control"].is_object());
+    assert_eq!(seen9.lock().unwrap().len(), 1, "over its daily cap after one call");
+    assert!(!seen10.lock().unwrap().is_empty());
+    // 1000*3 + 2000*3*1.25 + 50000*0.3 + 100*15 = 3000 + 7500 + 15000 + 1500 = 27000 / 1e6
+    assert!((out.cost_usd - 0.027).abs() < 1e-9, "{}", out.cost_usd);
 }

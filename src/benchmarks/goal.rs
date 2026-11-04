@@ -88,6 +88,9 @@ pub struct GoalSettings {
     /// Goals that run again on a timer.
     #[serde(default)]
     pub schedules: Vec<Schedule>,
+    /// Spending cap per run in USD (0: none). Agents stop once the run has spent this much.
+    #[serde(default)]
+    pub max_usd_per_run: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -171,6 +174,7 @@ impl Default for GoalSettings {
             select_guard: true,
             mcp_servers: vec![],
             schedules: vec![],
+            max_usd_per_run: 0.0,
         }
     }
 }

@@ -46,9 +46,14 @@ pub enum Msg {
 pub struct ChatResp {
     pub text: String,
     pub calls: Vec<ToolCall>,
+    /// Uncached input tokens (cached ones are counted separately below).
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub stop: String,
+    /// Input tokens served from the provider's prompt cache.
+    pub cached_tokens: u64,
+    /// Input tokens written to the cache (Anthropic).
+    pub cache_write_tokens: u64,
 }
 
 pub struct ChatReq<'a> {
@@ -378,11 +383,14 @@ fn openai(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
     let v = post(&format!("{base}/chat/completions"), &headers, &body, timeout)?;
     let choice = v.get("choices").and_then(|c| c.get(0)).ok_or_else(|| anyhow!("no choices in response: {}", crate::util::take_chars(&v.to_string(), 400)))?;
     let msg = &choice["message"];
+    // OpenAI caches long prompts automatically; prompt_tokens includes the cached part.
+    let cached = v["usage"]["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0);
     let mut out = ChatResp {
         text: msg.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string(),
         stop: choice.get("finish_reason").and_then(|f| f.as_str()).unwrap_or("").to_string(),
-        input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+        input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0).saturating_sub(cached),
         output_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+        cached_tokens: cached,
         ..Default::default()
     };
     for (i, c) in msg.get("tool_calls").and_then(|t| t.as_array()).cloned().unwrap_or_default().iter().enumerate() {
@@ -425,15 +433,33 @@ fn anthropic(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -
             })).collect::<Vec<_>>()})),
         }
     }
+    // Prompt caching: breakpoints on the tools, the system prompt and the last two user turns,
+    // so each turn re-reads the conversation so far from cache.
+    let cache = conn.prompt_cache.unwrap_or(true);
+    let eph = json!({"type": "ephemeral"});
+    if cache {
+        let user_idx: Vec<usize> = msgs.iter().enumerate().filter(|(_, m)| m["role"] == "user").map(|(i, _)| i).rev().take(2).collect();
+        for i in user_idx {
+            if let Some(last) = msgs[i]["content"].as_array_mut().and_then(|c| c.last_mut()) {
+                last["cache_control"] = eph.clone();
+            }
+        }
+    }
     let mut body = json!({"model": model, "max_tokens": req.max_tokens, "messages": msgs});
     if !req.system.is_empty() {
-        body["system"] = json!(req.system);
+        body["system"] = if cache { json!([{"type": "text", "text": req.system, "cache_control": eph}]) } else { json!(req.system) };
     }
     if let Some(t) = conn.temperature {
         body["temperature"] = json!(t);
     }
     if !req.tools.is_empty() {
-        body["tools"] = json!(req.tools.iter().map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.parameters})).collect::<Vec<_>>());
+        let mut tools: Vec<Value> = req.tools.iter().map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.parameters})).collect();
+        if cache {
+            if let Some(l) = tools.last_mut() {
+                l["cache_control"] = eph.clone();
+            }
+        }
+        body["tools"] = json!(tools);
     }
     let headers = vec![("x-api-key", conn.key()), ("anthropic-version", "2023-06-01".to_string())];
     let v = post(&format!("{}/v1/messages", conn.base()), &headers, &body, timeout)?;
@@ -441,6 +467,8 @@ fn anthropic(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -
         stop: v.get("stop_reason").and_then(|s| s.as_str()).unwrap_or("").to_string(),
         input_tokens: v["usage"]["input_tokens"].as_u64().unwrap_or(0),
         output_tokens: v["usage"]["output_tokens"].as_u64().unwrap_or(0),
+        cached_tokens: v["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0),
+        cache_write_tokens: v["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0),
         ..Default::default()
     };
     for b in v.get("content").and_then(|c| c.as_array()).cloned().unwrap_or_default() {
@@ -497,7 +525,8 @@ fn gemini(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
     let cand = v.get("candidates").and_then(|c| c.get(0)).ok_or_else(|| anyhow!("no candidates in response: {}", crate::util::take_chars(&v.to_string(), 400)))?;
     let mut out = ChatResp {
         stop: cand.get("finishReason").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-        input_tokens: v["usageMetadata"]["promptTokenCount"].as_u64().unwrap_or(0),
+        input_tokens: v["usageMetadata"]["promptTokenCount"].as_u64().unwrap_or(0).saturating_sub(v["usageMetadata"]["cachedContentTokenCount"].as_u64().unwrap_or(0)),
+        cached_tokens: v["usageMetadata"]["cachedContentTokenCount"].as_u64().unwrap_or(0),
         output_tokens: v["usageMetadata"]["candidatesTokenCount"].as_u64().unwrap_or(0)
             + v["usageMetadata"]["thoughtsTokenCount"].as_u64().unwrap_or(0),
         ..Default::default()
@@ -524,6 +553,10 @@ fn gemini(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
 /// Deterministic offline stand-in: writes one answer file, then ends with a reply that every
 /// stage of the method can parse (notes, a choice of candidate A, no library entry).
 fn mock(req: &ChatReq) -> ChatResp {
+    // Optional delay so demos and UI tests can watch a run move (HARNESS2_MOCK_DELAY_MS).
+    if let Some(ms) = crate::config::env_int("HARNESS2_MOCK_DELAY_MS", 0).ok().filter(|m| *m > 0) {
+        std::thread::sleep(Duration::from_millis(ms.min(60_000) as u64));
+    }
     let used_tools = req.messages.iter().any(|m| matches!(m, Msg::Tools(_)));
     let has_write = req.tools.iter().any(|t| t.name == "write_file");
     let task: String = req

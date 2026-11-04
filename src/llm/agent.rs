@@ -635,15 +635,20 @@ pub fn resolve_chain(model_id: &str) -> Result<Vec<(connections::Connection, Str
 /// has not just seen it fail. If none is, the one usable soonest, and how long until then.
 fn pick(chain: &[(connections::Connection, String, String)], avoid: &[Option<Instant>]) -> (usize, Duration) {
     let now = Instant::now();
+    // A connection over its daily spending cap is skipped like a tripped breaker, but for the day.
+    if chain.iter().all(|c| health::over_cap(&c.0)) {
+        return (usize::MAX, Duration::ZERO);
+    }
+    let capped = |i: usize| health::over_cap(&chain[i].0);
     let wait_of = |i: usize| -> Duration {
         let b = health::reopens_in(&chain[i].0.name);
         let a = avoid[i].map(|t| t.saturating_duration_since(now)).unwrap_or_default();
         b.max(a)
     };
-    if let Some(i) = (0..chain.len()).find(|i| wait_of(*i).is_zero()) {
+    if let Some(i) = (0..chain.len()).find(|i| !capped(*i) && wait_of(*i).is_zero()) {
         return (i, Duration::ZERO);
     }
-    (0..chain.len()).map(|i| (i, wait_of(i))).min_by_key(|(_, d)| *d).unwrap_or((0, Duration::ZERO))
+    (0..chain.len()).filter(|i| !capped(*i)).map(|i| (i, wait_of(i))).min_by_key(|(_, d)| *d).unwrap_or((0, Duration::ZERO))
 }
 
 /// How long a session avoids a model after one of its calls failed.
@@ -709,7 +714,18 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             traj.ev(json!({"type": "error", "message": out.error}));
             break;
         }
+        if let Some(b) = crate::log::budget().filter(|b| b.exceeded()) {
+            out.error = format!("the run's spending cap of ${:.2} was reached", b.cap_usd);
+            traj.ev(json!({"type": "error", "message": out.error}));
+            break;
+        }
         let (ci, wait) = pick(&chain, &avoid);
+        if ci == usize::MAX {
+            out.error = "every model in the chain is over its daily spending cap".into();
+            traj.ev(json!({"type": "error", "message": out.error}));
+            crate::log::event("heal", "spend_cap", json!({"models": chain.iter().map(|c| c.2.clone()).collect::<Vec<_>>()}));
+            break;
+        }
         if !wait.is_zero() {
             // Every model in the chain is down: wait for the first to half-open, rather than fail.
             let w = wait.min(left).min(Duration::from_secs(300));
@@ -735,6 +751,7 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         let budget = ((conn.window().saturating_sub(max_tokens) as usize) * 3).saturating_sub(cfg.system.len()).clamp(8_000, 600_000);
         out.steps += 1;
         compact(&mut messages, budget);
+        event("call", json!({"model": model_id, "step": out.steps, "depth": cfg.depth}));
         let resp = match client::chat(conn, model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens }, left.max(Duration::from_secs(30))) {
             Ok(r) => {
                 out.served_by = model_id.clone();
@@ -758,14 +775,23 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         };
         out.input_tokens += resp.input_tokens;
         out.output_tokens += resp.output_tokens;
-        out.cost_usd += (resp.input_tokens as f64 * conn.input_price + resp.output_tokens as f64 * conn.output_price) / 1e6;
+        let usd = conn.cost(&resp);
+        out.cost_usd += usd;
+        health::record_cost(&conn.name, usd);
+        health::record_cached(&conn.name, resp.cached_tokens);
+        if let Some(b) = crate::log::budget() {
+            if b.add(usd) {
+                crate::log::event("heal", "budget_cap", json!({"cap_usd": b.cap_usd, "spent_usd": *b.spent.lock().unwrap()}));
+                say!("{}! the run reached its spending cap of ${:.2}; stopping its agents", cfg.log_prefix, b.cap_usd);
+            }
+        }
         let _ = &model;
         if !resp.text.trim().is_empty() {
             traj.ev(json!({"type": "assistant", "text": resp.text}));
         }
         traj.ev(json!({"type": "usage", "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens}));
         event("turn", json!({
-            "step": out.steps, "depth": cfg.depth, "in": out.input_tokens, "out": out.output_tokens,
+            "step": out.steps, "depth": cfg.depth, "in": out.input_tokens, "out": out.output_tokens, "model": model_id,
             "tools": resp.calls.iter().map(|c| format!("{}({})", c.name, summarize_args(&c.args))).collect::<Vec<_>>(),
             "say": util::take_chars(resp.text.trim(), 160),
         }));

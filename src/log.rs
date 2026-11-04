@@ -101,6 +101,39 @@ pub struct Ctx {
     pub node: String,
     /// "edit" (an improver session), "run" (a solver rollout), "select", "learn".
     pub phase: String,
+    /// The run's spending budget, shared by every agent in the run.
+    pub budget: Option<std::sync::Arc<Budget>>,
+}
+
+/// A run's spending cap: every model call adds its cost; past the cap, agents stop.
+#[derive(Debug, Default)]
+pub struct Budget {
+    pub cap_usd: f64,
+    pub spent: Mutex<f64>,
+    pub hit: std::sync::atomic::AtomicBool,
+}
+
+impl Budget {
+    /// Add a cost; true when this crossed the cap.
+    pub fn add(&self, usd: f64) -> bool {
+        let mut s = self.spent.lock().unwrap();
+        *s += usd;
+        if self.cap_usd > 0.0 && *s >= self.cap_usd && !self.hit.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return true;
+        }
+        false
+    }
+    pub fn exceeded(&self) -> bool {
+        self.hit.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+pub fn budget() -> Option<std::sync::Arc<Budget>> {
+    CURRENT.with(|c| c.borrow().budget.clone())
+}
+
+pub fn set_budget(b: Option<std::sync::Arc<Budget>>) {
+    CURRENT.with(|c| c.borrow_mut().budget = b);
 }
 
 thread_local! {

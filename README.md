@@ -232,6 +232,15 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 
 ![MCP servers](docs/img/mcp.png)
 
+## Cost and live updates
+
+- **Spending caps.** Set **Max $ per run** under Models → Advanced. Once a run has spent that much, every agent in it stops and the run ends as `capped`, with no automatic retry. Each connection can have a **daily $ cap** (UTC day, persisted across restarts). Once it is reached, calls fail over to the next model in the chain, for example from an API model to a local one. Today's spend per connection appears in the health table.
+- **Prompt caching.** Anthropic requests mark the tools, the system prompt and the last two user turns as cache breakpoints, so each turn re-reads the conversation from the cache. Cached input from Anthropic, OpenAI-compatible servers and Gemini is counted separately and priced at the connection's cached rate (default 10% of input for Anthropic, 50% otherwise, editable).
+- **Push updates.** The run map is pushed over server-sent events (`/api/runs/:id/stream`) instead of being polled, and falls back to polling if the stream drops. The Overview listens to `/api/live`. The figure animates: a goal's slot lights up with the model serving it, the active stage glows, finished stages turn green, packets travel along the queue, tool-gate and model wires, and the gate, models and store boxes flash on gate, heal and memory events. **Where it reaches now** lists every working stage with its model (including "thinking" while a call is in flight), step and latest tool call.
+- `HARNESS2_MOCK_DELAY_MS` slows the offline mock model, for demos.
+
+![Live Overview](docs/img/overview_live.png)
+
 ## Memory
 
 | Memory | Holds | Read by | Written by |

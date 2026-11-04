@@ -224,6 +224,8 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/runs/:id/log", get(run_log))
             .route("/api/runs/:id/events", get(run_events))
             .route("/api/runs/:id/cancel", post(cancel_run))
+            .route("/api/runs/:id/stream", get(run_stream))
+            .route("/api/live", get(live_stream))
             .layer(axum::extract::DefaultBodyLimit::max(200 * 1024 * 1024));
         let listener = tokio::net::TcpListener::bind((host, port)).await?;
         let addr = listener.local_addr()?;
@@ -476,8 +478,11 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
     let sink = hlog::Sink::persistent(runs_dir().join(&id));
     hlog::register(&id, sink.clone());
     let (rid, gid) = (id.clone(), goal_id.to_string());
+    let root_dir = root.clone();
     std::thread::spawn(move || {
         hlog::set_current(Some(sink.clone()));
+        let cap = GoalAdapter::open(&root_dir).map(|a| a.settings.max_usd_per_run).unwrap_or(0.0);
+        hlog::set_budget(Some(std::sync::Arc::new(hlog::Budget { cap_usd: cap, ..Default::default() })));
         crate::say!("Queued (at most {} run(s) at once; HARNESS2_MAX_RUNS)", crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1));
         let _slot = RUN_SLOTS.acquire();
         if sink.is_cancelled() {
@@ -504,7 +509,9 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
             };
             // Self-healing: a run that failed, or finished partial because a model session or
             // rollout failed, is retried; finished work is reused, so only the broken parts redo.
-            let heal = !cancelled && attempt < retries && (status == "failed" || (status == "partial" && transient(&errs)));
+            let capped = hlog::budget().map(|b| b.exceeded()).unwrap_or(false);
+            let status = if capped { "capped".to_string() } else { status };
+            let heal = !cancelled && !capped && attempt < retries && (status == "failed" || (status == "partial" && transient(&errs)));
             if heal {
                 attempt += 1;
                 let wait = crate::config::env_int("HARNESS2_RUN_RETRY_WAIT", 30).unwrap_or(30).max(0) as u64;
@@ -1124,6 +1131,111 @@ async fn run_events(AxPath(id): AxPath<String>, Query(q): Query<LogQ>) -> Respon
         Json(json!({"from": from, "next": from + evs.len(), "events": evs, "run": info})),
     )
         .into_response()
+}
+
+// ---------- push updates (server-sent events) ----------
+type SseStream = std::pin::Pin<Box<dyn futures_util::Stream<Item = std::result::Result<axum::response::sse::Event, std::convert::Infallible>> + Send>>;
+
+/// One run's new log lines and events as they happen; ends when the run does.
+async fn run_stream(AxPath(id): AxPath<String>, Query(q): Query<StreamQ>) -> axum::response::Sse<SseStream> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    let st = (id, q.log.unwrap_or(0), q.ev.unwrap_or(0), false);
+    let s = futures_util::stream::unfold(st, |(id, mut lf, mut ef, done)| async move {
+        if done {
+            return None;
+        }
+        loop {
+            let info = RUNS.lock().unwrap().get(&id).cloned();
+            let Some(info) = info else {
+                return Some((Ok(Event::default().event("gone").data("{}")), (id, lf, ef, true)));
+            };
+            let sink = hlog::named(&id);
+            let lines = sink.lines_from(lf);
+            let evs = sink.events_from(ef);
+            let finished = info.status != "running" && info.status != "queued";
+            if !lines.is_empty() || !evs.is_empty() || finished {
+                lf += lines.len();
+                ef += evs.len();
+                let data = json!({"lines": lines, "events": evs, "status": info.status, "error": info.error, "project": info.project, "goal_id": info.goal_id, "log_next": lf, "ev_next": ef});
+                return Some((Ok(Event::default().event("tick").data(data.to_string())), (id, lf, ef, finished)));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    });
+    Sse::new(Box::pin(s) as SseStream).keep_alive(KeepAlive::default())
+}
+
+#[derive(Deserialize)]
+struct StreamQ {
+    log: Option<usize>,
+    ev: Option<usize>,
+}
+
+/// Where each running run is right now: active stages with their model and last tool call,
+/// plus the latest notable events (heals, gate decisions, memory, guard).
+fn live_snapshot() -> Value {
+    let runs: Vec<RunInfo> = RUNS.lock().unwrap().values().filter(|r| r.status == "running" || r.status == "queued").cloned().collect();
+    let mut out = vec![];
+    for r in runs {
+        let evs = hlog::named(&r.id).events_from(0);
+        let mut active: BTreeMap<String, Value> = BTreeMap::new();
+        let mut notable = vec![];
+        let (mut runs_done, mut sessions_done) = (0, 0);
+        for e in &evs {
+            let node = e["node"].as_str().unwrap_or("").to_string();
+            let key = format!("{}|{}", e["mode"].as_str().unwrap_or(""), node);
+            let kind = e["kind"].as_str().unwrap_or("");
+            let status = e["status"].as_str().unwrap_or("");
+            match (kind, status) {
+                ("stage" | "rollout" | "select" | "learn", "start") => {
+                    active.insert(key, json!({"node": node, "mode": e["mode"], "phase": e["phase"], "kind": kind, "since": e["t"], "model": "", "tool": ""}));
+                }
+                ("stage" | "rollout" | "select" | "learn", "done" | "failed" | "fell_back" | "retry") => {
+                    if status != "retry" {
+                        active.remove(&key);
+                        if kind == "rollout" { runs_done += 1 } else { sessions_done += 1 }
+                    }
+                }
+                ("step", "call") => {
+                    if let Some(a) = active.get_mut(&key) {
+                        a["model"] = e["model"].clone();
+                        a["calling"] = json!(true);
+                        a["call_t"] = e["t"].clone();
+                        a["step"] = e["step"].clone();
+                    }
+                }
+                ("step", "turn") => {
+                    if let Some(a) = active.get_mut(&key) {
+                        a["calling"] = json!(false);
+                        a["model"] = e["model"].clone();
+                        a["tool"] = e["tools"].get(0).cloned().unwrap_or(Value::Null);
+                        a["step"] = e["step"].clone();
+                        a["last"] = e["t"].clone();
+                    }
+                }
+                ("heal" | "gate" | "memory", _) | ("select", "guard") => notable.push(e.clone()),
+                _ => {}
+            }
+        }
+        let n = notable.len();
+        out.push(json!({"id": r.id, "project": r.project, "goal": r.goal, "status": r.status, "source": r.source,
+            "active": active.into_values().collect::<Vec<_>>(), "recent": notable.into_iter().skip(n.saturating_sub(8)).collect::<Vec<_>>(),
+            "rollouts_done": runs_done, "sessions_done": sessions_done, "k": r.k, "modes": r.modes}));
+    }
+    json!({"runs": out, "health": crate::llm::health::snapshot(), "approvals": crate::llm::approval::list().len(), "at": util::now_iso()})
+}
+
+/// The whole system, pushed every second for the live Overview.
+async fn live_stream() -> axum::response::Sse<SseStream> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    let s = futures_util::stream::unfold(0u64, |n| async move {
+        if n > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+        let snap = tokio::task::spawn_blocking(live_snapshot).await.unwrap_or(Value::Null);
+        Some((Ok(Event::default().event("live").data(snap.to_string())), n + 1))
+    });
+    Sse::new(Box::pin(s) as SseStream).keep_alive(KeepAlive::default())
 }
 
 async fn cancel_run(AxPath(id): AxPath<String>) -> ApiResult {

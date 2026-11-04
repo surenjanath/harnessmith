@@ -30,12 +30,56 @@ pub struct Stat {
     pub out_tok_s: f64,
     pub in_tokens: u64,
     pub out_tokens: u64,
+    pub cached_tokens: u64,
 }
 
 static STATS: Lazy<Mutex<BTreeMap<String, Stat>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
 
 fn ewma(old: f64, new: f64) -> f64 {
     if old == 0.0 { new } else { old * 0.7 + new * 0.3 }
+}
+
+/// Today's spend per connection (UTC day), persisted in `<runs>/spend.json`.
+static SPEND: Lazy<Mutex<(String, BTreeMap<String, f64>)>> = Lazy::new(|| {
+    let p = crate::config::get().runs.join("spend.json");
+    let v: Value = std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+    let day = v["day"].as_str().unwrap_or("").to_string();
+    let m = v["spend"].as_object().map(|o| o.iter().map(|(k, x)| (k.clone(), x.as_f64().unwrap_or(0.0))).collect()).unwrap_or_default();
+    Mutex::new((day, m))
+});
+
+fn today() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+pub fn record_cost(conn: &str, usd: f64) {
+    if usd <= 0.0 {
+        return;
+    }
+    let mut g = SPEND.lock().unwrap();
+    let t = today();
+    if g.0 != t {
+        *g = (t.clone(), BTreeMap::new());
+    }
+    *g.1.entry(conn.to_string()).or_default() += usd;
+    let body = json!({"day": g.0, "spend": g.1});
+    let _ = std::fs::write(crate::config::get().runs.join("spend.json"), body.to_string());
+}
+
+pub fn spent_today(conn: &str) -> f64 {
+    let g = SPEND.lock().unwrap();
+    if g.0 != today() { 0.0 } else { g.1.get(conn).copied().unwrap_or(0.0) }
+}
+
+/// Whether a connection has used up its daily cap.
+pub fn over_cap(c: &super::connections::Connection) -> bool {
+    c.daily_usd.map(|cap| cap > 0.0 && spent_today(&c.name) >= cap).unwrap_or(false)
+}
+
+pub fn record_cached(conn: &str, cached: u64) {
+    if cached > 0 {
+        STATS.lock().unwrap().entry(conn.to_string()).or_default().cached_tokens += cached;
+    }
 }
 
 pub fn record_ok(conn: &str, took: Duration, in_tok: u64, out_tok: u64) {
@@ -122,7 +166,8 @@ pub fn snapshot() -> Value {
                         "reopens_in_s": s.open_until.map(|t| t.saturating_duration_since(Instant::now()).as_secs()),
                         "last_error": s.last_error, "last_ok_s_ago": ago(s.last_ok), "last_fail_s_ago": ago(s.last_fail),
                         "latency_ms": s.latency_ms.round(), "out_tok_s": (s.out_tok_s * 10.0).round() / 10.0,
-                        "in_tokens": s.in_tokens, "out_tokens": s.out_tokens,
+                        "in_tokens": s.in_tokens, "out_tokens": s.out_tokens, "cached_tokens": s.cached_tokens,
+                        "spent_today_usd": (spent_today(k) * 10000.0).round() / 10000.0,
                     }),
                 )
             })

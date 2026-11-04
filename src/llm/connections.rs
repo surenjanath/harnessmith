@@ -51,6 +51,15 @@ pub struct Connection {
     /// Max simultaneous requests to this endpoint (default: 1 for Ollama, unlimited otherwise).
     #[serde(default)]
     pub max_concurrency: Option<usize>,
+    /// USD per million cached input tokens (default: 10% of input for Anthropic, 50% otherwise).
+    #[serde(default)]
+    pub cached_input_price: Option<f64>,
+    /// Daily spending cap in USD (UTC day); over it, calls fail over to the next model in the chain.
+    #[serde(default)]
+    pub daily_usd: Option<f64>,
+    /// Prompt caching where the provider supports it (default on).
+    #[serde(default)]
+    pub prompt_cache: Option<bool>,
 }
 
 impl Connection {
@@ -62,6 +71,12 @@ impl Connection {
             return std::env::var(&self.api_key_env).unwrap_or_default();
         }
         String::new()
+    }
+
+    /// USD for one reply: fresh input, cache writes (1.25x) and reads, and output.
+    pub fn cost(&self, r: &super::client::ChatResp) -> f64 {
+        let cached = self.cached_input_price.unwrap_or(self.input_price * if self.provider == "anthropic" { 0.1 } else { 0.5 });
+        (r.input_tokens as f64 * self.input_price + r.cache_write_tokens as f64 * self.input_price * 1.25 + r.cached_tokens as f64 * cached + r.output_tokens as f64 * self.output_price) / 1e6
     }
 
     /// Effective concurrency limit.
@@ -160,6 +175,9 @@ fn builtin(name: &str) -> Option<Connection> {
         temperature: None,
         context_window: None,
         max_concurrency: None,
+        cached_input_price: None,
+        daily_usd: None,
+        prompt_cache: None,
     };
     Some(match name {
         "openai" => mk("openai", "", "OPENAI_API_KEY"),

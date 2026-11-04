@@ -324,6 +324,9 @@ fn models(a: ModelsArgs) -> Result<()> {
                 temperature: None,
                 context_window: None,
                 max_concurrency: None,
+                cached_input_price: None,
+                daily_usd: None,
+                prompt_cache: None,
             });
             connections::save(&reg)?;
             println!("saved {}", connections::path().display());

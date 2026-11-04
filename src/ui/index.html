@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harness² Studio</title>
+<title>Harnessmith</title>
 <style>
 :root {
   --bg: #f5f6f8; --panel: #ffffff; --panel2: #f0f2f5; --ink: #16191d; --muted: #5b6470; --faint: #8a929d; --line: #e2e5e9; --line2: #cdd2d9;
@@ -139,6 +139,23 @@ svg .t1 { font: 600 10.5px var(--mono); fill: var(--ink); letter-spacing: .04em;
 svg .t2 { font: 9px var(--mono); fill: var(--muted); letter-spacing: .03em; }
 svg .t3 { font: 600 9px var(--mono); fill: var(--muted); letter-spacing: .06em; }
 svg .tok { fill: var(--ok); } svg .tbad { fill: var(--bad); } svg .twarn { fill: var(--warn); } svg .tacc { fill: var(--accent); }
+svg .bx.now rect { stroke: var(--accent); stroke-width: 2.6; animation: glow 1.2s ease-in-out infinite; }
+svg .bx.now .t1 { fill: var(--accent); }
+svg .bx.done rect { stroke: var(--ok); }
+svg .bx.flash-bad rect { stroke: var(--bad); stroke-width: 2.6; }
+svg .bx.flash-warn rect, svg .bx.flash-warn path.cyl { stroke: var(--warn); stroke-width: 2.6; }
+svg .bx.flash-mem path.cyl, svg .bx.flash-mem rect { stroke: var(--pink); stroke-width: 2.6; }
+svg .pkt { fill: var(--accent); }
+svg .pkt.tool { fill: var(--warn); } svg .pkt.model { fill: var(--improver); }
+@keyframes glow { 50% { stroke-opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { svg .bx.now rect { animation: none; } svg .pkt { display: none !important; } }
+.livebar { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; font: 12px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 0 0 16px; }
+.livebar b { color: var(--ink); font-weight: 600; }
+.livebar .dot.active { margin-right: 4px; }
+.where { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.where th, .where td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.where th { color: var(--muted); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+.where td.m { color: var(--improver); } .where td.t { color: var(--accent); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 svg .grp { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 7 5; }
 svg .main { fill: none; stroke: var(--ink); stroke-width: 2.6; }
 svg .data { fill: none; stroke: var(--ink); stroke-width: 1.3; marker-end: url(#ah); }
@@ -250,7 +267,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 </head>
 <body>
 <header>
-  <h1>Harness<sup>2</sup> Studio <small id="ver"></small></h1>
+  <h1>Harnessmith <small id="ver"></small></h1>
   <nav id="nav">
     <button data-v="overview">Overview</button>
     <button data-v="run" class="on">Run a goal</button>
@@ -366,6 +383,10 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
         <div><label>$ / 1M input tokens</label><input id="cf-pin" type="number" step="0.01" placeholder="0"></div>
         <div><label>$ / 1M output tokens</label><input id="cf-pout" type="number" step="0.01" placeholder="0"></div>
       </div>
+      <div class="row">
+        <div><label>$ / 1M cached input</label><input id="cf-pcache" type="number" step="0.01" placeholder="Anthropic 10%, else 50%"></div>
+        <div><label>Daily $ cap · then fail over</label><input id="cf-cap" type="number" step="0.01" placeholder="no cap"></div>
+      </div>
       <div class="actions">
         <button class="btn primary" id="cf-save">Save</button>
         <button class="btn" id="cf-list">Fetch models</button>
@@ -395,6 +416,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
         <div><label>Effort</label><select id="s-effort"><option>low</option><option>medium</option><option>high</option></select></div>
         <div><label>Shell tool for the agent</label><select id="s-shell"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
         <div><label>Sub-agents</label><select id="s-subs"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
+        <div><label>Max $ per run (0 = no cap)</label><input id="s-maxusd" type="number" step="0.1" min="0"></div>
         <div><label>Parallel stages</label><select id="s-par"><option value="1">1 (best for one local model)</option><option value="2">2 (reference)</option><option value="4">4</option></select></div>
       </div>
     </details>
@@ -538,7 +560,7 @@ function show(v) {
   if (v === "harness") loadHarness();
   if (v === "library") loadLibrary();
   if (v === "doctor") runDoctor();
-  if (v === "overview") loadOverview();
+  if (v === "overview") loadOverview(); else closeLive();
   if (v === "memory") loadMemory();
   if (v === "models") startHealthTable(); else stopHealthTable();
 }
@@ -949,7 +971,37 @@ function watch(runId) {
       }
     } catch (e) { $("#live-status").textContent = e.message; }
   };
-  tick(); liveTimer = setInterval(tick, 1200);
+  // Push updates: the server streams new log lines and events as they happen; polling is the
+  // fallback when the stream cannot be opened or drops.
+  const apply = (d) => {
+    if (d.lines && d.lines.length) {
+      const pre = $("#live-log"), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+      pre.textContent += d.lines.join("\n") + "\n";
+      if (atEnd) pre.scrollTop = pre.scrollHeight;
+    }
+    liveFrom = d.log_next; evFrom = d.ev_next; events = events.concat(d.events || []);
+    renderPipeline($("#live-graph"), reduceEvents(events));
+    $("#live-open").onclick = () => { show("history"); openGoal(d.goal_id); };
+    if (d.status === "queued") $("#live-title").textContent = "Queued — waiting for a free run slot…";
+    else if (d.status === "running" && $("#live-title").textContent.startsWith("Queued")) $("#live-title").textContent = "Running…";
+    if (d.status !== "running" && d.status !== "queued") {
+      $("#live-cancel").classList.add("hidden");
+      $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically", capped: "Stopped at the spending cap"}[d.status] || "Finished with problems";
+      $("#live-status").innerHTML = d.error ? `<span class="err">${esc(d.error)}</span>` : "";
+      return true;
+    }
+    return false;
+  };
+  if (window.runES) { window.runES.close(); window.runES = null; }
+  if (window.EventSource) {
+    const es = new EventSource(`/api/runs/${encodeURIComponent(runId)}/stream?log=0&ev=0`);
+    window.runES = es;
+    let finished = false;
+    es.addEventListener("tick", (m) => { if (liveRun !== runId) return es.close(); try { if (apply(JSON.parse(m.data))) { finished = true; es.close(); } } catch (e) {} });
+    es.addEventListener("gone", () => { finished = true; es.close(); });
+    // A dropped stream would reconnect from the start and replay; poll from where we are instead.
+    es.onerror = () => { es.close(); if (!finished && liveRun === runId) { clearInterval(liveTimer); tick(); liveTimer = setInterval(tick, 1200); } };
+  } else { tick(); liveTimer = setInterval(tick, 1200); }
 }
 
 // ---------- health + doctor ----------
@@ -966,7 +1018,7 @@ async function refreshHealth() {
     if (t && names.length) t.innerHTML = `<table><thead><tr><th>Connection</th><th>State</th><th>Avg call</th><th>Tokens out</th><th>OK / fail</th><th></th></tr></thead><tbody>${names.map(n => { const x = h[n];
       return `<tr><td><b>${esc(n)}</b>${x.last_error && x.state !== "healthy" ? `<div class="hint err">${esc(x.last_error.slice(0, 140))}</div>` : ""}</td>
       <td><span class="chip ${x.state === "healthy" ? "ok" : x.state === "open" ? "bad" : x.state === "unknown" ? "" : "warn"}">${esc(x.state)}${x.state === "open" && x.reopens_in_s != null ? " · retry in " + x.reopens_in_s + "s" : ""}</span></td>
-      <td>${x.latency_ms ? fmtT(x.latency_ms) : "—"}</td><td>${fmtK(x.out_tokens)}</td><td>${x.ok} / ${x.fail}</td>
+      <td>${x.latency_ms ? fmtT(x.latency_ms) : "—"}</td><td>${fmtK(x.out_tokens)}${x.cached_tokens ? ` <span class="hint">· ${fmtK(x.cached_tokens)} cached</span>` : ""}</td><td>${x.ok} / ${x.fail}${x.spent_today_usd ? ` <span class="hint">· $${x.spent_today_usd.toFixed(3)} today</span>` : ""}</td>
       <td>${x.state === "open" || x.state === "degraded" ? `<button class="btn small" onclick="docFix('reset_breaker:${esc(n)}')">Reset</button>` : ""}</td></tr>`; }).join("")}</tbody></table>`;
   } catch (e) {}
 }
@@ -1009,7 +1061,7 @@ async function loadModels() {
   $("#r-solver").value = s.solver_model; $("#r-improver").value = s.improver_model; $("#r-selector").value = s.selector_model; $("#r-judge").value = s.judge_model;
   $("#s-channel").value = s.improver_channel; $("#s-ssteps").value = s.solver_steps; $("#s-isteps").value = s.improver_steps;
   $("#s-stime").value = s.solver_timeout; $("#s-itime").value = s.improver_timeout; $("#s-effort").value = s.effort;
-  $("#s-shell").value = String(s.allow_shell); $("#s-subs").value = String(s.allow_subagents); $("#s-par").value = String(s.parallelism || 2);
+  $("#s-shell").value = String(s.allow_shell); $("#s-subs").value = String(s.allow_subagents); $("#s-par").value = String(s.parallelism || 2); $("#s-maxusd").value = s.max_usd_per_run || 0;
   const ids = new Set();
   conns.connections.forEach(c => { if (c.default_model) ids.add(`${c.name}/${c.default_model}`); });
   ["openai/gpt-4.1", "anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro", "ollama/qwen3", "mock/mock-1"].forEach(x => ids.add(x));
@@ -1044,17 +1096,17 @@ function connForm() {
   return {name: $("#cf-name").value.trim(), provider: $("#cf-provider").value, base_url: $("#cf-base").value.trim(), api_key: $("#cf-key").value,
     api_key_env: $("#cf-keyenv").value.trim(), default_model: $("#cf-model").value.trim(), input_price: +($("#cf-pin").value || 0),
     output_price: +($("#cf-pout").value || 0), max_tokens: num($("#cf-maxtok")), temperature: null,
-    context_window: num($("#cf-ctx")), max_concurrency: num($("#cf-conc"))};
+    context_window: num($("#cf-ctx")), max_concurrency: num($("#cf-conc")), cached_input_price: num($("#cf-pcache")), daily_usd: num($("#cf-cap")), prompt_cache: null};
 }
 window.editConn = (name) => {
   const c = conns.connections.find(x => x.name === name); if (!c) return;
   $("#cf-title").textContent = "Edit " + name;
   $("#cf-name").value = c.name; $("#cf-provider").value = c.provider; $("#cf-base").value = c.base_url; $("#cf-key").value = c.api_key;
   $("#cf-keyenv").value = c.api_key_env; $("#cf-model").value = c.default_model; $("#cf-maxtok").value = c.max_tokens ?? "";
-  $("#cf-pin").value = c.input_price || ""; $("#cf-pout").value = c.output_price || ""; $("#cf-ctx").value = c.context_window ?? ""; $("#cf-conc").value = c.max_concurrency ?? ""; $("#cf-provider").onchange();
+  $("#cf-pin").value = c.input_price || ""; $("#cf-pout").value = c.output_price || ""; $("#cf-ctx").value = c.context_window ?? ""; $("#cf-conc").value = c.max_concurrency ?? ""; $("#cf-pcache").value = c.cached_input_price ?? ""; $("#cf-cap").value = c.daily_usd ?? ""; $("#cf-provider").onchange();
 };
 window.delConn = async (name) => { if (!confirm("Remove connection " + name + "?")) return; await api("connections/" + encodeURIComponent(name), {method: "DELETE"}); loadModels(); };
-$("#cf-clear").onclick = () => { ["#cf-name", "#cf-base", "#cf-key", "#cf-keyenv", "#cf-model", "#cf-maxtok", "#cf-pin", "#cf-pout", "#cf-ctx", "#cf-conc"].forEach(s => $(s).value = ""); $("#cf-title").textContent = "Add a connection"; };
+$("#cf-clear").onclick = () => { ["#cf-name", "#cf-base", "#cf-key", "#cf-keyenv", "#cf-model", "#cf-maxtok", "#cf-pin", "#cf-pout", "#cf-ctx", "#cf-conc", "#cf-pcache", "#cf-cap"].forEach(s => $(s).value = ""); $("#cf-title").textContent = "Add a connection"; };
 $("#cf-save").onclick = async () => {
   try { await jpost("connections", connForm()); msg("#cf-msg", "Saved.", true); loadModels(); } catch (e) { msg("#cf-msg", e.message); }
 };
@@ -1076,7 +1128,7 @@ function settingsForm() {
   s.selector_model = $("#r-selector").value.trim() || s.improver_model; s.judge_model = $("#r-judge").value.trim();
   s.improver_channel = $("#s-channel").value; s.solver_steps = +$("#s-ssteps").value || 60; s.improver_steps = +$("#s-isteps").value || 80;
   s.solver_timeout = +$("#s-stime").value || 1800; s.improver_timeout = +$("#s-itime").value || 1800; s.effort = $("#s-effort").value;
-  s.allow_shell = $("#s-shell").value === "true"; s.allow_subagents = $("#s-subs").value === "true"; s.parallelism = +$("#s-par").value;
+  s.allow_shell = $("#s-shell").value === "true"; s.allow_subagents = $("#s-subs").value === "true"; s.parallelism = +$("#s-par").value; s.max_usd_per_run = +($("#s-maxusd").value || 0);
   return s;
 }
 $("#r-save").onclick = async () => {
@@ -1243,8 +1295,8 @@ async function loadOverview() {
     renderOverview(runs.runs);
   } catch (e) { $("#paper").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
-function svgBox(x, y, w, h, l1, l2, cls = "", l2cls = "t2") {
-  return `<g class="bx ${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5"/><text class="t1" x="${x + w / 2}" y="${y + h / 2 - (l2 ? 3 : -4)}" text-anchor="middle">${esc(l1)}</text>${l2 ? `<text class="${l2cls}" x="${x + w / 2}" y="${y + h / 2 + 11}" text-anchor="middle">${esc(l2)}</text>` : ""}</g>`;
+function svgBox(x, y, w, h, l1, l2, cls = "", l2cls = "t2", id = "") {
+  return `<g class="bx ${cls}"${id ? ` id="${id}"` : ""}><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5"/><text class="t1" x="${x + w / 2}" y="${y + h / 2 - (l2 ? 3 : -4)}" text-anchor="middle">${esc(l1)}</text>${l2 ? `<text class="${l2cls}" x="${x + w / 2}" y="${y + h / 2 + 11}" text-anchor="middle"${id ? ` id="${id}-s"` : ""}>${esc(l2)}</text>` : ""}</g>`;
 }
 const svgNum = (x, y, n) => `<g class="num"><circle cx="${x}" cy="${y}" r="9"/><text x="${x}" y="${y + 4}">${n}</text></g>`;
 const svgDefs = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahp" d="M0,0 L10,5 L0,10 z"/></marker></defs>`;
@@ -1255,7 +1307,7 @@ function figure1(runs) {
   const g = gateCache, mode = g.mode.toUpperCase();
   let o = `<svg viewBox="0 0 1100 500" role="img" aria-label="System layout">${svgDefs}`;
   // process boundary
-  o += `<rect class="grp" x="150" y="14" width="940" height="430"/><text class="t3" x="162" y="30">HARNESS² PROCESS (ONE PER SERVER)</text>`;
+  o += `<rect class="grp" x="150" y="14" width="940" height="430"/><text class="t3" x="162" y="30">HARNESSMITH PROCESS (ONE PER SERVER)</text>`;
   o += `<path class="evt" d="M210,48 H1030 V70" /><text class="t2" x="380" y="44">RERUN ON A GOAL PAGE: STRAIGHT TO THE QUEUE, SAME LIBRARY</text>`;
   // sources
   o += `<rect class="grp" x="10" y="92" width="122" height="230"/><text class="t3" x="18" y="108">SOURCES</text>`;
@@ -1263,27 +1315,28 @@ function figure1(runs) {
   o += svgNum(71, 340, 1);
   o += `<path class="main" d="M120,143 H150 V178 H183"/><path class="main" d="M120,205 H150"/><path class="main" d="M120,267 H150 V205"/>`;
   // gate
-  o += svgNum(245, 128, 2) + svgBox(185, 150, 120, 56, "GATE", `INTAKE · ${g.checks.length + 1} CHECKS`);
+  o += svgNum(245, 128, 2) + svgBox(185, 150, 120, 56, "GATE", `INTAKE · ${g.checks.length + 1} CHECKS`, "", "t2", "ov-gate");
   o += `<path class="data" d="M245,206 V246"/>` + svgBox(178, 248, 134, 48, "STOP", `REASONS RETURNED · ${g.intake.stopped}`);
   o += `<path class="main" d="M305,178 H343"/><text class="t2" x="324" y="171" text-anchor="middle">ACCEPT</text><text class="t2 tok" x="324" y="194" text-anchor="middle">${g.intake.accepted}</text>`;
   // queue + store
-  o += svgNum(405, 128, 3) + svgBox(345, 150, 120, 56, "QUEUE", `+ ${queued.length} WAITING`);
+  o += svgNum(405, 128, 3) + svgBox(345, 150, 120, 56, "QUEUE", `+ ${queued.length} WAITING`, "", "t2", "ov-queue");
   o += `<path class="evt" d="M405,206 V252"/>`;
-  o += `<g class="bx"><path class="cyl" d="M352,258 a53,9 0 0 0 106,0 a53,9 0 0 0 -106,0 v40 a53,9 0 0 0 106,0 v-40"/><text class="t1" x="405" y="285" text-anchor="middle">STORE</text><text class="t2" x="405" y="298" text-anchor="middle">RUNS · LIB · MEMORY</text></g>`;
+  o += `<g class="bx" id="ov-store"><path class="cyl" d="M352,258 a53,9 0 0 0 106,0 a53,9 0 0 0 -106,0 v40 a53,9 0 0 0 106,0 v-40"/><text class="t1" x="405" y="285" text-anchor="middle">STORE</text><text class="t2" x="405" y="298" text-anchor="middle">RUNS · MEMORY</text></g>`;
   // run slots
   const shown = Math.min(Math.max(max, 1), 3), slotH = 66, top = 92;
-  o += `<rect class="grp" x="500" y="68" width="575" height="${shown * (slotH + 12) + 70}"/><text class="t3" x="512" y="84">RUN SLOTS: ${max} (HARNESS2_MAX_RUNS) · ${live.length} BUSY</text>`;
+  o += `<rect class="grp" x="500" y="68" width="575" height="${shown * (slotH + 12) + 70}"/><text class="t3" x="512" y="84" id="ov-slots-t">RUN SLOTS: ${max} (HARNESS2_MAX_RUNS) · ${live.length} BUSY</text>`;
   o += svgNum(1058, 84, 4);
   o += `<path class="main" d="M465,178 H488"/>`;
   for (let i = 0; i < shown; i++) {
     const y = top + i * (slotH + 12), r = live[i];
-    o += `<path class="main" d="M488,178 V${y + slotH / 2} H514"/>`;
-    o += `<g class="bx ${r ? "live" : "dash"}"><rect x="514" y="${y}" width="548" height="${slotH}"/></g>`;
-    o += `<text class="t1" x="524" y="${y + 15}">${r ? "RUN-" + esc(r.id.slice(4, 18)) : "FREE SLOT"}</text><text class="t2" x="1052" y="${y + 15}" text-anchor="end">${r ? esc((r.goal || "").slice(0, 48).toUpperCase()) : "OWN WORKSPACE, HARNESS COPY, MODELS"}</text>`;
+    o += `<path class="main" d="M488,178 V${y + slotH / 2} H514"/><path id="ov-wq-${i}" d="M305,178 H488 V${y + slotH / 2} H514" fill="none" stroke="none"/>`;
+    o += `<g class="bx ${r ? "live" : "dash"}" id="ov-slot-${i}"><rect x="514" y="${y}" width="548" height="${slotH}"/></g>`;
+    o += `<text class="t1" x="524" y="${y + 15}" id="ov-slot-t-${i}">${r ? "RUN-" + esc(r.id.slice(4, 18)) : "FREE SLOT"}</text><text class="t2" x="1052" y="${y + 15}" text-anchor="end" id="ov-slot-g-${i}">${r ? esc((r.goal || "").slice(0, 48).toUpperCase()) : "OWN WORKSPACE, HARNESS COPY, MODELS"}</text>`;
+    o += `<circle r="4.5" class="pkt" id="ov-pq-${i}" style="display:none"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#ov-wq-${i}"/></animateMotion></circle>`;
     const st = [["BASE", "SOLVER"], ["PROPOSE", "INV · DOM"], ["COMPOSE", "+ PROBE"], ["SELECT", "BLIND"], ["LEARN", "LESSON"]];
     st.forEach(([a, b], j) => {
       const x = 524 + j * 106;
-      o += svgBox(x, y + 24, 90, 34, a, b, r ? "" : "off");
+      o += svgBox(x, y + 24, 90, 34, a, b, r ? "" : "off", "t2", `ov-st-${i}-${j}`);
       if (j < 4) o += `<path class="data" d="M${x + 90},${y + 41} H${x + 104}"/>`;
     });
   }
@@ -1291,9 +1344,12 @@ function figure1(runs) {
   o += svgBox(700, qy - 2, 190, 32, max > shown ? `+${max - shown} MORE SLOTS` : "+ QUEUED GOALS WAIT", queued.length ? `${queued.length} WAITING NOW` : "NONE WAITING", "dash");
   // tool gate + models
   const sbk = (projectData.settings.sandbox || "auto") === "off" ? "NO SANDBOX" : statusCache.sandbox && statusCache.sandbox.bwrap ? "BWRAP" : statusCache.sandbox && statusCache.sandbox.unshare ? "UNSHARE" : "NO SANDBOX";
-  o += svgBox(185, 340, 130, 50, "TOOL GATE", `${mode} · ${sbk}`, "", g.mode === "off" || sbk === "NO SANDBOX" ? "t2 tbad" : "t2 tok");
-  o += svgBox(345, 340, 130, 50, "MODELS", down ? `${down} DOWN · FAILING OVER` : `${hs.length} SEEN · HEALTHY`, "", down ? "t2 tbad" : "t2 tok");
-  o += `<path class="evt" d="M560,${qy + 8} V326 H250 V338"/><path class="evt" d="M640,${qy + 8} V365 H477"/>`;
+  o += svgBox(185, 340, 130, 50, "TOOL GATE", `${mode} · ${sbk}`, "", g.mode === "off" || sbk === "NO SANDBOX" ? "t2 tbad" : "t2 tok", "ov-tool");
+  o += svgBox(345, 340, 130, 50, "MODELS", down ? `${down} DOWN · FAILING OVER` : `${hs.length} SEEN · HEALTHY`, "", down ? "t2 tbad" : "t2 tok", "ov-models");
+  o += `<path class="evt" id="ov-wt" d="M560,${qy + 8} V326 H250 V338"/><path class="evt" id="ov-wm" d="M640,${qy + 8} V365 H477"/>`;
+  o += `<circle r="4" class="pkt tool" id="ov-pt" style="display:none"><animateMotion dur="1.1s" repeatCount="indefinite"><mpath href="#ov-wt"/></animateMotion></circle>`;
+  o += `<circle r="4" class="pkt model" id="ov-pm" style="display:none"><animateMotion dur="0.9s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#ov-wm"/></animateMotion></circle>`;
+  o += `<text class="t2 tacc" x="482" y="356" id="ov-model-now"></text>`;
   o += `<text class="t2" x="552" y="320" text-anchor="end">EVERY SOLVER TOOL CALL</text><text class="t2" x="646" y="380">EVERY MODEL CALL</text>`;
   // legend
   o += `<g transform="translate(185,412)"><rect x="0" y="-8" width="16" height="10" fill="none" stroke="currentColor" class="ahp" style="fill:none;stroke:var(--ink)"/><text class="t2" x="22" y="1">COMPONENT</text><path class="main" d="M110,-3 H140"/><text class="t2" x="146" y="1">MAIN PATH</text><path class="data" d="M230,-3 H260"/><text class="t2" x="266" y="1">DATA</text><path class="evt" d="M310,-3 H340"/><text class="t2" x="346" y="1">EVENT</text></g>`;
@@ -1307,7 +1363,7 @@ function figure2() {
   const st = [["GOAL", "IN"], ["GATE", "7 CHECKS"], ["QUEUE", `MAX ${p.max_runs || 1} AT ONCE`], ["BASE", `≤${s.solver_steps} STEPS`], ["PROPOSE", "INV + DOM"], ["COMPOSE", "MERGE + PROBE"], ["SELECT", "BLIND"], ["LEARN", "LIBRARY"], ["DONE", "REPORT"]];
   const W = 104, G = 16, X = (i) => 8 + i * (W + G);
   let o = `<svg viewBox="0 0 1090 230" role="img" aria-label="Run lifecycle">${svgDefs}`;
-  st.forEach(([a, b], i) => { o += svgBox(X(i), 40, W, 46, a, b); if (i < st.length - 1) o += `<path class="data" d="M${X(i) + W},63 H${X(i + 1)}"/>`; });
+  st.forEach(([a, b], i) => { o += svgBox(X(i), 40, W, 46, a, b, "", "t2", `ov2-st-${i}`); if (i < st.length - 1) o += `<path class="data" d="M${X(i) + W},63 H${X(i + 1)}"/>`; });
   // annotations
   o += `<path class="evt" d="M${X(1) + 52},86 V150"/><text class="t2" x="${X(1) + 10}" y="166">STOP: EVERY REASON</text><text class="t2" x="${X(1) + 10}" y="178">RETURNED AT ONCE</text>`;
   o += `<path class="evt" d="M${X(3) + 30},150 V88"/><text class="t2" x="${X(3) - 30}" y="166">ROLLOUT FAILS: RETRY ONCE</text><text class="t2" x="${X(3) - 30}" y="178">AFTER ${p.rollout_retry_wait_s ?? 10} S · TOOL GATE ON EVERY CALL</text><text class="t2" x="${X(3) - 30}" y="190">SOLVER ${Math.round(s.solver_timeout / 60)} MIN · IMPROVER ${Math.round(s.improver_timeout / 60)} MIN</text>`;
@@ -1323,16 +1379,21 @@ function renderOverview(runs) {
   const step = (ok, txt, todo) => `<li class="${ok ? "done" : ""}">${txt} ${ok ? '<span class="ck">✓</span>' : `<span class="todo">· ${todo}</span>`}</li>`;
   const modeRow = (m, a, b) => `<tr class="${g.mode === m ? "on" : ""}" onclick="setGateMode('${m}')" title="Switch the gate to ${m}"><td>${a}</td><td>${b}</td></tr>`;
   $("#paper").innerHTML = `
-  <div class="ttl"><h2>Harness<sup>2</sup> Studio</h2><div class="tag">One gate · one queue · a recursion per goal · as little human attention as possible</div></div>
-  <div class="sec"><b>1</b><div><h3>Introduction.</h3><p>Harness² adapts an agent's harness to each goal. One process takes every goal in, checks it at a deterministic gate, and gives each accepted goal its own run slot, workspace and harness copy. Solver attempts are probed, an improver proposes and composes edits, and a blind selector adopts one output and writes a lesson for the next goal (figure 1).</p></div></div>
+  <div class="ttl"><h2>Harnessmith</h2><div class="tag">One gate · one queue · a recursion per goal · as little human attention as possible</div></div>
+  <div class="livebar" id="livebar"><span><span class="dot"></span>connecting to the live feed…</span></div>
+  <div class="sec"><b>1</b><div><h3>Introduction.</h3><p>Harnessmith adapts an agent's harness to each goal, using the Harness² method. One process takes every goal in, checks it at a deterministic gate, and gives each accepted goal its own run slot, workspace and harness copy. Solver attempts are probed, an improver proposes and composes edits, and a blind selector adopts one output and writes a lesson for the next goal (figure 1).</p></div></div>
   <div class="fig">${figure1(runs)}</div>
   <div class="fig-cap"><b>Figure 1.</b> Layout: one gate, a queue of run slots, and replies on the same goal page.</div>
   <div class="sec"><b>2</b><div><h3>How it works.</h3><p>(1) A goal arrives from the web UI or the CLI; a restart resumes interrupted runs. (2) The gate checks the goal, its inputs, the budget, and that every role has a reachable model chain; a stop returns every reason at once. (3) An accepted goal waits for a free run slot. (4) Each run executes the recursion in its own workspace; every solver tool call passes the tool gate, and every model call passes the circuit breakers. (5) Results return on the goal's page (figure 2).</p></div></div>
   <div class="fig">${figure2()}</div>
-  <div class="fig-cap"><b>Figure 2.</b> Run lifecycle with time limits and recovery paths.</div>
-  <div class="pgrid">
+  <div class="fig-cap"><b>Figure 2.</b> Run lifecycle with time limits and recovery paths. The stage the oldest running goal is in lights up.</div>
+  <div class="sec"><b>3</b><div><h3>Where it reaches now.</h3><p>Every stage that is working at this moment, the model serving it and its latest tool call, updated every second. Packets on figure 1 show goals entering their slot (blue), tool calls passing the tool gate (amber) and model calls (green).</p></div></div>
+  <table class="where" id="where"><tr><td class="muted">Nothing is running.</td></tr></table>
+  <div class="ph" style="margin-top:14px">Recent events · heals, gate decisions, memory, regression guard</div>
+  <div class="rows" id="live-feed"><p class="hint">None yet.</p></div>
+  <div class="pgrid" style="margin-top:18px">
     <div>
-      <div class="sec" style="margin-top:4px"><b>3</b><div><h3>Data.</h3></div></div>
+      <div class="sec" style="margin-top:4px"><b>4</b><div><h3>Data.</h3></div></div>
       <table class="ptab"><caption>Table 1. Limits in force for <b>${esc(project)}</b></caption>
         <tr><th>Parameter</th><th>Value</th></tr>
         <tr><td>Run slots (HARNESS2_MAX_RUNS)</td><td>${p.max_runs ?? 1} at once, rest queue</td></tr>
@@ -1346,6 +1407,7 @@ function renderOverview(runs) {
         <tr><td>Tool gate</td><td>${g.mode} · ${g.rules.length + g.custom_rules.filter(Boolean).length} rules · inputs ${g.protect_inputs ? "read-only" : "writable"}</td></tr>
         <tr><td>Sandbox</td><td>${esc(s.sandbox || "auto")} → ${statusCache.sandbox && statusCache.sandbox.bwrap ? "bwrap" : statusCache.sandbox && statusCache.sandbox.unshare ? "unshare" : "none"} · network ${s.sandbox_network ? "on" : "off"}</td></tr>
         <tr><td>Regression guard</td><td>${s.select_guard === false ? "off" : "base attempt competes · failure-looking outputs dropped"}</td></tr>
+        <tr><td>Spending caps</td><td>${s.max_usd_per_run ? "$" + s.max_usd_per_run + " per run" : "no per-run cap"} · daily caps per connection fail over · prompt caching on</td></tr>
         <tr><td>Project memory</td><td>${s.memory_enabled === false ? "off" : "on"} · ≤ 300 notes, 600 chars each · promote ${s.memory_promote === false ? "off" : "≤ 4k chars"}</td></tr>
         <tr><td>Gate decisions so far</td><td>${g.intake.accepted} accepted · ${g.intake.stopped} stopped · ${g.tool.blocked} calls blocked · ${g.tool.would_block} would-block</td></tr>
       </table>
@@ -1378,7 +1440,7 @@ function renderOverview(runs) {
         <textarea id="gate-rules" rows="3" placeholder="\\bnpm\\s+publish\\b">${esc(g.custom_rules.join("\n"))}</textarea>
         <div class="actions" style="margin-top:8px"><button class="btn small" onclick="saveGate()">Save gate</button><span id="gate-msg" class="hint"></span></div>
       </div>
-      <div class="caution" style="margin-top:16px"><h4>CAUTION</h4><p>The solver runs commands as the server's OS user. The gate blocks known-dangerous patterns and keeps inputs read-only, but it is not a sandbox. Run Harness² under a dedicated account that holds only its own credentials.</p></div>
+      <div class="caution" style="margin-top:16px"><h4>CAUTION</h4><p>Solver commands run in the sandbox when one is available, and the gate blocks known-dangerous patterns. MCP servers, hooks of the improver and the server itself run as the OS user. Run Harnessmith under a dedicated account that holds only its own credentials.</p></div>
       <div class="bring"><div class="bh"><span>BRING-UP</span><span>OPERATOR</span></div><ol>
         ${step(Object.keys(healthCache || {}).length > 0 || rolesSet, "MODELS - connect or detect local", "Models tab")}
         ${step(rolesSet, "ROLES - solver, improver, selector chains", "set all three")}
@@ -1389,7 +1451,76 @@ function renderOverview(runs) {
       ${g.intake.recent.length ? `<div class="ph" style="margin-top:14px">Recent gate decisions</div><div class="rows">${g.intake.recent.map(e => `<div class="r"><span class="dot ${e.decision === "accept" ? "ok" : "bad"}"></span><span class="k">${e.decision === "accept" ? "Accept" : "Stop"}</span><span class="v">${esc(e.goal || "")}${(e.reasons || []).length ? " — " + esc(e.reasons.join("; ")) : ""}</span><span class="s st">${esc((e.at || "").slice(11, 16))}</span></div>`).join("")}</div>` : ""}
     </div>
   </div>
-  <div class="fig id" style="margin-top:8px">H2-OVERVIEW · ${esc(project.toUpperCase())}</div>`;
+  <div class="fig id" style="margin-top:8px">HARNESSMITH-OVERVIEW · ${esc(project.toUpperCase())}</div>`;
+  openLive();
+}
+
+// ---------- live Overview: animate the figures from /api/live ----------
+let liveES = null, lastLive = null;
+const STAGE_OF = (node) => node.startsWith("base") ? 0 : /^(inv|dom)/.test(node) ? 1 : /^(agg|c\d)/.test(node) ? 2 : node === "select" ? 3 : node === "learn" ? 4 : -1;
+function openLive() {
+  if (liveES || !window.EventSource) return;
+  liveES = new EventSource("/api/live");
+  liveES.addEventListener("live", (m) => { try { lastLive = JSON.parse(m.data); liveUpdate(lastLive); } catch (e) {} });
+  liveES.onerror = () => { const b = $("#livebar"); if (b) b.innerHTML = '<span><span class="dot bad"></span>live feed lost — reconnecting…</span>'; };
+}
+function closeLive() { if (liveES) { liveES.close(); liveES = null; } }
+const setCls = (id, cls, on) => { const e = document.getElementById(id); if (e) e.classList.toggle(cls, on); };
+const setTxt = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+const show_ = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? "" : "none"; };
+function liveUpdate(L) {
+  if ($("#v-overview").classList.contains("hidden")) return;
+  const now = Date.now();
+  const running = L.runs.filter(r => r.status === "running"), queued = L.runs.filter(r => r.status === "queued");
+  const actives = running.flatMap(r => r.active.map(a => ({...a, run: r})));
+  const models = [...new Set(actives.map(a => a.model).filter(Boolean))];
+  const hs = Object.entries(L.health || {}), down = hs.filter(([, x]) => x.state === "open");
+  const recentAt = (pred, ms) => running.some(r => r.recent.some(e => pred(e) && now - e.t < ms));
+  $("#livebar").innerHTML = `<span><span class="dot ${running.length ? "active" : "ok"}"></span><b>LIVE</b></span>
+    <span><b>${running.length}</b> running · <b>${queued.length}</b> queued</span>
+    <span><b>${actives.length}</b> stage(s) working</span>
+    <span>models ${models.length ? models.map(m => `<b>${esc(m)}</b>`).join(", ") : "idle"}</span>
+    <span>${down.length ? `<span class="st bad">${down.length} down</span>` : '<span class="st ok">all healthy</span>'}</span>
+    ${L.approvals ? `<span class="st warn">✋ ${L.approvals} waiting for you</span>` : ""}
+    <span style="margin-left:auto">${esc((L.at || "").slice(11, 19))} UTC</span>`;
+  // figure 1: slots
+  for (let i = 0; i < 3; i++) {
+    if (!document.getElementById(`ov-slot-${i}`)) break;
+    const r = running[i];
+    setCls(`ov-slot-${i}`, "live", !!r); setCls(`ov-slot-${i}`, "dash", !r);
+    const serving = r ? [...new Set(r.active.map(a => a.model).filter(Boolean))] : [];
+    setTxt(`ov-slot-t-${i}`, r ? `RUN-${r.id.slice(4, 18)}${serving.length ? "  ·  " + serving.join(", ").toUpperCase() : ""}` : "FREE SLOT");
+    setTxt(`ov-slot-g-${i}`, r ? (r.goal || "").slice(0, serving.length ? 30 : 48).toUpperCase() : "OWN WORKSPACE, HARNESS COPY, MODELS");
+    const nowSt = new Set(r ? r.active.map(a => STAGE_OF(a.node)) : []);
+    const maxSt = r ? Math.max(-1, ...r.active.map(a => STAGE_OF(a.node))) : -1;
+    for (let j = 0; j < 5; j++) {
+      setCls(`ov-st-${i}-${j}`, "off", !r); setCls(`ov-st-${i}-${j}`, "now", nowSt.has(j)); setCls(`ov-st-${i}-${j}`, "done", !!r && !nowSt.has(j) && j < maxSt);
+    }
+    show_(`ov-pq-${i}`, !!r);
+  }
+  setTxt("ov-slots-t", `RUN SLOTS: ${(statusCache.policy || {}).max_runs || 1} (HARNESS2_MAX_RUNS) · ${running.length} BUSY`);
+  setTxt("ov-queue-s", `+ ${queued.length} WAITING`);
+  const toolNow = actives.some(a => a.tool && a.last && now - a.last < 4000), modelNow = actives.some(a => a.calling);
+  show_("ov-pt", toolNow); show_("ov-pm", modelNow);
+  setTxt("ov-model-now", models.length ? "→ " + models.join(", ") : "");
+  setTxt("ov-models-s", down.length ? `${down.length} DOWN · FAILING OVER` : `${hs.length} SEEN · HEALTHY`);
+  setCls("ov-models", "flash-warn", recentAt(e => e.kind === "heal", 6000));
+  setCls("ov-tool", "flash-bad", recentAt(e => e.kind === "gate", 6000));
+  setCls("ov-store", "flash-mem", recentAt(e => e.kind === "memory", 6000));
+  // figure 2: the oldest running goal's stage
+  const r0 = running[0], st0 = r0 ? r0.active.map(a => STAGE_OF(a.node)) : [];
+  for (let k = 0; k < 9; k++) setCls(`ov2-st-${k}`, "now", false);
+  if (r0) { st0.forEach(j => setCls(`ov2-st-${j + 3}`, "now", true)); } else if (queued.length) setCls("ov2-st-2", "now", true);
+  // section 3: where it reaches
+  const ago = (t) => t ? fmtT(now - t) + " ago" : "—";
+  $("#where").innerHTML = actives.length ? `<tr><th>Run</th><th>Stage</th><th>Doing</th><th>Model</th><th>Step</th><th>Latest tool call</th><th>Last turn</th></tr>` + actives.map(a => `<tr>
+      <td>${esc(a.run.id.slice(4, 18))}</td><td><b>${esc(a.node)}</b>${a.mode ? " · " + esc(a.mode) : ""}</td>
+      <td>${esc({rollout: a.node.startsWith("base") ? "solving" : "probing", stage: "editing the harness", select: "choosing blind", learn: "writing a lesson"}[a.kind] || a.kind)}</td>
+      <td class="m">${a.model ? esc(a.model) + (a.calling ? ` <span class="st warn">· thinking ${fmtT(now - a.call_t)}</span>` : "") : "starting…"}</td><td>${a.step || "—"}</td><td class="t" title="${esc(a.tool || "")}">${esc(a.tool || "—")}</td><td>${ago(a.last || a.since)}</td></tr>`).join("")
+    : `<tr><td class="muted">${queued.length ? queued.length + " goal(s) waiting for a slot." : "Nothing is running. Start a goal and watch it move through figure 1."}</td></tr>`;
+  const feed = running.flatMap(r => r.recent.map(e => ({...e, run: r.id}))).sort((a, b) => b.t - a.t).slice(0, 8);
+  const label = (e) => e.kind === "heal" ? `🩹 ${e.status}${e.to ? " → " + e.to : ""}` : e.kind === "gate" ? `⛔ gate ${e.status}${e.rule ? " · " + e.rule : ""}` : e.kind === "memory" ? `🧠 memory ${e.status}` : `🛡 guard`;
+  if (feed.length) $("#live-feed").innerHTML = feed.map(e => `<div class="r"><span class="dot ${e.kind === "gate" ? "bad" : e.kind === "heal" ? "warn" : e.kind === "memory" ? "pink" : "selector"}"></span><span class="k">${esc(label(e))}</span><span class="v">${esc(e.node || "")} ${esc(e.call || e.text || e.query || e.error || "")}</span><span class="s st">${ago(e.t)}</span></div>`).join("");
 }
 window.setGateMode = async (m) => { projectData.settings.gate_mode = m; await saveGate(); };
 window.saveGate = async () => {
