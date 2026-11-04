@@ -215,6 +215,13 @@ async fn status() -> ApiResult {
         "projects_root": goal::projects_root(),
         "providers": connections::PROVIDERS,
         "python": util::which("python3").is_some(),
+        "policy": {
+            "max_runs": crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1),
+            "run_retries": crate::config::env_int("HARNESS2_RUN_RETRIES", 1).unwrap_or(1).max(0),
+            "run_retry_wait_s": crate::config::env_int("HARNESS2_RUN_RETRY_WAIT", 30).unwrap_or(30).max(0),
+            "rollout_retry_wait_s": crate::config::env_int("HARNESS2_ROLLOUT_RETRY_WAIT", 10).unwrap_or(10).max(0),
+            "auto_resume": crate::config::env("HARNESS2_AUTO_RESUME").map(|v| v != "0").unwrap_or(true),
+        },
     })))
 }
 

@@ -69,6 +69,10 @@ Connections are saved to `connections.json` (override with `HARNESS2_CONNECTIONS
 
 ## Watching a run: the pipeline map
 
+The map is drawn like a network diagram. Each stage is a box whose line shows the role and status, and links are labelled with what flows along them (`traces`, `edits`, `output`, `verdict`). A link takes the colour of the role that receives it: blue solver, green improver, purple selector, yellow library. The striped trunk marks the path to the adopted output, and dashed boxes are stages that haven't started. Above the run form, **Wiring** shows which model chain serves each role, with its live status (`Live`, `Backup n`, `Degraded`, `Down`). **Self-healing policy** shows the retry and failover rules currently in force.
+
+![Topology map](docs/img/topology.png)
+
 While a goal runs, **Run a goal** draws its pipeline live, one lane per recursion mode:
 
 ```text
