@@ -255,6 +255,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     <button data-v="history">History</button>
     <button data-v="harness">Base harness</button>
     <button data-v="library">Library</button>
+    <button data-v="memory">Memory</button>
     <button data-v="doctor">Doctor</button>
   </nav>
   <div class="spacer"></div>
@@ -444,6 +445,42 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
   </div>
 </section>
 
+<!-- MEMORY -->
+<section id="v-memory" class="hidden">
+  <div class="grid2 top">
+    <div class="panel">
+      <div class="ph">Memory · <b id="m-proj"></b> · <span id="m-stats"></span></div>
+      <div class="row" style="grid-template-columns: 1fr 160px; gap: 0 10px">
+        <div><input id="m-q" placeholder="Search notes…"></div>
+        <div><select id="m-f"><option value="live">active + candidates</option><option value="active">active</option><option value="candidate">candidates</option><option value="pinned">pinned</option><option value="archived">archived</option><option value="all">all</option></select></div>
+      </div>
+      <div class="rows" id="m-list" style="margin-top:10px"></div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Add a note</div>
+        <textarea id="m-text" rows="3" placeholder="e.g. Sales CSVs from the ERP export use ';' as the delimiter and a comma decimal."></textarea>
+        <label>Tags · comma separated</label><input id="m-tags" placeholder="csv, erp">
+        <div class="actions"><button class="btn primary small" id="m-add">Add note</button><span id="m-msg"></span></div>
+      </div>
+      <div class="panel">
+        <div class="ph">How memory works</div>
+        <div class="pol">
+          <div><span class="dot solver"></span><span><b>RECALL:</b> the solver searches notes from earlier goals before planning</span></div>
+          <div><span class="dot warn"></span><span><b>REMEMBER:</b> it saves durable facts and techniques as <i>candidates</i></span></div>
+          <div><span class="dot ok"></span><span><b>SETTLE:</b> after a run, notes from the adopted attempt and base runs become <i>active</i>; the rest are archived</span></div>
+          <div><span class="dot learner"></span><span><b>PROMOTE:</b> adopted notes are appended to the base harness's <code>LongTermMEMORY.md</code></span></div>
+          <div><span class="dot selector"></span><span><b>PIN:</b> pinned notes go into every solver's instructions</span></div>
+          <div><span class="dot bad"></span><span><b>SAFE:</b> notes that look like keys or tokens are refused; memory lives outside the harness</span></div>
+        </div>
+        <label style="margin-top:14px"><input type="checkbox" id="m-on" style="width:auto;margin-right:6px">Solver can remember and recall</label>
+        <label style="margin-top:6px"><input type="checkbox" id="m-promote" style="width:auto;margin-right:6px">Promote adopted notes into LongTermMEMORY.md</label>
+        <div class="actions" style="margin-top:8px"><button class="btn small" id="m-save">Save memory settings</button><span id="m-smsg" class="hint"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- LIBRARY -->
 <section id="v-library" class="hidden">
   <div class="panel"><h2>Experience library</h2><p class="hint">Lessons the selector wrote after each adopted harness. Later goals in the same project and domain read these before proposing edits.</p><div id="lib"></div></div>
@@ -481,6 +518,7 @@ function show(v) {
   if (v === "library") loadLibrary();
   if (v === "doctor") runDoctor();
   if (v === "overview") loadOverview();
+  if (v === "memory") loadMemory();
   if (v === "models") startHealthTable(); else stopHealthTable();
 }
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
@@ -548,7 +586,7 @@ function renderWiring() {
   }).join("") + (() => {
     const w = wiredFrom(projectData.base), shell = s.allow_shell !== false;
     return `<div class="r" title="tools the solver can call"><span class="dot cyan"></span><span class="k">Tools</span><span class="v">${BUILTIN_TOOLS_N} built-in${w.length ? ' <span class="arrow">+</span> ' + w.map(t => esc(t.name)).join(", ") : ""} <span class="muted" style="font-family:Inter,system-ui,sans-serif;font-size:12.5px">&nbsp;<a href="#" onclick="show('harness');return false">${w.length ? "edit" : "wire one"}</a></span></span><span class="s st ${w.length ? (shell ? "ok" : "warn") : "idle"}">${w.length ? (shell ? w.length + " wired" : "Shell off") : "None wired"}</span></div>`;
-  })() + (Object.keys(healthCache).length ? "" : `<div class="hint" style="margin-top:6px">Status turns <span class="st ok">Live</span> after the first successful call. <span class="st warn">Backup n</span> means a failover is serving.</div>`);
+  })() + `<div class="r" title="project memory"><span class="dot ${s.memory_enabled === false ? "hollow" : "pink"}"></span><span class="k">Memory</span><span class="v">remember · recall${s.memory_promote === false ? "" : ' <span class="arrow">→</span> LongTermMEMORY.md'} <span class="muted" style="font-family:Inter,system-ui,sans-serif;font-size:12.5px">&nbsp;<a href="#" onclick="show('memory');return false">open</a></span></span><span class="s st ${s.memory_enabled === false ? "idle" : "ok"}">${s.memory_enabled === false ? "Off" : "On"}</span></div>` + (Object.keys(healthCache).length ? "" : `<div class="hint" style="margin-top:6px">Status turns <span class="st ok">Live</span> after the first successful call. <span class="st warn">Backup n</span> means a failover is serving.</div>`);
 }
 function renderPolicy() {
   const el = $("#policy"); if (!el || !statusCache) return;
@@ -604,7 +642,7 @@ const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3)
 const MODE_NAME = {agg: "Parallel recursion", seq: "Sequential recursion"};
 
 function reduceEvents(events) {
-  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: [], gates: []};
+  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: [], gates: [], mem: []};
   const get = (mode, node) => {
     const key = (node.startsWith("base") ? "" : mode) + "|" + node;
     return S.nodes[key] ||= {key, mode, label: node, dim: node.startsWith("base") ? "BASE" : "", edit: {s: "wait"}, run: {s: "wait"}, sel: {s: "wait"}, evs: []};
@@ -615,11 +653,13 @@ function reduceEvents(events) {
     if (e.kind === "task" && e.status === "done") S.done = e;
     if (e.kind === "heal") S.heals.push(e);
     if (e.kind === "gate") S.gates.push(e);
+    if (e.kind === "memory") S.mem.push(e);
     if (e.kind === "task" && e.status === "start" && S.done) S.done = null; // a healing retry restarted the task
     if (!e.node) continue;
     const n = get(e.mode, e.node); n.evs.push(e);
     if (e.kind === "heal") n.heals = (n.heals || 0) + 1;
     if (e.kind === "gate") n.gates = (n.gates || 0) + 1;
+    if (e.kind === "memory") n.mem = (n.mem || 0) + 1;
     if (e.kind === "stage") {
       n.dim = e.dim || n.dim;
       if (e.status === "start") { n.edit = {s: "active", t: e.t}; }
@@ -683,6 +723,7 @@ function nodeCard(laneId, n, adopted, selected) {
     cls = anyActive ? "active" : bad ? "bad" : n.run.s !== "wait" ? "done" : "";
   }
   if (n.heals) body += `<div class="heal" title="self-healing actions on this node">healed ×${n.heals}</div>`;
+  if (n.mem) body += ` <div class="heal" style="color:var(--cyan);background:color-mix(in srgb,var(--cyan) 14%,transparent)" title="memory saves and recalls on this node">memory ×${n.mem}</div>`;
   if (n.gates) body += ` <div class="heal" style="color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)" title="guardrail gate decisions on this node">gated ×${n.gates}</div>`;
   if (!cls) cls = "wait";
   if (adopted) cls += " adopted";
@@ -738,6 +779,10 @@ function renderPipeline(target, S) {
     const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
     const last = S.heals[S.heals.length - 1];
     h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
+  }
+  if (S.mem.length) {
+    const c = (k) => S.mem.filter(e => e.status === k).length, st = S.mem.find(e => e.status === "settle");
+    h += `<div class="feed" style="border-color:color-mix(in srgb,var(--cyan) 55%,var(--line))"><b style="color:var(--cyan)">Memory</b> — recalled ×${c("recall")} · saved ×${c("remember")}${st ? ` · after the run: kept ${st.kept}, archived ${st.archived}, promoted ${st.promoted}` : ""}</div>`;
   }
   if (S.gates.length) {
     const b = S.gates.filter(e => e.status === "blocked").length, last = S.gates[S.gates.length - 1];
@@ -828,6 +873,8 @@ function nodeDrawer(n, t0) {
         loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
         deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
+    } else if (e.kind === "memory") {
+      cls = "act"; txt = e.status === "remember" ? `🧠 Saved a note <code>${esc(e.id)}</code>${e.dup ? " (already known)" : ""}: ${esc(e.text)}` : e.status === "recall" ? `🧠 Recalled ${e.hits} note(s) for “${esc(e.query)}”` : `🧠 Memory settled: kept ${e.kept}, archived ${e.archived}, promoted ${e.promoted}`;
     } else if (e.kind === "gate") {
       cls = "bad"; txt = `⛔ Gate ${e.status === "blocked" ? "blocked" : "would block (observe)"} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
     } else if (e.kind === "select") {
@@ -1189,7 +1236,7 @@ function figure1(runs) {
   // queue + store
   o += svgNum(405, 128, 3) + svgBox(345, 150, 120, 56, "QUEUE", `+ ${queued.length} WAITING`);
   o += `<path class="evt" d="M405,206 V252"/>`;
-  o += `<g class="bx"><path class="cyl" d="M352,258 a53,9 0 0 0 106,0 a53,9 0 0 0 -106,0 v40 a53,9 0 0 0 106,0 v-40"/><text class="t1" x="405" y="285" text-anchor="middle">STORE</text><text class="t2" x="405" y="298" text-anchor="middle">RUNS · LIBRARY</text></g>`;
+  o += `<g class="bx"><path class="cyl" d="M352,258 a53,9 0 0 0 106,0 a53,9 0 0 0 -106,0 v40 a53,9 0 0 0 106,0 v-40"/><text class="t1" x="405" y="285" text-anchor="middle">STORE</text><text class="t2" x="405" y="298" text-anchor="middle">RUNS · LIB · MEMORY</text></g>`;
   // run slots
   const shown = Math.min(Math.max(max, 1), 3), slotH = 66, top = 92;
   o += `<rect class="grp" x="500" y="68" width="575" height="${shown * (slotH + 12) + 70}"/><text class="t3" x="512" y="84">RUN SLOTS: ${max} (HARNESS2_MAX_RUNS) · ${live.length} BUSY</text>`;
@@ -1263,6 +1310,7 @@ function renderOverview(runs) {
         <tr><td>Agent self-checks</td><td>loop ×3 · errors ×4 · deadline rescue</td></tr>
         <tr><td>Goal / inputs at the gate</td><td>≤ 20k chars · ≤ 200 files, 200 MB · k ≤ 4</td></tr>
         <tr><td>Tool gate</td><td>${g.mode} · ${g.rules.length + g.custom_rules.filter(Boolean).length} rules · inputs ${g.protect_inputs ? "read-only" : "writable"}</td></tr>
+        <tr><td>Project memory</td><td>${s.memory_enabled === false ? "off" : "on"} · ≤ 300 notes, 600 chars each · promote ${s.memory_promote === false ? "off" : "≤ 4k chars"}</td></tr>
         <tr><td>Gate decisions so far</td><td>${g.intake.accepted} accepted · ${g.intake.stopped} stopped · ${g.tool.blocked} calls blocked · ${g.tool.would_block} would-block</td></tr>
       </table>
       <table class="ptab" style="margin-top:14px"><caption>Table 2. Tool-gate rules (shell commands and wired tools)</caption>
@@ -1306,6 +1354,49 @@ window.saveGate = async () => {
   if ($("#gate-rules")) { s.gate_rules = $("#gate-rules").value.split("\n").map(x => x.trim()).filter(Boolean); s.gate_protect_inputs = $("#gate-protect").checked; }
   try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); await loadOverview(); msg("#gate-msg", "Gate saved: " + s.gate_mode + ".", true); }
   catch (e) { msg("#gate-msg", e.message); }
+};
+
+// ---------- memory ----------
+let memNotes = [];
+async function loadMemory() {
+  try {
+    const r = await api(`projects/${encodeURIComponent(project)}/memory`);
+    memNotes = r.notes; const st = r.stats;
+    $("#m-proj").textContent = project;
+    $("#m-stats").textContent = `${st.active} active · ${st.candidate} candidate · ${st.pinned} pinned · ${st.promoted} promoted · ${st.uses} recalls`;
+    $("#m-on").checked = projectData.settings.memory_enabled !== false; $("#m-promote").checked = projectData.settings.memory_promote !== false;
+    renderMemory();
+  } catch (e) { $("#m-list").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function renderMemory() {
+  const q = $("#m-q").value.trim().toLowerCase(), f = $("#m-f").value;
+  const keep = (n) => (f === "all" || (f === "live" && n.status !== "archived") || (f === "pinned" ? n.pinned && n.status !== "archived" : n.status === f))
+    && (!q || (n.text + " " + n.tags.join(" ")).toLowerCase().includes(q));
+  const list = memNotes.filter(keep);
+  const dot = (n) => n.status === "active" ? "ok" : n.status === "candidate" ? "warn" : "hollow";
+  const from = (n) => n.source.by === "user" ? "you" : `${(n.source.goal || "").slice(0, 15)} · ${n.source.node || "?"}`;
+  $("#m-list").innerHTML = list.length ? list.map(n => `<div class="r" style="grid-template-columns:12px minmax(0,1fr) auto;padding:6px 0;border-bottom:1px solid var(--line)">
+      <span class="dot ${dot(n)}"></span>
+      <span><span style="font-size:13.5px">${n.pinned ? '<b style="color:var(--selector)">★</b> ' : ""}${esc(n.text)}</span>
+        <div class="v" style="white-space:normal">${esc(n.id)} · ${esc(n.status)}${n.tags.length ? " · " + n.tags.map(esc).join(", ") : ""} · from ${esc(from(n))} · used ${n.uses}×${n.promoted ? ' · <span class="st ok">in LongTermMEMORY.md</span>' : ""}${n.note ? " · " + esc(n.note) : ""}</div></span>
+      <span class="s" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn small" onclick="memEdit('${n.id}',{pinned:${!n.pinned}})">${n.pinned ? "Unpin" : "Pin"}</button>
+        ${!n.promoted && n.status !== "archived" ? `<button class="btn small" onclick="memPromote('${n.id}')">Promote</button>` : ""}
+        <button class="btn small" onclick="memEdit('${n.id}',{status:'${n.status === "archived" ? "active" : "archived"}'})">${n.status === "archived" ? "Restore" : "Archive"}</button>
+        <button class="btn small" onclick="memDel('${n.id}')">Delete</button></span></div>`).join("")
+    : '<p class="muted">No notes here yet. The solver saves notes with <code>remember</code> during runs, or add one yourself.</p>';
+}
+$("#m-q").oninput = renderMemory; $("#m-f").onchange = renderMemory;
+window.memEdit = async (id, body) => { try { await jpost(`projects/${encodeURIComponent(project)}/memory/${id}`, body, "PUT"); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
+window.memDel = async (id) => { if (!confirm("Delete this note?")) return; try { await api(`projects/${encodeURIComponent(project)}/memory/${id}`, {method: "DELETE"}); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
+window.memPromote = async (id) => { try { const r = await jpost(`projects/${encodeURIComponent(project)}/memory/${id}/promote`, {}); msg("#m-msg", r.promoted ? "Promoted into LongTermMEMORY.md." : "Not promoted (already there, or over the 4k budget).", !!r.promoted); loadMemory(); } catch (e) { msg("#m-msg", e.message); } };
+$("#m-add").onclick = async () => {
+  try { const r = await jpost(`projects/${encodeURIComponent(project)}/memory`, {text: $("#m-text").value, tags: $("#m-tags").value.split(",").map(x => x.trim()).filter(Boolean)}); $("#m-text").value = ""; $("#m-tags").value = ""; msg("#m-msg", r.dup ? "Already known; tags merged." : "Added.", true); loadMemory(); }
+  catch (e) { msg("#m-msg", e.message); }
+};
+$("#m-save").onclick = async () => {
+  const s = Object.assign({}, projectData.settings, {memory_enabled: $("#m-on").checked, memory_promote: $("#m-promote").checked});
+  try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); msg("#m-smsg", "Saved.", true); } catch (e) { msg("#m-smsg", e.message); }
 };
 
 async function loadLibrary() {

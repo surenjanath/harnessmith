@@ -221,3 +221,9 @@ pub fn slug_safe(label: &str) -> String {
     let re = regex::Regex::new(r"[^A-Za-z0-9_.-]+").unwrap();
     re.replace_all(label, "_").into_owned()
 }
+
+/// Lowercase hex SHA-256 of `bytes`.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}

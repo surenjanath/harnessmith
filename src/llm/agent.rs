@@ -40,6 +40,8 @@ pub struct AgentConfig {
     pub rescue_hint: String,
     /// The operator's guardrail gate, checked before every tool call (None: no gate).
     pub gate: Option<super::gate::Gate>,
+    /// Project memory: enables `remember` / `recall`, with where new notes come from.
+    pub memory: Option<(super::memory::Store, super::memory::Source)>,
 }
 
 impl AgentConfig {
@@ -60,6 +62,7 @@ impl AgentConfig {
             rescue_dir: None,
             rescue_hint: String::new(),
             gate: None,
+            memory: None,
         }
     }
 }
@@ -127,6 +130,18 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
             name: "bash".into(),
             description: "Run a shell command in the workspace directory (e.g. `python3 scripts/x.py`). Output is truncated to 30k chars.".into(),
             parameters: obj(json!({"command": {"type": "string"}, "timeout_s": {"type": "integer", "description": "default 120, max 600"}}), &["command"]),
+        });
+    }
+    if cfg.memory.is_some() {
+        t.push(ToolDef {
+            name: "remember".into(),
+            description: "Save one durable, reusable note for later goals in this project: a fact about the inputs, a technique that worked, a pitfall to avoid. Not the task's answer, never a secret. At most 600 chars.".into(),
+            parameters: obj(json!({"note": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}, "description": "a few lowercase keywords"}}), &["note"]),
+        });
+        t.push(ToolDef {
+            name: "recall".into(),
+            description: "Search notes saved by earlier goals in this project. Pass a few keywords about the task or a step; returns the best matches.".into(),
+            parameters: obj(json!({"query": {"type": "string"}, "k": {"type": "integer", "description": "how many notes, default 5"}}), &[]),
         });
     }
     if cfg.harness.is_some() {
@@ -329,6 +344,7 @@ fn required(tool: &str) -> &'static [&'static str] {
         "bash" => &["command"],
         "skill" => &["name"],
         "task" => &["agent", "prompt"],
+        "remember" => &["note"],
         _ => &[],
     }
 }
@@ -485,6 +501,27 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             Ok(if r.final_text.trim().is_empty() { format!("(sub-agent returned nothing{})", if r.error.is_empty() { String::new() } else { format!(": {}", r.error) }) } else { r.final_text })
         }
         "finish" => Ok(s("answer")),
+        "remember" if cfg.memory.is_some() => {
+            let (store, src) = cfg.memory.as_ref().unwrap();
+            let mut src = src.clone();
+            src.node = crate::log::node();
+            src.mode = crate::log::ctx().mode;
+            let tags: Vec<String> = a.get("tags").and_then(|t| t.as_array()).map(|v| v.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+            let (n, dup) = store.remember(&s("note"), &tags, src, "candidate")?;
+            crate::log::event("memory", "remember", json!({"id": n.id, "text": util::take_chars(&n.text, 160), "dup": dup}));
+            Ok(if dup { format!("Already in memory as {} (tags merged).", n.id) } else { format!("Saved as {}. It becomes active for later goals if this attempt is adopted.", n.id) })
+        }
+        "recall" if cfg.memory.is_some() => {
+            let (store, src) = cfg.memory.as_ref().unwrap();
+            let q = s("query");
+            let k = a.get("k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+            let hits = store.recall(&q, k, &src.goal)?;
+            crate::log::event("memory", "recall", json!({"query": util::take_chars(&q, 120), "hits": hits.len(), "ids": hits.iter().map(|n| n.id.clone()).collect::<Vec<_>>()}));
+            if hits.is_empty() {
+                return Ok("No matching notes yet.".into());
+            }
+            Ok(hits.iter().map(|n| format!("- [{}{}] {}{}", n.id, if n.status == "candidate" { ", unconfirmed" } else { "" }, n.text, if n.tags.is_empty() { String::new() } else { format!("  (tags: {})", n.tags.join(", ")) })).collect::<Vec<_>>().join("\n"))
+        }
         other => match find_wired(cfg, other) {
             Some(t) => run_wired(cfg, &t, a),
             None => bail!("unknown tool {other:?}"),

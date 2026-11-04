@@ -108,6 +108,14 @@ fn self_healing_scenarios() {
             (200, reply_text(if blocked { "respected the gate" } else { "input was overwritten" }))
         }
     }));
+    let (p6, _seen6) = server(Arc::new(|n, req: &Value| match n {
+        1 => (200, reply_tool("remember", json!({"note": "regions.csv uses semicolons as the delimiter", "tags": ["csv"]}))),
+        2 => (200, reply_tool("recall", json!({"query": "csv delimiter"}))),
+        _ => {
+            let got = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("unconfirmed] regions.csv uses semicolons")).unwrap_or(false));
+            (200, reply_text(if got { "recalled" } else { "forgot" }))
+        }
+    }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -116,7 +124,7 @@ fn self_healing_scenarios() {
             (200, reply_tool("read_file", json!({"path": format!("notes{n}.txt")})))
         }
     }));
-    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5)]}));
+    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -202,4 +210,19 @@ fn self_healing_scenarios() {
     assert_eq!(std::fs::read_to_string(ws5.join("data.csv")).unwrap(), "a\n1\n");
     let gates = std::fs::read_to_string(d.path().join("t5.jsonl")).unwrap().lines().filter(|l| l.contains("\"type\":\"gate\"")).count();
     assert_eq!(gates, 2);
+
+    // 6. Memory: a note saved with `remember` is found by `recall` in the same goal, and becomes
+    //    visible to other goals only once its attempt is adopted.
+    let ws6 = d.path().join("ws6");
+    std::fs::create_dir_all(&ws6).unwrap();
+    let store = harness2::llm::memory::Store::open(&d.path().join("proj"));
+    let mut cfg = AgentConfig::new("mem/m", "agent", &ws6);
+    cfg.memory = Some((store.clone(), harness2::llm::memory::Source { goal: "g1".into(), by: "agent".into(), ..Default::default() }));
+    assert!(agent::tool_defs(&cfg).iter().any(|t| t.name == "remember"));
+    let out = agent::run(&cfg, "go").unwrap();
+    assert_eq!(out.final_text, "recalled");
+    assert!(store.recall("csv delimiter", 5, "g2").unwrap().is_empty(), "unadopted notes stay private to their goal");
+    let node = store.load()[0].source.node.clone();
+    store.settle("g1", &[(String::new(), node)]).unwrap();
+    assert_eq!(store.recall("csv delimiter", 5, "g2").unwrap().len(), 1);
 }

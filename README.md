@@ -175,6 +175,24 @@ Gate decisions appear on the pipeline map as a red feed, with a "gated ×n" badg
 
 ![Overview](docs/img/overview.png)
 
+## Memory
+
+| Memory | Holds | Read by | Written by |
+|---|---|---|---|
+| `LongTermMEMORY.md` (harness) | facts and know-how, in every solver's instructions | solver | you, the improver, promotion |
+| **Project memory** (Memory tab) | notes from `remember` | solver, via `recall` and pinned notes | solver, you |
+| Experience library (Library tab) | one lesson per finished goal | improver | selector |
+| Session | the conversation, trimmed to fit the context window | that agent | automatic |
+
+The solver has two memory tools. `recall` searches notes from earlier goals in the project, and `remember` saves a durable fact or technique. Notes are stored in `<project>/memory.json`, outside the harness, so the gate can keep the harness read-only. A new note starts as a *candidate*. When the run ends:
+- notes from the adopted attempt and the base runs become *active*;
+- notes from rejected attempts are archived;
+- adopted notes are appended to the base harness's `LongTermMEMORY.md`, up to 4k characters.
+
+Pinned notes go into every solver's instructions. Notes that look like keys or tokens are refused. In the Memory tab you can search, add, pin, promote, archive and delete notes, or switch memory and promotion off for the project.
+
+![Memory](docs/img/memory.png)
+
 ## Goals from the command line
 
 ```bash

@@ -68,6 +68,12 @@ pub struct GoalSettings {
     /// Task inputs are read-only to the solver.
     #[serde(default = "yes")]
     pub gate_protect_inputs: bool,
+    /// Project memory (`remember` / `recall` for the solver).
+    #[serde(default = "yes")]
+    pub memory_enabled: bool,
+    /// Append notes from adopted attempts to the base harness's LongTermMEMORY.md.
+    #[serde(default = "yes")]
+    pub memory_promote: bool,
 }
 fn enforce() -> String {
     "enforce".into()
@@ -116,6 +122,8 @@ impl Default for GoalSettings {
             gate_mode: enforce(),
             gate_rules: vec![],
             gate_protect_inputs: true,
+            memory_enabled: true,
+            memory_promote: true,
         }
     }
 }
@@ -316,6 +324,7 @@ impl BenchmarkAdapter for GoalAdapter {
                 gate_mode: self.settings.gate_mode.clone(),
                 gate_rules: self.settings.gate_rules.clone(),
                 gate_protect_inputs: self.settings.gate_protect_inputs,
+                memory: self.settings.memory_enabled.then(|| (self.root.clone(), task_id.to_string())),
             },
         )
     }

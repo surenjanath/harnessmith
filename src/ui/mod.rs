@@ -190,6 +190,9 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/library", get(get_library))
             .route("/api/projects/:p/estimate", get(estimate))
             .route("/api/projects/:p/gate", get(gate_summary))
+            .route("/api/projects/:p/memory", get(memory_list).post(memory_add))
+            .route("/api/projects/:p/memory/:id", put(memory_edit).delete(memory_delete))
+            .route("/api/projects/:p/memory/:id/promote", post(memory_promote))
             .route("/api/projects/:p/goals/:id/download", get(download))
             .route("/api/runs", get(list_runs))
             .route("/api/runs/:id/log", get(run_log))
@@ -485,6 +488,9 @@ pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<
                 r.error = errs.join("; ");
                 r.attempts = attempt;
             });
+            if !cancelled && status != "failed" {
+                settle_memory(&a, &gid, &rid);
+            }
             match res {
                 Ok(v) => crate::say!("Finished: {}", v["status"]),
                 Err(e) => crate::say!("FAILED: {e}"),
@@ -493,6 +499,34 @@ pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<
         }
     });
     Ok(id)
+}
+
+/// Memory after a run: keep notes from the adopted attempts (and base runs), archive the rest,
+/// and promote the adopted ones into the base harness's LongTermMEMORY.md.
+fn settle_memory(a: &GoalAdapter, gid: &str, rid: &str) {
+    if !a.settings.memory_enabled {
+        return;
+    }
+    let adopted: Vec<(String, String)> = hlog::named(rid)
+        .events_from(0)
+        .into_iter()
+        .filter(|e| e["kind"] == "select" && e["status"] == "done")
+        .filter_map(|e| e["chosen"].as_str().map(|c| (e["mode"].as_str().unwrap_or("").to_string(), c.to_string())))
+        .collect();
+    let store = crate::llm::memory::Store::open(&a.root);
+    let Ok((on, off, won)) = store.settle(gid, &adopted) else { return };
+    let mut promoted = 0;
+    if a.settings.memory_promote && !won.is_empty() {
+        if let Ok(base) = a.base_harness() {
+            promoted = store.promote(&base, &won.iter().map(|n| n.id.clone()).collect::<Vec<_>>()).unwrap_or(0);
+        }
+    }
+    if on + off > 0 {
+        hlog::set_mode("");
+        hlog::at("", "");
+        hlog::event("memory", "settle", json!({"kept": on, "archived": off, "promoted": promoted}));
+        crate::say!("memory: kept {on} note(s), archived {off}, promoted {promoted} into LongTermMEMORY.md");
+    }
 }
 
 fn parse_modes(m: &str) -> Result<Vec<&'static str>> {
@@ -615,6 +649,103 @@ async fn gate_summary(AxPath(p): AxPath<String>) -> ApiResult {
             "intake": {"accepted": accepted, "stopped": entries.len() - accepted, "recent": entries.iter().rev().take(6).cloned().collect::<Vec<_>>()},
             "tool": {"blocked": blocked, "would_block": would},
         }))
+    })
+    .await
+}
+
+// ---------- memory API ----------
+fn mem_store(p: &str) -> Result<(GoalAdapter, crate::llm::memory::Store)> {
+    let a = GoalAdapter::open(&goal::project_dir(p)?)?;
+    let st = crate::llm::memory::Store::open(&a.root);
+    Ok((a, st))
+}
+
+async fn memory_list(AxPath(p): AxPath<String>) -> ApiResult {
+    blocking(move || {
+        let (_, st) = mem_store(&p)?;
+        let mut notes = st.load();
+        notes.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.created.cmp(&a.created)));
+        let count = |s: &str| notes.iter().filter(|n| n.status == s).count();
+        Ok(json!({
+            "stats": {"active": count("active"), "candidate": count("candidate"), "archived": count("archived"), "pinned": notes.iter().filter(|n| n.pinned && n.status != "archived").count(), "promoted": notes.iter().filter(|n| n.promoted).count(), "uses": notes.iter().map(|n| n.uses as u64).sum::<u64>()},
+            "notes": notes,
+        }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct MemAdd {
+    text: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+async fn memory_add(AxPath(p): AxPath<String>, Json(m): Json<MemAdd>) -> ApiResult {
+    blocking(move || {
+        let (_, st) = mem_store(&p)?;
+        let (n, dup) = st.remember(&m.text, &m.tags, crate::llm::memory::Source { by: "user".into(), ..Default::default() }, "active")?;
+        Ok(json!({"note": n, "dup": dup}))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct MemEdit {
+    text: Option<String>,
+    tags: Option<Vec<String>>,
+    pinned: Option<bool>,
+    status: Option<String>,
+}
+
+async fn memory_edit(AxPath((p, id)): AxPath<(String, String)>, Json(m): Json<MemEdit>) -> ApiResult {
+    blocking(move || {
+        let (_, st) = mem_store(&p)?;
+        st.update(|notes| {
+            let n = notes.iter_mut().find(|n| n.id == id).ok_or_else(|| anyhow::anyhow!("no note {id}"))?;
+            if let Some(t) = m.text {
+                let t = t.trim().to_string();
+                if t.chars().count() < 8 || t.chars().count() > crate::llm::memory::MAX_NOTE_CHARS {
+                    anyhow::bail!("a note is 8 to {} characters", crate::llm::memory::MAX_NOTE_CHARS);
+                }
+                n.text = t;
+            }
+            if let Some(t) = m.tags {
+                n.tags = t.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect();
+            }
+            if let Some(pn) = m.pinned {
+                n.pinned = pn;
+            }
+            if let Some(s) = m.status {
+                if !["active", "candidate", "archived"].contains(&s.as_str()) {
+                    anyhow::bail!("status is active, candidate or archived");
+                }
+                n.note = if s == "archived" { "archived by hand".into() } else { String::new() };
+                n.status = s;
+            }
+            Ok(json!({"note": n.clone()}))
+        })
+    })
+    .await
+}
+
+async fn memory_delete(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
+    blocking(move || {
+        let (_, st) = mem_store(&p)?;
+        st.update(|notes| {
+            let before = notes.len();
+            notes.retain(|n| n.id != id);
+            Ok(json!({"deleted": before - notes.len()}))
+        })
+    })
+    .await
+}
+
+async fn memory_promote(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
+    blocking(move || {
+        let (a, st) = mem_store(&p)?;
+        let n = st.promote(&a.base_harness()?, &[id])?;
+        Ok(json!({"promoted": n}))
     })
     .await
 }

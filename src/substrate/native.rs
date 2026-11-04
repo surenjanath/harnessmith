@@ -151,6 +151,8 @@ pub struct SolveOpts {
     pub gate_mode: String,
     pub gate_rules: Vec<String>,
     pub gate_protect_inputs: bool,
+    /// Project root holding memory.json, and the goal id notes are filed under (None: no memory).
+    pub memory: Option<(PathBuf, String)>,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -186,6 +188,11 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         gate.protect_inputs(&ws);
     }
     cfg.gate = Some(gate);
+    if let Some((root, goal)) = &o.memory {
+        let store = crate::llm::memory::Store::open(root);
+        cfg.system = format!("{}\n\n---\n\n{}", cfg.system, crate::llm::memory::system_section(&store.pinned()));
+        cfg.memory = Some((store, crate::llm::memory::Source { goal: goal.clone(), by: "agent".into(), ..Default::default() }));
+    }
     let out = agent::run(&cfg, task)?;
     util::write(&run_dir.join("final.md"), &out.final_text)?;
     // A session that died (transport error, cancellation) before producing anything is a dead
