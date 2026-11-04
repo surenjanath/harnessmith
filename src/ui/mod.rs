@@ -25,6 +25,7 @@
 //!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
+pub mod advisor;
 pub mod assist;
 pub mod auth;
 pub mod files;
@@ -218,6 +219,10 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/goals/:id/files", get(files::goal_files))
             .route("/api/projects/:p/file", get(files::project_file))
             .route("/api/open", post(files::open_in_os))
+            .route("/api/advisor", get(advisor::advisor))
+            .route("/api/advisor/bench", post(advisor::bench))
+            .route("/api/advisor/pull", post(advisor::pull))
+            .route("/api/advisor/pulls", get(advisor::pull_status))
             .route("/api/projects/:p/schedules", get(schedules_get))
             .route("/api/hooks/goal", post(inbound::hook_goal))
             .route("/api/hooks/github", post(inbound::hook_github))

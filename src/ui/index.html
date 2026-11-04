@@ -134,6 +134,13 @@ svg .bar-b { fill: var(--line2); } svg .bar-a { fill: var(--accent); } svg .axis
 .path { font: 11.5px var(--mono); color: var(--muted); word-break: break-all; }
 .slow { color: var(--warn); font: 11.5px var(--mono); }
 .slowhint { border-left: 3px solid var(--warn); padding: 6px 10px; margin: 6px 0 10px; font-size: 12.5px; color: var(--muted); background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.hw { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.hw .kv { overflow-wrap: anywhere; font-size: 15px !important; line-height: 1.3; }
+.advtab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.advtab td, .advtab th { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; white-space: nowrap; }
+.advtab td.n { font: 12px var(--mono); text-align: right; }
+.preset { border: 1px solid var(--line2); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 220px; }
+.preset .path { white-space: normal; }
 /* overview: paper-style figures */
 .paper { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 30px 30px; margin-bottom: 14px; }
 .paper .ttl { text-align: center; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
@@ -371,6 +378,10 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 
 <!-- MODELS -->
 <section id="v-models" class="hidden">
+  <div class="panel" id="advisor">
+    <div class="live-head"><div class="ph" style="margin:0">Model advisor · what runs best on this machine</div><div class="spacer"></div><button class="btn small" id="adv-scan">Scan again</button></div>
+    <div id="adv-body" style="margin-top:10px"><p class="muted">Scanning hardware and local model servers…</p></div>
+  </div>
   <div class="grid2">
     <div class="panel">
       <h2>Connections</h2>
@@ -592,7 +603,7 @@ function show(v) {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   document.querySelectorAll("main > section").forEach(s => s.classList.toggle("hidden", s.id !== "v-" + v));
   store("h2.view", v);
-  if (v === "models") loadModels();
+  if (v === "models") { loadModels(); if (!advData) loadAdvisor(); }
   if (v === "history") loadHistory();
   if (v === "harness") loadHarness();
   if (v === "library") loadLibrary();
@@ -1102,6 +1113,66 @@ $("#doc-run").onclick = runDoctor;
 $("#doc-heal").onclick = async () => { try { const r = await jpost("doctor/heal", {}); msg("#doc-msg", r.applied.length ? r.applied.join("; ") : "Nothing needed fixing.", true); runDoctor(); } catch (e) { msg("#doc-msg", e.message); } };
 
 // ---------- models ----------
+// ---------- model advisor ----------
+let advData = null;
+async function loadAdvisor() {
+  const el = $("#adv-body");
+  el.innerHTML = '<p class="muted">Scanning hardware and local model servers…</p>';
+  try { advData = await api("advisor"); renderAdvisor(); } catch (e) { el.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+function renderAdvisor() {
+  const a = advData, hw = a.hardware, c = a.counts, r = a.recommend;
+  const k = (l, v, sub) => `<div class="kpi"><div class="kl">${l}</div><div class="kv" style="font-size:16px">${v}</div><div class="ks">${sub || "&nbsp;"}</div></div>`;
+  const gpu = hw.gpus.length ? hw.gpus.map(g => `${esc(g.name)}${g.kind === "nvidia" ? ` · ${g.vram_gb.toFixed(0)} GB` : ""}`).join("<br>") : "none detected";
+  let h = `<div class="hw">${k("This machine", esc(hw.summary), esc(hw.os + " · " + hw.arch))}${k("CPU", esc(hw.cpu || "?"), hw.cores + " cores")}${k("Memory", hw.ram_gb + " GB", hw.ram_available_gb ? hw.ram_available_gb + " GB free" : "")}${k("GPU", gpu, "")}${k("Model budget", "≈ " + hw.budget_gb + " GB", hw.mode === "cpu" ? "CPU only: expect slow generation" : "largest model that fits fast")}</div>`;
+  h += `<div class="legend" style="margin-bottom:10px"><span><b>${c.local_servers}</b>&nbsp;local server(s)</span><span><b>${c.custom}</b>&nbsp;saved / custom</span><span><b>${c.api}</b>&nbsp;API connection(s)</span><span><b>${c.local_models}</b>&nbsp;local model(s)</span><span><b>${c.fit}</b>&nbsp;fit your budget</span></div>`;
+  // recommendation + presets
+  h += `<div class="ph">Recommended for this machine</div><div class="rows">${["solver", "improver", "selector", "embedding"].map(role => `<div class="r"><span class="dot ${role === "embedding" ? "cyan" : role}"></span><span class="k">${role[0].toUpperCase() + role.slice(1)}</span><span class="v">${esc(r.roles[role] || "— nothing suitable found")}</span><span class="s"></span></div>`).join("")}</div>`;
+  if (r.why.length) h += `<ul class="muted" style="margin:6px 0 10px;padding-left:18px;font-size:13px">${r.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>`;
+  if (r.presets.length) h += `<div class="ph">One-click setups</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${r.presets.map(p => `<div class="preset"><b>${esc(p.label)}</b><span class="hint" style="margin:0">${esc(p.about)}</span><span class="path">solver: ${esc(p.solver)}<br>improver: ${esc(p.improver)}</span><button class="btn small primary" style="margin-top:6px;align-self:flex-start" onclick="applyPreset('${p.id}')">Use this setup</button></div>`).join("")}</div>`;
+  // pulls
+  const ollama = a.servers.find(s => s.provider === "ollama" && s.reachable);
+  if (r.pulls.length) h += `<div class="ph">Worth downloading${ollama ? "" : " (needs Ollama running)"}</div><div class="rows" style="margin-bottom:12px">${r.pulls.map(p => `<div class="r"><span class="dot learner"></span><span class="k mono">${esc(p.model)}</span><span class="v">${p.size_gb} GB · ${esc(p.why)} · <code>ollama pull ${esc(p.model)}</code></span><span class="s">${ollama ? `<button class="btn small" onclick="pullModel('${esc(p.model)}')">Download</button> <span class="st" id="pull-${esc(p.model.replace(/[^a-z0-9]/gi, "_"))}"></span>` : ""}</span></div>`).join("")}</div>`;
+  // models
+  const fitChip = (f) => `<span class="st ${f === "fits" || f === "api" ? "ok" : f === "tight" ? "warn" : f === "too big" ? "bad" : "info"}">${f === "api" ? "API" : f}</span>`;
+  h += `<div class="ph">Every model found</div><div style="overflow-x:auto"><table class="advtab"><tr><th>Model</th><th>Where</th><th>Fit</th><th class="n">Params</th><th class="n">Size</th><th>Quant</th><th class="n">Est. tok/s</th><th class="n">Measured</th><th></th></tr>${a.models.map((m, i) => `<tr>
+      <td class="mono">${esc(m.name)}${m.kind !== "chat" ? ` <span class="chip">${m.kind}</span>` : ""}</td><td>${esc(m.server)}${m.saved ? "" : ' <span class="hint">(detected)</span>'}</td><td>${fitChip(m.fits)}</td>
+      <td class="n">${m.params_b ? m.params_b + "B" : "—"}</td><td class="n">${m.size_gb ? m.size_gb + " GB" : "—"}</td><td class="mono">${esc(m.quant || "")}</td>
+      <td class="n">${m.est_tok_s ? m.est_tok_s : "—"}</td><td class="n" id="bench-${i}">${m.measured_tok_s ? m.measured_tok_s + " tok/s" : "—"}</td>
+      <td>${m.kind === "chat" ? `<button class="btn small" onclick="benchModel(${i})">Benchmark</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="9" class="muted">No models found. Start Ollama or LM Studio, or add a connection below.</td></tr>'}</table></div>
+    <p class="hint">Fit compares the model's size to your budget. Speed is estimated from memory bandwidth until you benchmark it (a short generation, measured end to end). Measured speeds feed the recommendation.</p>`;
+  $("#adv-body").innerHTML = h;
+}
+window.benchModel = async (i) => {
+  const m = advData.models[i], el = $(`#bench-${i}`); el.textContent = "running…";
+  try { const r = await jpost("advisor/bench", {id: m.id, base_url: m.base_url || "", provider: m.provider || ""}); el.textContent = `${r.tok_s} tok/s (${r.seconds}s)`; m.measured_tok_s = r.tok_s; }
+  catch (e) { el.innerHTML = `<span class="err">${esc(e.message.slice(0, 80))}</span>`; }
+};
+window.pullModel = async (name) => {
+  const ollama = advData.servers.find(s => s.provider === "ollama" && s.reachable), id = "#pull-" + name.replace(/[^a-z0-9]/gi, "_");
+  try { await jpost("advisor/pull", {model: name, base_url: ollama ? ollama.base_url : ""}); $(id).textContent = "downloading…";
+    const t = setInterval(async () => { const st = await api("advisor/pulls"); const v = st[name] || ""; $(id).textContent = v; if (v === "done" || v.startsWith("failed")) { clearInterval(t); if (v === "done") loadAdvisor(); } }, 4000);
+  } catch (e) { $(id).textContent = e.message; }
+};
+window.applyPreset = async (pid) => {
+  const p = advData.recommend.presets.find(x => x.id === pid); if (!p) return;
+  // Save any detected-but-unsaved server the preset uses, so its model ids resolve.
+  const used = [p.solver, p.improver, p.selector].join(",").split(",").map(x => x.trim()).filter(Boolean);
+  for (const id of used) {
+    const m = advData.models.find(x => x.id === id);
+    if (m && !m.saved) {
+      try { await jpost("connections", {name: m.server, provider: m.provider, base_url: m.base_url, api_key: "", api_key_env: "", default_model: m.name, input_price: 0, output_price: 0, max_tokens: null, temperature: null, context_window: null, max_concurrency: m.provider === "ollama" ? 1 : null}); advData.models.filter(x => x.server === m.server).forEach(x => x.saved = true); } catch (e) {}
+    }
+  }
+  $("#r-solver").value = p.solver; $("#r-improver").value = p.improver; $("#r-selector").value = p.selector;
+  if (advData.recommend.roles.embedding && $("#m-embed")) projectData.settings.memory_embed_model = projectData.settings.memory_embed_model || advData.recommend.roles.embedding;
+  const allLocal = pid === "all_local";
+  if (allLocal) $("#s-par").value = "1";
+  $("#r-save").onclick();
+  toast(`“${p.label}” applied${allLocal ? " · parallel stages set to 1 for one local GPU" : ""}`);
+};
+$("#adv-scan").onclick = loadAdvisor;
+
 async function loadModels() {
   conns = await api("connections");
   $("#builtins").innerHTML = conns.builtins.map(b => `<code>${b}/…</code>`).join(" ");

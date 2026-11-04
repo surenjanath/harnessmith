@@ -255,6 +255,21 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 - **Login.** Set `HARNESS2_UI_PASSWORD` (8+ characters). Every page and API call then needs the session cookie from `/login` or `Authorization: Bearer <password>`. Inbound hooks keep their own tokens. Use this whenever the UI is reachable beyond localhost.
 - **Stop is immediate.** Stop closes in-flight model calls at once. Local plain-HTTP servers see the connection drop and stop generating, and HTTPS calls are abandoned. It also kills running shell commands and ends retry waits. Cancelled calls do not count against a model's circuit breaker.
 
+## Help writing goals, finding files, and picking models
+
+- **✨ Improve with AI** (next to the goal box). The project's improver model turns a rough request ("a research document on dogs") into a detailed brief: objective, scope with the angles you probably want, sources and how to cite them, exact deliverable files, and a quality bar. It also suggests grading criteria and a domain, plus a few questions worth deciding. You edit it, then press **Use this**. With no model reachable, a built-in template does the same job offline.
+- **Files tab** (on each goal). Lists every attempt's output folder, with the adopted one first, plus the inputs and the project folder. **View** previews a file safely: HTML runs in a sandboxed origin that cannot reach the UI. **Copy path** copies its location, and **Open folder** opens Finder, Explorer or your Linux file manager when the server runs on your own machine.
+- **Timing.** Each step in a stage's timeline shows how long its model call took and how many prompt tokens it read. Slow calls are flagged, and the map shows the slowest call with advice. Usually the cause is a long prompt on a local model. Nodes show a live "thinking 2m" timer while a call is in flight.
+- **Model advisor** (Models tab):
+  - **Hardware:** detects your CPU, RAM, NVIDIA GPUs and Apple Silicon unified memory, and works out how much memory a model may use.
+  - **Models:** lists every model on detected and saved local servers (Ollama, LM Studio, llama.cpp, vLLM…) and your API connections, with parameters, size, quantisation, fit and estimated speed. **Benchmark** measures real tokens/s.
+  - **Recommendations:** the best solver, improver, selector and embedding model for your machine, with one-click setups: **All local**, **Local solver + API improver**, **All API**.
+  - **Downloads:** suggests models worth pulling for your memory budget, with a **Download** button for Ollama.
+- **Agents that act.** A small model that narrates instead of calling tools is told so and pushed to real tool calls while `output/` is empty, and `finish` is refused until something is written. Tool calls written as JSON in prose are recovered.
+
+![Goal assistant](docs/img/assist.png)
+![Model advisor](docs/img/advisor.png)
+
 ## Memory
 
 | Memory | Holds | Read by | Written by |
