@@ -29,6 +29,8 @@ pub enum Mode {
     Off,
     Observe,
     Enforce,
+    /// A person approves or denies each rule hit (read-only rules are still enforced).
+    Ask,
 }
 
 impl Mode {
@@ -36,6 +38,7 @@ impl Mode {
         match s.trim().to_lowercase().as_str() {
             "off" => Mode::Off,
             "observe" => Mode::Observe,
+            "ask" => Mode::Ask,
             _ => Mode::Enforce,
         }
     }
@@ -44,6 +47,7 @@ impl Mode {
             Mode::Off => "off",
             Mode::Observe => "observe",
             Mode::Enforce => "enforce",
+            Mode::Ask => "ask",
         }
     }
 }

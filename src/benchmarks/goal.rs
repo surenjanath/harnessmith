@@ -82,6 +82,37 @@ pub struct GoalSettings {
     /// Regression guard: the base attempt competes in selection; failure-looking finals drop out.
     #[serde(default = "yes")]
     pub select_guard: bool,
+    /// MCP servers (stdio) whose tools the solver can call.
+    #[serde(default)]
+    pub mcp_servers: Vec<crate::llm::mcp::ServerCfg>,
+    /// Goals that run again on a timer.
+    #[serde(default)]
+    pub schedules: Vec<Schedule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Schedule {
+    pub id: String,
+    pub goal: String,
+    #[serde(default)]
+    pub domain: String,
+    /// Minutes between runs (at least 5).
+    pub every_minutes: u64,
+    #[serde(default = "one")]
+    pub k: usize,
+    #[serde(default = "parallel")]
+    pub mode: String,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Optional webhook that receives each result.
+    #[serde(default)]
+    pub reply_url: String,
+}
+fn one() -> usize {
+    1
+}
+fn parallel() -> String {
+    "parallel".into()
 }
 fn auto() -> String {
     "auto".into()
@@ -138,6 +169,8 @@ impl Default for GoalSettings {
             sandbox: auto(),
             sandbox_network: false,
             select_guard: true,
+            mcp_servers: vec![],
+            schedules: vec![],
         }
     }
 }
@@ -341,6 +374,7 @@ impl BenchmarkAdapter for GoalAdapter {
                 memory: self.settings.memory_enabled.then(|| (self.root.clone(), task_id.to_string())),
                 sandbox: self.settings.sandbox.clone(),
                 sandbox_network: self.settings.sandbox_network,
+                mcp_servers: self.settings.mcp_servers.clone(),
             },
         )
     }

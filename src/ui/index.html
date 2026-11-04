@@ -112,6 +112,9 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .st { font: 11.5px var(--mono); white-space: nowrap; }
 .st.ok { color: var(--ok); } .st.bad { color: var(--bad); } .st.warn { color: var(--warn); } .st.info, .st.idle { color: var(--muted); }
 
+.appr { border: 1.5px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--panel)); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+.appr .r { grid-template-columns: 12px minmax(0, 1fr) auto; }
+.mcp-row { display: grid; grid-template-columns: 12px minmax(90px, max-content) minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); }
 /* overview: paper-style figures */
 .paper { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 26px 30px 30px; margin-bottom: 14px; }
 .paper .ttl { text-align: center; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; margin-bottom: 18px; }
@@ -260,11 +263,13 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
   </nav>
   <div class="spacer"></div>
   <button class="hpill" id="hpill" title="Model health (circuit breakers). Click for the Doctor." onclick="show('doctor')"><span class="dot"></span><span>models: checking…</span></button>
+  <button class="hpill warn hidden" id="apill" onclick="window.scrollTo(0,0)"><span class="dot warn"></span><span id="apill-t"></span></button>
   <button class="theme-t" id="theme-t" title="Switch light / dark"></button>
   <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
   <button class="btn small" id="newproj" title="New project">+ Project</button>
 </header>
 <main>
+<div id="approvals" class="appr hidden"></div>
 
 <!-- OVERVIEW -->
 <section id="v-overview" class="hidden">
@@ -304,6 +309,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     <div class="hint" id="g-models"></div>
     <div class="actions">
       <button class="btn primary" id="g-go">Start</button>
+      <select id="g-repeat" style="width:auto" title="Also run this goal on a timer"><option value="0">Run once</option><option value="60">Repeat hourly</option><option value="360">Repeat every 6 h</option><option value="1440">Repeat daily</option><option value="10080">Repeat weekly</option></select>
       <span id="g-msg"></span>
     </div>
   </div>
@@ -313,6 +319,10 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     <div id="live-status" style="margin:6px 0"></div>
     <div id="live-graph"></div>
     <details><summary>Raw log</summary><pre class="log" id="live-log"></pre></details>
+  </div>
+  <div class="grid2">
+    <div class="panel"><div class="ph">Schedules · goals on a timer</div><div class="rows" id="sched-list"></div></div>
+    <div class="panel"><div class="ph">Inbound · goals from outside</div><div id="inbound"></div></div>
   </div>
   <div class="panel">
     <h2>How it works</h2>
@@ -406,6 +416,17 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 
 <!-- HARNESS -->
 <section id="v-harness" class="hidden">
+  <div class="panel">
+    <div class="ph">MCP servers · tools from outside (project setting, not in the harness)</div>
+    <div id="mcp-list"></div>
+    <div class="row" style="margin-top:6px">
+      <div><label>Name</label><input id="mcp-name" placeholder="files"></div>
+      <div style="grid-column: span 2"><label>Command</label><input id="mcp-cmd" placeholder="npx -y @modelcontextprotocol/server-filesystem /data"></div>
+      <div><label>Env · KEY=value per line</label><textarea id="mcp-env" rows="1" placeholder="GITHUB_TOKEN=…"></textarea></div>
+    </div>
+    <div class="actions"><button class="btn small" id="mcp-add">+ Add server</button><button class="btn small" id="mcp-try">Test first</button><label style="margin:0"><input type="checkbox" id="mcp-ask" style="width:auto;margin-right:6px">Ask before each call</label><span id="mcp-msg" class="hint"></span></div>
+    <p class="hint">Each rollout starts its servers and stops them at the end. Their tools appear to the solver as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, checked by the gate. MCP servers run outside the sandbox (they often need the network), so add only servers you trust.</p>
+  </div>
   <div class="panel tools">
     <div class="ph">Tools · what the agent can call · <b id="t-count"></b></div>
     <div class="rows" id="tools-list"></div>
@@ -552,6 +573,7 @@ async function refreshProject() {
   $("#g-models").innerHTML = roles.map(([r, m]) => `${r}: <code>${esc(m || "not set")}</code>`).join(" · ") + (roles.some(r => !r[1]) ? ` — <a href="#" onclick="show('models');return false">set models</a>` : "");
   updateBudget();
   renderWiring();
+  loadSchedules();
 }
 
 // ---------- wiring + policy (diagram legend panels) ----------
@@ -629,7 +651,13 @@ $("#g-go").onclick = async () => {
   $("#g-go").disabled = true; msg("#g-msg", "Starting…", true);
   try {
     const r = await api("projects/" + encodeURIComponent(project) + "/goals", {method: "POST", body: fd});
-    msg("#g-msg", "Started.", true);
+    const every = +$("#g-repeat").value;
+    if (every) {
+      const l = JSON.parse(JSON.stringify(projectData.settings.schedules || []));
+      l.push({id: "s" + Date.now().toString(36), goal: text, domain: $("#g-domain").value, every_minutes: every, k: +$("#g-k").value, mode: $("#g-mode").value, enabled: true, reply_url: ""});
+      await saveSchedules(l);
+    }
+    msg("#g-msg", every ? "Started, and scheduled to repeat." : "Started.", true);
     watch(r.run_id);
   } catch (e) { msg("#g-msg", e.message); }
   $("#g-go").disabled = false;
@@ -787,8 +815,8 @@ function renderPipeline(target, S) {
     h += `<div class="feed" style="border-color:color-mix(in srgb,var(--cyan) 55%,var(--line))"><b style="color:var(--cyan)">Memory</b> — recalled ×${c("recall")} · saved ×${c("remember")}${st ? ` · after the run: kept ${st.kept}, archived ${st.archived}, promoted ${st.promoted}` : ""}</div>`;
   }
   if (S.gates.length) {
-    const b = S.gates.filter(e => e.status === "blocked").length, last = S.gates[S.gates.length - 1];
-    h += `<div class="feed" style="border-color:color-mix(in srgb,var(--bad) 55%,var(--line))"><b style="color:var(--bad)">Guardrail gate ×${S.gates.length}</b> — blocked ×${b}${S.gates.length - b ? ` · would block ×${S.gates.length - b} (observe mode)` : ""}<div class="hint">latest: <b style="color:var(--ink)">${esc(last.rule)}</b>${last.node ? " at " + esc(last.node) : ""}: ${esc(last.call || "")} — ${esc(last.reason || "")}</div></div>`;
+    const b = S.gates.filter(e => e.status === "blocked" || e.status === "denied").length, last = S.gates[S.gates.length - 1];
+    h += `<div class="feed" style="border-color:color-mix(in srgb,var(--bad) 55%,var(--line))"><b style="color:var(--bad)">Guardrail gate ×${S.gates.length}</b> — blocked ×${b}${S.gates.filter(e => e.status === "would_block").length ? ` · would block ×${S.gates.filter(e => e.status === "would_block").length} (observe mode)` : ""}${S.gates.filter(e => e.status === "approved").length ? ` · approved ×${S.gates.filter(e => e.status === "approved").length}` : ""}<div class="hint">latest: <b style="color:var(--ink)">${esc(last.rule)}</b>${last.node ? " at " + esc(last.node) : ""}: ${esc(last.call || "")} — ${esc(last.reason || "")}</div></div>`;
   }
   h += `<div class="legend"><span><span class="dot active"></span>working</span><span><span class="dot ok"></span>done</span><span><span class="dot warn"></span>fell back / no output</span><span><span class="dot bad"></span>failed</span><span>★ adopted</span><span style="margin-left:auto"><span class="dot solver"></span>solver</span><span><span class="dot improver"></span>improver</span><span><span class="dot selector"></span>selector</span><span><span class="dot learner"></span>library</span></div>`;
   for (const mode of modes) {
@@ -878,7 +906,7 @@ function nodeDrawer(n, t0) {
     } else if (e.kind === "memory") {
       cls = "act"; txt = e.status === "remember" ? `🧠 Saved a note <code>${esc(e.id)}</code>${e.dup ? " (already known)" : ""}: ${esc(e.text)}` : e.status === "recall" ? `🧠 Recalled ${e.hits} note(s) for “${esc(e.query)}”` : `🧠 Memory settled: kept ${e.kept}, archived ${e.archived}, promoted ${e.promoted}`;
     } else if (e.kind === "gate") {
-      cls = "bad"; txt = `⛔ Gate ${e.status === "blocked" ? "blocked" : "would block (observe)"} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
+      cls = e.status === "approved" ? "ok" : "bad"; txt = `${e.status === "ask" ? "✋" : "⛔"} Gate ${{blocked: "blocked", would_block: "would block (observe)", ask: "asked a person about", approved: "approved", denied: "denied"}[e.status] || e.status} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
     } else if (e.kind === "select") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
       txt = e.status === "guard" ? `🛡 Regression guard: ${(e.added || []).length ? "added the unmodified base attempt <b>" + esc(e.added.join(", ")) + "</b> to the pool" : ""}${(e.added || []).length && (e.dropped || []).length ? "; " : ""}${(e.dropped || []).length ? "dropped failure-looking outputs <b>" + esc(e.dropped.join(", ")) + "</b>" : ""}` : e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
@@ -1172,7 +1200,8 @@ function wiredFrom(tree) {
 }
 function renderTools() {
   const wired = wiredFrom(baseTree), shell = !projectData || projectData.settings.allow_shell !== false;
-  $("#t-count").textContent = `${BUILTIN_TOOLS.length} built-in · ${wired.length} wired`;
+  const mcps = (projectData && projectData.settings.mcp_servers || []).filter(m => m.enabled !== false);
+  $("#t-count").textContent = `${BUILTIN_TOOLS.length} built-in · ${wired.length} wired · ${mcps.length} MCP server(s)`;
   $("#tools-list").innerHTML = wired.map(t => `<div class="r"><span class="dot ${t.ok ? "cyan" : "bad"}"></span><span class="k"><a href="#" onclick="selectFile('${esc(t.p)}');return false">${esc(t.name)}</a></span><span class="v">${esc(t.desc)}<br><span class="mono" style="color:var(--faint)">$ ${esc(t.cmd)}</span></span><span class="s st ${t.ok ? (shell ? "ok" : "warn") : "bad"}">${t.ok ? (shell ? "Wired" : "Shell off") : "Invalid"}</span></div>`).join("")
     + BUILTIN_TOOLS.map(([n, d]) => `<div class="r"><span class="dot solver"></span><span class="k mono" style="font-weight:500">${n}</span><span class="v">${esc(d)}</span><span class="s st info">Built-in</span></div>`).join("");
   const st = projectData && projectData.starter_tools || {};
@@ -1189,8 +1218,10 @@ $("#t-starter").onclick = () => { Object.assign(baseTree, projectData.starter_to
 async function loadHarness() {
   await refreshProject();
   baseTree = Object.assign({}, projectData.base);
-  renderHarnessFiles(); renderTools(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
+  renderHarnessFiles(); renderTools(); renderMcp(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
 }
+$("#mcp-add").onclick = () => { const m = mcpFromForm(); if (!m.name || !m.command) return msg("#mcp-msg", "Give it a name and a command."); const l = JSON.parse(JSON.stringify(projectData.settings.mcp_servers || [])); if (l.some(x => x.name === m.name)) return msg("#mcp-msg", "That name is taken."); l.push(m); saveMcp(l, "Added. Use Test to list its tools."); };
+$("#mcp-try").onclick = async () => { const m = mcpFromForm(); msg("#mcp-msg", "Starting…", true); try { const r = await jpost("mcp/test", m); msg("#mcp-msg", `${r.tools.length} tool(s): ${r.tools.slice(0, 10).map(t => t.name).join(", ")}`, true); } catch (e) { msg("#mcp-msg", e.message); } };
 function renderHarnessFiles() {
   $("#h-files").innerHTML = Object.keys(baseTree).sort().map(p => `<button class="${p === hSel ? "on" : ""}" onclick="selectFile('${esc(p)}')">${esc(p)}</button>`).join("") + `<button onclick="selectFile('')">+ new file</button>`;
 }
@@ -1332,6 +1363,7 @@ function renderOverview(runs) {
         ${modeRow("off", "OFF", "not checked")}
         ${modeRow("observe", "OBSERVE", "run, recorded as “would block”")}
         ${modeRow("enforce", "ENFORCE (DEFAULT)", "refused; the agent is told the rule and carries on")}
+        ${modeRow("ask", "ASK", "a person approves or denies in the UI; no answer = deny")}
       </table>
       <div class="hint" style="font:11px var(--mono);margin:4px 0 0">Goals failing an intake check stop in every mode. The improver cannot edit the gate.</div>
       <div class="gate-ed" style="margin-top:10px">
@@ -1366,6 +1398,71 @@ window.saveGate = async () => {
   try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); await loadOverview(); msg("#gate-msg", "Gate saved: " + s.gate_mode + ".", true); }
   catch (e) { msg("#gate-msg", e.message); }
 };
+
+// ---------- approvals ("ask" gate) ----------
+async function pollApprovals() {
+  try {
+    const r = await api("approvals"), el = $("#approvals"), n = r.pending.length;
+    $("#apill").classList.toggle("hidden", !n); $("#apill-t").textContent = `✋ ${n} approval${n === 1 ? "" : "s"} waiting`;
+    el.classList.toggle("hidden", !n);
+    if (n) el.innerHTML = `<div class="ph" style="color:var(--warn)">Approval needed · the agent is waiting · unanswered requests are denied after ${Math.round(r.timeout_s / 60)} min</div><div class="rows">${r.pending.map(p => `<div class="r"><span class="dot warn"></span><span><code>${esc(p.call)}</code><div class="v" style="white-space:normal">rule ${esc(p.rule)} · ${esc(p.reason)}${p.node ? " · at " + esc(p.node) : ""} · asked ${esc((p.created || "").slice(11, 19))}</div></span><span class="s" style="display:flex;gap:6px"><button class="btn small primary" onclick="decide('${p.id}',true)">Approve</button><button class="btn small" onclick="decide('${p.id}',false)">Deny</button></span></div>`).join("")}</div>`;
+  } catch (e) {}
+}
+window.decide = async (id, allow) => { try { await jpost(`approvals/${id}`, {allow}); } catch (e) { alert(e.message); } pollApprovals(); };
+setInterval(pollApprovals, 2500);
+
+// ---------- MCP servers (project settings) ----------
+function renderMcp() {
+  const list = (projectData.settings.mcp_servers || []);
+  $("#mcp-list").innerHTML = list.length ? list.map((m, i) => `<div class="mcp-row"><span class="dot ${m.enabled === false ? "hollow" : "pink"}"></span><span class="k mono">${esc(m.name)}</span>
+      <span class="v" style="white-space:normal">$ ${esc([m.command, ...(m.args || [])].join(" "))}${Object.keys(m.env || {}).length ? " · env " + Object.keys(m.env).map(esc).join(", ") : ""}${m.ask ? ' · <span class="st warn">asks before each call</span>' : ""}<div id="mcp-t-${i}" class="hint"></div></span>
+      <span class="s" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end"><button class="btn small" onclick="mcpTest(${i})">Test</button><button class="btn small" onclick="mcpToggle(${i},'enabled')">${m.enabled === false ? "Enable" : "Disable"}</button><button class="btn small" onclick="mcpToggle(${i},'ask')">${m.ask ? "Don't ask" : "Ask first"}</button><button class="btn small" onclick="mcpDel(${i})">Remove</button></span></div>`).join("")
+    : '<p class="hint">No MCP servers yet. Add one below, e.g. <code>npx -y @modelcontextprotocol/server-filesystem /data</code>.</p>';
+}
+async function saveMcp(list, note) {
+  const s = Object.assign({}, projectData.settings, {mcp_servers: list});
+  try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); renderMcp(); renderTools(); if (note) msg("#mcp-msg", note, true); } catch (e) { msg("#mcp-msg", e.message); }
+}
+window.mcpToggle = (i, k) => { const l = JSON.parse(JSON.stringify(projectData.settings.mcp_servers || [])); l[i][k] = k === "enabled" ? l[i].enabled === false : !l[i][k]; saveMcp(l); };
+window.mcpDel = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.mcp_servers || [])); l.splice(i, 1); saveMcp(l, "Removed."); };
+window.mcpTest = async (i) => {
+  const el = $(`#mcp-t-${i}`); el.textContent = "starting…";
+  try { const r = await jpost("mcp/test", projectData.settings.mcp_servers[i]); el.innerHTML = `<span class="st ok">${r.tools.length} tool(s)</span> ` + r.tools.slice(0, 12).map(t => `<code>${esc(t.name)}</code>`).join(" "); }
+  catch (e) { el.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+};
+function mcpFromForm() {
+  const parts = $("#mcp-cmd").value.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+  const clean = parts.map(x => x.replace(/^["']|["']$/g, ""));
+  const env = {}; $("#mcp-env").value.split("\n").map(l => l.trim()).filter(Boolean).forEach(l => { const i = l.indexOf("="); if (i > 0) env[l.slice(0, i).trim()] = l.slice(i + 1); });
+  return {name: $("#mcp-name").value.trim(), command: clean[0] || "", args: clean.slice(1), env, enabled: true, ask: $("#mcp-ask").checked};
+}
+
+// ---------- schedules + inbound ----------
+async function loadSchedules() {
+  try {
+    const r = await api(`projects/${encodeURIComponent(project)}/schedules`), list = projectData.settings.schedules || [], h = r.hooks;
+    $("#sched-list").innerHTML = list.length ? list.map((x, i) => { const st = r.state[x.id] || {};
+      return `<div class="r"><span class="dot ${x.enabled ? "learner" : "hollow"}"></span><span class="k mono">every ${x.every_minutes >= 1440 ? Math.round(x.every_minutes / 1440) + "d" : x.every_minutes >= 60 ? Math.round(x.every_minutes / 60) + "h" : x.every_minutes + "m"}</span><span class="v" style="white-space:normal">${esc(x.goal.slice(0, 120))}${st.last ? ` · last ${esc(st.last.slice(0, 16).replace("T", " "))}` : " · not run yet"}${st.error ? ` · <span class="err">${esc(st.error)}</span>` : ""}</span>
+        <span class="s" style="display:flex;gap:4px"><button class="btn small" onclick="schedToggle(${i})">${x.enabled ? "Pause" : "Resume"}</button><button class="btn small" onclick="schedDel(${i})">Remove</button></span></div>`; }).join("")
+      : '<p class="hint">No schedules. Pick “Repeat” before Start to run a goal on a timer.</p>';
+    const on = (b) => b ? '<span class="st ok">on</span>' : '<span class="st idle">off</span>';
+    const origin = location.origin;
+    $("#inbound").innerHTML = `<div class="rows">
+      <div class="r"><span class="dot solver"></span><span class="k">Webhook</span><span class="v">POST ${esc(origin)}/api/hooks/goal · HARNESS2_HOOK_TOKEN</span><span class="s">${on(h.goal)}</span></div>
+      <div class="r"><span class="dot improver"></span><span class="k">GitHub issues</span><span class="v">POST ${esc(origin)}/api/hooks/github · HARNESS2_GITHUB_SECRET${h.github_reply ? "" : " · replies need HARNESS2_GITHUB_TOKEN"}</span><span class="s">${on(h.github)}</span></div>
+      <div class="r"><span class="dot judge"></span><span class="k">Notifications</span><span class="v">approvals and finished runs → HARNESS2_NOTIFY_URL (Slack, Discord, ntfy…)</span><span class="s">${on(h.notify)}</span></div></div>
+      <details style="margin-top:6px"><summary>Example</summary><pre>curl -X POST ${esc(origin)}/api/hooks/goal \\
+  -H "Authorization: Bearer $HARNESS2_HOOK_TOKEN" -H "content-type: application/json" \\
+  -d '{"project": "${esc(project)}", "goal": "Summarise today\'s report", "reply_url": "https://example.com/hook"}'</pre>
+      <p class="hint">GitHub: add a webhook (content type JSON, events: Issues and Issue comments) with your secret. An issue labelled <code>harnessmith</code>, or a comment starting <code>/harnessmith …</code>, becomes a goal; the result is posted back on the issue.</p></details>`;
+  } catch (e) {}
+}
+async function saveSchedules(list) {
+  const s = Object.assign({}, projectData.settings, {schedules: list});
+  await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); loadSchedules();
+}
+window.schedToggle = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l[i].enabled = !l[i].enabled; saveSchedules(l); };
+window.schedDel = (i) => { const l = JSON.parse(JSON.stringify(projectData.settings.schedules || [])); l.splice(i, 1); saveSchedules(l); };
 
 // ---------- memory ----------
 let memNotes = [];

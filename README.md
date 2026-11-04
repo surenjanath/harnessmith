@@ -209,6 +209,29 @@ Gate decisions appear on the pipeline map as a red feed, with a "gated ×n" badg
 
 ![Overview](docs/img/overview.png)
 
+## MCP servers, approvals and goals from outside
+
+**MCP servers.** Under **Base harness → MCP servers**, add any stdio MCP server, for example `npx -y @modelcontextprotocol/server-filesystem /data`, with a name and optional environment variables. **Test** lists its tools. Each rollout starts the project's servers and stops them at the end. Their tools appear to the solver as `mcp_<server>_<tool>`, next to the built-in and wired tools. Servers are a project setting, not part of the harness, so the improver cannot add one. They run outside the sandbox because they often need the network, so add only servers you trust. Mark a server **Ask first** to require approval for every call.
+
+**"Ask" gate mode.** When a tool call breaks a gate rule, the run pauses. The UI shows an **Approve / Deny** banner (and a header badge) on every page. Unanswered requests are denied after `HARNESS2_APPROVAL_TIMEOUT` seconds (default 600). Read-only rules are always enforced.
+
+**Notifications.** Set `HARNESS2_NOTIFY_URL` to get a JSON POST with a `text` field for every approval request and every finished run. This works with Slack and Discord incoming webhooks, ntfy, or your own endpoint.
+
+**Goals from outside.** Every outside goal goes through the intake gate, and its result goes back where it came from:
+- **Webhook:**
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/hooks/goal \
+  -H "Authorization: Bearer $HARNESS2_HOOK_TOKEN" -H "content-type: application/json" \
+  -d '{"project": "default", "goal": "Summarise the attached report", "reply_url": "https://example.com/result"}'
+```
+
+  `reply_url` receives `{run_id, status, outputs, …}` when the run ends. The endpoint is off until `HARNESS2_HOOK_TOKEN` is set to 16 or more characters.
+- **GitHub issues:** add a repository webhook (JSON content type; Issues and Issue comments events) pointing at `/api/hooks/github`, and set `HARNESS2_GITHUB_SECRET` to the webhook's secret. Signatures are verified. An issue labelled `harnessmith` (or `HARNESS2_GITHUB_LABEL`), or a comment starting with `/harnessmith …`, becomes a goal in project `HARNESS2_GITHUB_PROJECT` (default: owner-repo). The result is posted back on the issue using `HARNESS2_GITHUB_TOKEN`.
+- **Schedules:** choose **Repeat hourly / every 6 h / daily / weekly** next to Start. The Run page lists schedules with Pause and Remove, along with each one's last run. A schedule never overlaps its own previous run.
+
+![MCP servers](docs/img/mcp.png)
+
 ## Memory
 
 | Memory | Holds | Read by | Written by |

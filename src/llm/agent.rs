@@ -44,6 +44,8 @@ pub struct AgentConfig {
     pub memory: Option<(super::memory::Store, super::memory::Source)>,
     /// Sandbox for shell commands (bash, wired tools, hooks); None runs them directly.
     pub sandbox: Option<super::sandbox::Sandbox>,
+    /// Started MCP servers whose tools are offered next to the built-in ones.
+    pub mcp: Option<std::sync::Arc<super::mcp::Hub>>,
 }
 
 /// `bash -c cmd` in the workspace, inside the sandbox when there is one.
@@ -78,6 +80,7 @@ impl AgentConfig {
             gate: None,
             memory: None,
             sandbox: None,
+            mcp: None,
         }
     }
 }
@@ -176,6 +179,9 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
         if cfg.allow_shell {
             t.extend(wired_tools(cfg.harness.as_ref().unwrap()).into_iter().map(|w| w.def));
         }
+    }
+    if let Some(h) = &cfg.mcp {
+        t.extend(h.tools().into_iter().map(|m| ToolDef { name: m.exposed.clone(), description: format!("[MCP {}] {}", m.server, m.description), parameters: m.schema.clone() }));
     }
     t
 }
@@ -535,10 +541,15 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             }
             Ok(hits.iter().map(|n| format!("- [{}{}] {}{}", n.id, if n.status == "candidate" { ", unconfirmed" } else { "" }, n.text, if n.tags.is_empty() { String::new() } else { format!("  (tags: {})", n.tags.join(", ")) })).collect::<Vec<_>>().join("\n"))
         }
-        other => match find_wired(cfg, other) {
-            Some(t) => run_wired(cfg, &t, a),
-            None => bail!("unknown tool {other:?}"),
-        },
+        other => {
+            if let Some((client, tool)) = cfg.mcp.as_ref().and_then(|h| h.find(other)) {
+                return client.call(&tool.name, a, Duration::from_secs(180));
+            }
+            match find_wired(cfg, other) {
+                Some(t) => run_wired(cfg, &t, a),
+                None => bail!("unknown tool {other:?}"),
+            }
+        }
     }
 }
 
@@ -794,8 +805,22 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             }
             if let Some(g) = &cfg.gate {
                 let wired = if crate::core::tree::BUILTIN_TOOLS.contains(&call.name.as_str()) { None } else { find_wired(cfg, &call.name).map(|w| w.command) };
-                if let Some(v) = g.check(&call.name, &call.args, wired.as_deref()) {
-                    let enforce = g.mode == super::gate::Mode::Enforce;
+                // An MCP server marked "ask" needs a person for every call.
+                let ask_server = cfg.mcp.as_ref().and_then(|h| h.find(&call.name)).map(|(c, _)| c.cfg.ask).unwrap_or(false);
+                let verdict = g.check(&call.name, &call.args, wired.as_deref()).or_else(|| (ask_server && g.mode != super::gate::Mode::Off).then(|| super::gate::Verdict { rule: "mcp-ask".into(), reason: "this MCP server asks before every call".into() }));
+                let readonly_rule = verdict.as_ref().map(|v| v.rule.ends_with("-readonly")).unwrap_or(false);
+                if let Some(v) = verdict.as_ref().filter(|_| (g.mode == super::gate::Mode::Ask || ask_server) && !readonly_rule) {
+                    let shown = format!("{}({})", call.name, summarize_args(&call.args));
+                    say!("{}✋ gate asks a person: {shown} ({})", cfg.log_prefix, v.rule);
+                    let (ok, why) = super::approval::ask(&call.name, &shown, &v.rule, &v.reason);
+                    crate::log::event("gate", if ok { "approved" } else { "denied" }, json!({"tool": call.name, "call": shown, "rule": v.rule, "reason": why}));
+                    traj.ev(json!({"type": "gate", "status": if ok { "approved" } else { "denied" }, "detail": {"call": shown, "rule": v.rule, "reason": why}}));
+                    if !ok {
+                        results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: format!("[gate] Not approved (rule `{}`): {why}. Reach the goal another way.", v.rule), is_error: true });
+                        continue;
+                    }
+                } else if let Some(v) = verdict {
+                    let enforce = g.mode == super::gate::Mode::Enforce || g.mode == super::gate::Mode::Ask;
                     let detail = json!({"tool": call.name, "call": format!("{}({})", call.name, summarize_args(&call.args)), "rule": v.rule, "reason": v.reason, "mode": g.mode.as_str()});
                     traj.ev(json!({"type": "gate", "status": if enforce { "blocked" } else { "would_block" }, "detail": detail}));
                     crate::log::event("gate", if enforce { "blocked" } else { "would_block" }, detail);

@@ -156,6 +156,8 @@ pub struct SolveOpts {
     /// "auto" | "bwrap" | "unshare" | "off", and whether sandboxed commands get network access.
     pub sandbox: String,
     pub sandbox_network: bool,
+    /// MCP servers whose tools the solver may call.
+    pub mcp_servers: Vec<crate::llm::mcp::ServerCfg>,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -197,6 +199,16 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         cfg.sandbox = Some(sb);
     }
     cfg.gate = Some(gate);
+    if o.mcp_servers.iter().any(|s| s.enabled) {
+        let hub = crate::llm::mcp::Hub::start(&o.mcp_servers);
+        for (n, e) in &hub.failed {
+            crate::say!("      ! MCP server {n} did not start: {}", util::take_chars(e, 200));
+        }
+        if !hub.clients.is_empty() {
+            crate::say!("      MCP: {} server(s), {} tool(s)", hub.clients.len(), hub.tools().len());
+            cfg.mcp = Some(std::sync::Arc::new(hub));
+        }
+    }
     if let Some((root, goal)) = &o.memory {
         let store = crate::llm::memory::Store::open(root);
         cfg.system = format!("{}\n\n---\n\n{}", cfg.system, crate::llm::memory::system_section(&store.pinned()));

@@ -116,6 +116,20 @@ fn self_healing_scenarios() {
             (200, reply_text(if got { "recalled" } else { "forgot" }))
         }
     }));
+    let (p7, seen7) = server(Arc::new(|n, req: &Value| match n {
+        1 => (200, reply_tool("mcp_calc_add", json!({"a": 2, "b": 40}))),
+        _ => {
+            let got = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("sum=42")).unwrap_or(false));
+            (200, reply_text(if got { "mcp ok" } else { "mcp missing" }))
+        }
+    }));
+    let (p8, _seen8) = server(Arc::new(|n, req: &Value| match n {
+        1 => (200, reply_tool("bash", json!({"command": "sudo whoami"}))),
+        _ => {
+            let denied = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("[gate] Not approved") && c.contains("denied by a person")).unwrap_or(false));
+            (200, reply_text(if denied { "denied" } else { "ran anyway" }))
+        }
+    }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
         let rescued = req["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().map(|c| c.contains("output/ is still empty")).unwrap_or(false));
         if rescued {
@@ -124,7 +138,7 @@ fn self_healing_scenarios() {
             (200, reply_tool("read_file", json!({"path": format!("notes{n}.txt")})))
         }
     }));
-    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6)]}));
+    let d = setup(json!({"connections": [conn("deadone", dead), conn("backup", good), conn("looper", p2), conn("slow", p3), conn("tooler", p4), conn("gated", p5), conn("mem", p6), conn("mcp", p7), conn("asker", p8)]}));
     let (d2, d3) = (&d, &d);
 
     // 1. Failover: the primary is down, the backup answers, the work completes.
@@ -225,4 +239,33 @@ fn self_healing_scenarios() {
     let node = store.load()[0].source.node.clone();
     store.settle("g1", &[(String::new(), node)]).unwrap();
     assert_eq!(store.recall("csv delimiter", 5, "g2").unwrap().len(), 1);
+
+    // 7. MCP: a stdio server's tools are offered as `mcp_<server>_<tool>` and called over JSON-RPC.
+    let ws7 = d.path().join("ws7");
+    std::fs::create_dir_all(&ws7).unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp.py");
+    let hub = harness2::llm::mcp::Hub::start(&[harness2::llm::mcp::ServerCfg { name: "calc".into(), command: "python3".into(), args: vec![fixture.display().to_string()], enabled: true, ..Default::default() }]);
+    assert!(hub.failed.is_empty(), "{:?}", hub.failed);
+    let mut cfg = AgentConfig::new("mcp/m", "agent", &ws7);
+    cfg.mcp = Some(Arc::new(hub));
+    let out = agent::run(&cfg, "go").unwrap();
+    let first = &seen7.lock().unwrap()[0];
+    assert!(first["tools"].as_array().unwrap().iter().any(|t| t["function"]["name"] == "mcp_calc_add"));
+    assert_eq!(out.final_text, "mcp ok");
+
+    // 8. Ask mode: a rule hit waits for a person; a deny reaches the agent as a refusal.
+    let ws8 = d.path().join("ws8");
+    std::fs::create_dir_all(&ws8).unwrap();
+    let mut cfg = AgentConfig::new("asker/m", "agent", &ws8);
+    cfg.gate = Some(harness2::llm::gate::Gate::new("ask", &[]));
+    let judge = std::thread::spawn(|| loop {
+        if let Some(p) = harness2::llm::approval::list().into_iter().find(|p| p["rule"] == "sudo") {
+            harness2::llm::approval::decide(p["id"].as_str().unwrap(), false);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    });
+    let out = agent::run(&cfg, "go").unwrap();
+    judge.join().unwrap();
+    assert_eq!(out.final_text, "denied");
 }

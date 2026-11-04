@@ -5,7 +5,9 @@
 pub mod agent;
 pub mod client;
 pub mod connections;
+pub mod approval;
 pub mod gate;
+pub mod mcp;
 pub mod health;
 pub mod memory;
 pub mod sandbox;

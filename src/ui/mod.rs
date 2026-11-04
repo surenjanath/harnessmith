@@ -26,6 +26,7 @@
 //! ```
 
 pub mod doctor;
+pub mod inbound;
 
 use crate::benchmarks::goal::{self, GoalAdapter, GoalSettings};
 use crate::core::spec::BenchmarkAdapter;
@@ -65,6 +66,24 @@ pub(crate) struct RunInfo {
     /// Healing attempts the run made (whole-run retries).
     #[serde(default)]
     attempts: u32,
+    /// Where the result goes when the run ends (webhook, GitHub issue), if anywhere.
+    #[serde(default)]
+    reply: Option<Reply>,
+    /// What started it: "ui", "webhook", "github", "schedule".
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub(crate) struct Reply {
+    /// "webhook" | "github".
+    kind: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    issue: u64,
 }
 
 /// At most this many goals run at once; the rest wait as "queued" (HARNESS2_MAX_RUNS).
@@ -80,7 +99,7 @@ fn set_status(id: &str, f: impl FnOnce(&mut RunInfo)) {
     }
 }
 
-static RUNS: Lazy<Mutex<BTreeMap<String, RunInfo>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
+pub(crate) static RUNS: Lazy<Mutex<BTreeMap<String, RunInfo>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
 
 /// Where each UI run keeps run.json, log.txt and events.jsonl.
 fn runs_dir() -> PathBuf {
@@ -133,7 +152,7 @@ fn transient(errors: &[String]) -> bool {
     errors.iter().any(|e| e.contains("execution failed") || e.contains("transport") || e.contains("HTTP 5") || e.contains("timed out") || e.contains("timeout") || e.contains("connection"))
 }
 
-struct ApiError(anyhow::Error);
+pub(crate) struct ApiError(anyhow::Error);
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (StatusCode::BAD_REQUEST, Json(json!({"error": format!("{}", self.0)}))).into_response()
@@ -144,9 +163,9 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
         ApiError(e.into())
     }
 }
-type ApiResult = std::result::Result<Json<Value>, ApiError>;
+pub(crate) type ApiResult = std::result::Result<Json<Value>, ApiError>;
 
-async fn blocking<F: FnOnce() -> Result<Value> + Send + 'static>(f: F) -> ApiResult {
+pub(crate) async fn blocking<F: FnOnce() -> Result<Value> + Send + 'static>(f: F) -> ApiResult {
     Ok(Json(tokio::task::spawn_blocking(f).await.map_err(|e| anyhow::anyhow!("{e}"))??))
 }
 
@@ -156,6 +175,7 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
         println!("doctor: {}", healed.join("; "));
     }
     load_runs();
+    inbound::start_scheduler();
     // Background healer: every 10 minutes, apply the safe fixes.
     std::thread::spawn(|| loop {
         std::thread::sleep(std::time::Duration::from_secs(600));
@@ -190,6 +210,12 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/library", get(get_library))
             .route("/api/projects/:p/estimate", get(estimate))
             .route("/api/projects/:p/gate", get(gate_summary))
+            .route("/api/projects/:p/schedules", get(schedules_get))
+            .route("/api/hooks/goal", post(inbound::hook_goal))
+            .route("/api/hooks/github", post(inbound::hook_github))
+            .route("/api/approvals", get(approvals_list))
+            .route("/api/approvals/:id", post(approvals_decide))
+            .route("/api/mcp/test", post(mcp_test))
             .route("/api/projects/:p/memory", get(memory_list).post(memory_add))
             .route("/api/projects/:p/memory/:id", put(memory_edit).delete(memory_delete))
             .route("/api/projects/:p/memory/:id/promote", post(memory_promote))
@@ -416,6 +442,11 @@ fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -
 }
 
 pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>, resumed_from: &str) -> Result<String> {
+    let (reply, source) = RUNS.lock().unwrap().get(resumed_from).map(|r| (r.reply.clone(), r.source.clone())).unwrap_or((None, "ui".into()));
+    start_run_with(project, goal_id, k, modes, resumed_from, reply, &source)
+}
+
+pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>, resumed_from: &str, reply: Option<Reply>, source: &str) -> Result<String> {
     let root = goal::project_dir(project)?;
     let a = GoalAdapter::open(&root)?;
     a.preflight()?;
@@ -437,6 +468,8 @@ pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<
         modes: modes.iter().map(|m| schedule::mode_name(m).to_string()).collect(),
         resumed_from: resumed_from.into(),
         attempts: 0,
+        reply,
+        source: source.into(),
     };
     save_run(&info);
     RUNS.lock().unwrap().insert(id.clone(), info);
@@ -492,6 +525,7 @@ pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<
             if !cancelled && status != "failed" {
                 settle_memory(&a, &gid, &rid);
             }
+            deliver_result(&rid, &status, &errs, res.as_ref().ok());
             match res {
                 Ok(v) => crate::say!("Finished: {}", v["status"]),
                 Err(e) => crate::say!("FAILED: {e}"),
@@ -500,6 +534,51 @@ pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<
         }
     });
     Ok(id)
+}
+
+/// Send the result where the run's reply points, and to HARNESS2_NOTIFY_URL.
+fn deliver_result(rid: &str, status: &str, errs: &[String], v: Option<&Value>) {
+    let Some(info) = RUNS.lock().unwrap().get(rid).cloned() else { return };
+    let outputs: BTreeMap<String, String> = v
+        .and_then(|v| v["deliverables"].as_object())
+        .map(|m| m.iter().map(|(k, d)| (k.clone(), d["text"].as_str().unwrap_or("").to_string())).collect())
+        .unwrap_or_default();
+    crate::llm::approval::notify(
+        &format!("harnessmith: run {} on \"{}\" finished: {status}{}", info.id, util::take_chars(&info.goal, 80), if errs.is_empty() { String::new() } else { format!(" ({})", util::take_chars(&errs.join("; "), 200)) }),
+        json!({"event": "run_finished", "run_id": info.id, "project": info.project, "status": status}),
+    );
+    let Some(r) = info.reply.clone() else { return };
+    let body = json!({"run_id": info.id, "project": info.project, "goal_id": info.goal_id, "goal": info.goal, "status": status, "errors": errs, "outputs": outputs});
+    let res: Result<()> = (|| {
+        match r.kind.as_str() {
+            "webhook" => {
+                ureq::post(&r.url).timeout(std::time::Duration::from_secs(20)).send_json(body.clone())?;
+            }
+            "github" => {
+                let token = crate::config::env("HARNESS2_GITHUB_TOKEN").or_else(|| crate::config::env("GITHUB_TOKEN")).ok_or_else(|| anyhow::anyhow!("set HARNESS2_GITHUB_TOKEN to reply on GitHub"))?;
+                let out = outputs.values().next().cloned().unwrap_or_default();
+                let md = format!(
+                    "**harnessmith** finished this goal: `{status}`{}\n\n{}\n\n<sub>run `{}` · project `{}`</sub>",
+                    if errs.is_empty() { String::new() } else { format!("\n\n> {}", util::take_chars(&errs.join("; "), 500)) },
+                    if out.trim().is_empty() { "_No output was produced._".to_string() } else { util::take_chars(&out, 60_000) },
+                    info.id,
+                    info.project
+                );
+                ureq::post(&format!("https://api.github.com/repos/{}/issues/{}/comments", r.repo, r.issue))
+                    .set("Authorization", &format!("Bearer {token}"))
+                    .set("Accept", "application/vnd.github+json")
+                    .set("User-Agent", "harnessmith")
+                    .timeout(std::time::Duration::from_secs(20))
+                    .send_json(json!({"body": md}))?;
+            }
+            _ => {}
+        }
+        Ok(())
+    })();
+    match res {
+        Ok(()) => crate::say!("result sent to {}", if r.kind == "github" { format!("{}#{}", r.repo, r.issue) } else { r.url.clone() }),
+        Err(e) => crate::say!("! could not send the result to {}: {e}", r.kind),
+    }
 }
 
 /// Memory after a run: keep notes from the adopted attempts (and base runs), archive the rest,
@@ -530,7 +609,7 @@ fn settle_memory(a: &GoalAdapter, gid: &str, rid: &str) {
     }
 }
 
-fn parse_modes(m: &str) -> Result<Vec<&'static str>> {
+pub(crate) fn parse_modes(m: &str) -> Result<Vec<&'static str>> {
     if m == "both" {
         return Ok(schedule::MODES.to_vec());
     }
@@ -610,7 +689,7 @@ fn gate_log(entry: Value) {
     }
 }
 
-fn intake_gate(project: &str, s: &GoalSettings, text: &str, files: &[(String, Vec<u8>)], k: usize) -> Result<()> {
+pub(crate) fn intake_gate(project: &str, s: &GoalSettings, text: &str, files: &[(String, Vec<u8>)], k: usize) -> Result<()> {
     let checks = intake_checks(s, text, files, k);
     let failed: Vec<String> = checks.iter().filter(|(_, ok, _)| !ok).map(|(n, _, d)| format!("{n}: {d}")).collect();
     let decision = if failed.is_empty() { "accept" } else { "stop" };
@@ -652,6 +731,40 @@ async fn gate_summary(AxPath(p): AxPath<String>) -> ApiResult {
         }))
     })
     .await
+}
+
+// ---------- approvals, MCP, schedules ----------
+async fn approvals_list() -> ApiResult {
+    Ok(Json(json!({"pending": crate::llm::approval::list(), "timeout_s": crate::llm::approval::timeout().as_secs()})))
+}
+
+#[derive(Deserialize)]
+struct Decide {
+    allow: bool,
+}
+
+async fn approvals_decide(AxPath(id): AxPath<String>, Json(d): Json<Decide>) -> ApiResult {
+    if !crate::llm::approval::decide(&id, d.allow) {
+        return Err(anyhow::anyhow!("no pending approval {id} (answered already, or timed out)").into());
+    }
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn mcp_test(Json(c): Json<crate::llm::mcp::ServerCfg>) -> ApiResult {
+    blocking(move || {
+        let tools = crate::llm::mcp::probe(&c)?;
+        Ok(json!({"tools": tools.into_iter().map(|(n, d)| json!({"name": n, "description": d})).collect::<Vec<_>>()}))
+    })
+    .await
+}
+
+async fn schedules_get(AxPath(p): AxPath<String>) -> ApiResult {
+    Ok(Json(json!({"state": inbound::schedule_state(&p), "hooks": {
+        "goal": crate::config::env("HARNESS2_HOOK_TOKEN").map(|t| t.len() >= 16).unwrap_or(false),
+        "github": crate::config::env("HARNESS2_GITHUB_SECRET").is_some(),
+        "github_reply": crate::config::env("HARNESS2_GITHUB_TOKEN").or_else(|| crate::config::env("GITHUB_TOKEN")).is_some(),
+        "notify": crate::config::env("HARNESS2_NOTIFY_URL").is_some(),
+    }})))
 }
 
 // ---------- memory API ----------
