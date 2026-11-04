@@ -106,7 +106,13 @@ fn post(url: &str, headers: &[(&str, String)], body: &Value, timeout: Duration) 
                     bail!(last);
                 }
             }
-            Err(e) => last = format!("transport error calling {url}: {e}"),
+            Err(ureq::Error::Transport(t)) => {
+                last = format!("transport error calling {url}: {t}");
+                // Nothing listening / unknown host: retrying here only delays failover.
+                if matches!(t.kind(), ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Dns) {
+                    bail!(last);
+                }
+            }
         }
     }
     bail!(last)
@@ -136,14 +142,27 @@ fn limiter(conn: &Connection) -> std::sync::Arc<crate::core::proposer::Semaphore
 pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> Result<ChatResp> {
     let lim = limiter(conn);
     let _slot = lim.acquire();
-    let mut r = match conn.provider.as_str() {
+    let t0 = std::time::Instant::now();
+    let res = match conn.provider.as_str() {
         "openai" => openai(conn, model, req, timeout),
         "ollama" => ollama(conn, model, req, timeout),
         "anthropic" => anthropic(conn, model, req, timeout),
         "gemini" => gemini(conn, model, req, timeout),
         "mock" => Ok(mock(req)),
         p => bail!("unknown provider {p:?}"),
-    }?;
+    };
+    let mut r = match res {
+        Ok(r) => {
+            super::health::record_ok(&conn.name, t0.elapsed(), r.input_tokens, r.output_tokens);
+            r
+        }
+        Err(e) => {
+            if super::health::record_fail(&conn.name, &format!("{e}")) {
+                crate::say!("    ! connection {} tripped its circuit breaker after {} failures in a row", conn.name, super::health::TRIP_AFTER);
+            }
+            return Err(e);
+        }
+    };
     r.text = strip_think(&r.text);
     if r.calls.is_empty() && !req.tools.is_empty() {
         r.calls = text_tool_calls(&r.text, req.tools);

@@ -5,4 +5,5 @@
 pub mod agent;
 pub mod client;
 pub mod connections;
+pub mod health;
 pub mod session;

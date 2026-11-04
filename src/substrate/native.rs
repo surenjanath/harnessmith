@@ -133,6 +133,8 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     cfg.harness = Some(hdir);
     cfg.trajectory = Some(run_dir.join("trajectory.jsonl"));
     cfg.log_prefix = "      ".into();
+    cfg.rescue_dir = Some(ws.join("output"));
+    cfg.rescue_hint = "output/ is still empty. Write your best complete deliverable there now with write_file (a partial answer beats none), then call finish.".into();
     let out = agent::run(&cfg, task)?;
     util::write(&run_dir.join("final.md"), &out.final_text)?;
     // A session that died (transport error, cancellation) before producing anything is a dead
@@ -152,7 +154,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     extra.insert("error".into(), Value::String(out.error.clone()));
     util::write(
         &run_dir.join("usage.json"),
-        serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error}))?,
+        serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error, "heals": out.heals, "model": out.served_by}))?,
     )?;
     runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
     Ok(run_dir.to_path_buf())

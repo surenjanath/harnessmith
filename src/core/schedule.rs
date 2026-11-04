@@ -429,7 +429,7 @@ fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String,
         crate::log::at(&label, "run");
         crate::log::event("rollout", "start", json!({"run_id": rid}));
         say!("  [{label}] base rollout {rid}");
-        match adapter.execute(task_id, None, &rid, None) {
+        match recursion::execute_healing(adapter, task_id, None, &rid) {
             Ok(rd) => {
                 let d = adapter.delivered(&rd);
                 say!("  [{label}] base rollout done (delivered={d})");

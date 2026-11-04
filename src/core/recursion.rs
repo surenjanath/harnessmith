@@ -310,7 +310,7 @@ fn roll(adapter: &dyn BenchmarkAdapter, task_id: &str, label: &str, t: Option<&T
     }
     crate::log::event("rollout", "start", json!({"run_id": run_id}));
     say!("  [{label}] rollout {run_id}");
-    match adapter.execute(task_id, hdir.as_deref(), &run_id, None) {
+    match execute_healing(adapter, task_id, hdir.as_deref(), &run_id) {
         Ok(rd) => {
             let exists = rd.exists();
             let delivered = exists && adapter.delivered(&rd);
@@ -322,6 +322,22 @@ fn roll(adapter: &dyn BenchmarkAdapter, task_id: &str, label: &str, t: Option<&T
             say!("  [{label}] rollout failed: {e}");
             crate::log::event("rollout", "failed", json!({"error": util::take_chars(&format!("{e}"), 600)}));
             RunView::new(label, &run_id, work_dir.join("missing"), false, false, &format!("{e}"))
+        }
+    }
+}
+
+/// Run one rollout, healing a transient failure: an error that is not a cancellation is
+/// retried once after a pause, with a `heal` event, before the rollout counts as dead.
+pub fn execute_healing(adapter: &dyn BenchmarkAdapter, task_id: &str, harness_dir: Option<&Path>, run_id: &str) -> Result<PathBuf> {
+    match adapter.execute(task_id, harness_dir, run_id, None) {
+        Ok(rd) => Ok(rd),
+        Err(e) if crate::log::cancelled() || format!("{e}").contains("cancelled") => Err(e),
+        Err(e) => {
+            let wait = config::env_int("HARNESS2_ROLLOUT_RETRY_WAIT", 10).unwrap_or(10).max(0) as u64;
+            crate::log::event("heal", "retry_rollout", json!({"run_id": run_id, "error": util::take_chars(&format!("{e}"), 300), "wait_s": wait}));
+            say!("  ! rollout {run_id} failed ({}); retrying once in {wait}s", util::take_chars(&format!("{e}"), 160));
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+            adapter.execute(task_id, harness_dir, run_id, None)
         }
     }
 }

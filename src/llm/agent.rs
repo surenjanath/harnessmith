@@ -7,7 +7,8 @@
 //! what prose cannot. Every event is appended to a JSONL trajectory.
 
 use super::client::{self, ChatReq, Msg, ToolCall, ToolDef, ToolResult};
-use super::connections;
+use super::{connections, health};
+use std::collections::{HashMap, HashSet};
 use crate::{config, say, util};
 use anyhow::{bail, Result};
 use regex::Regex;
@@ -33,6 +34,10 @@ pub struct AgentConfig {
     /// Log a one-line summary of each tool call.
     pub verbose: bool,
     pub log_prefix: String,
+    /// Self-healing deadline rescue: when the step or time budget is nearly gone and this
+    /// directory is still empty (None: always), append `rescue_hint` to the next observation.
+    pub rescue_dir: Option<PathBuf>,
+    pub rescue_hint: String,
 }
 
 impl AgentConfig {
@@ -50,6 +55,8 @@ impl AgentConfig {
             depth: 0,
             verbose: true,
             log_prefix: "    ".into(),
+            rescue_dir: None,
+            rescue_hint: String::new(),
         }
     }
 }
@@ -63,6 +70,10 @@ pub struct AgentOutcome {
     pub output_tokens: u64,
     pub error: String,
     pub finished: bool,
+    /// Self-healing actions taken (failovers, loop breaks, rescues...).
+    pub heals: u32,
+    /// The model id that produced the last reply.
+    pub served_by: String,
 }
 
 fn obj(props: Value, required: &[&str]) -> Value {
@@ -452,8 +463,52 @@ fn compact(messages: &mut [Msg], budget: usize) {
 }
 
 /// Run the loop until the model finishes, the step budget runs out, or the wall clock does.
+/// A role's model chain: `"a/x, b/y"` -> the resolvable entries, in order.
+pub fn resolve_chain(model_id: &str) -> Result<Vec<(connections::Connection, String, String)>> {
+    let mut chain = vec![];
+    let mut errs = vec![];
+    for id in model_id.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        match connections::resolve(id) {
+            Ok((c, m)) => chain.push((c, m, id.to_string())),
+            Err(e) => errs.push(format!("{e}")),
+        }
+    }
+    if chain.is_empty() {
+        bail!("no usable model in {model_id:?}: {}", errs.join("; "));
+    }
+    Ok(chain)
+}
+
+/// The first model in the chain that is usable now: its breaker is not open and this session
+/// has not just seen it fail. If none is, the one usable soonest, and how long until then.
+fn pick(chain: &[(connections::Connection, String, String)], avoid: &[Option<Instant>]) -> (usize, Duration) {
+    let now = Instant::now();
+    let wait_of = |i: usize| -> Duration {
+        let b = health::reopens_in(&chain[i].0.name);
+        let a = avoid[i].map(|t| t.saturating_duration_since(now)).unwrap_or_default();
+        b.max(a)
+    };
+    if let Some(i) = (0..chain.len()).find(|i| wait_of(*i).is_zero()) {
+        return (i, Duration::ZERO);
+    }
+    (0..chain.len()).map(|i| (i, wait_of(i))).min_by_key(|(_, d)| *d).unwrap_or((0, Duration::ZERO))
+}
+
+/// How long a session avoids a model after one of its calls failed.
+const AVOID_AFTER_FAIL: Duration = Duration::from_secs(20);
+
+/// Short stable fingerprint of a tool call's observation, for loop detection.
+fn obs_key(s: &str) -> String {
+    use sha2::Digest as _;
+    let h = sha2::Sha256::digest(s.as_bytes());
+    hex::encode(&h[..8])
+}
+
+/// Run the loop until the model finishes, the step budget runs out, or the wall clock does.
+/// Self-healing: model failover along the chain, waiting out a full outage, loop breaking,
+/// error-streak and deadline rescue.
 pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
-    let (conn, model) = connections::resolve(&cfg.model_id)?;
+    let chain = resolve_chain(&cfg.model_id)?;
     let tools = tool_defs(cfg);
     let mut traj = Traj(match &cfg.trajectory {
         Some(p) => {
@@ -469,12 +524,22 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let mut messages = vec![Msg::User(task.to_string())];
     let mut out = AgentOutcome::default();
     let t0 = Instant::now();
-    let max_tokens = conn.max_tokens.unwrap_or(cfg.max_tokens).min(conn.window() / 2).max(256);
-    // Chars of conversation the window can hold (~3 chars/token), minus system and reply room.
-    let budget = ((conn.window().saturating_sub(max_tokens) as usize) * 3).saturating_sub(cfg.system.len()).clamp(8_000, 600_000);
     let mut stop_blocks = 0;
     let mut nudges = 0;
+    let mut outage_retries = 0u32;
+    let mut last_idx: Option<usize> = None;
+    let mut avoid: Vec<Option<Instant>> = vec![None; chain.len()];
+    let mut last_err = String::new();
+    let mut seen: HashMap<String, (u32, String)> = HashMap::new();
+    let mut warned: HashSet<String> = HashSet::new();
+    let mut err_streak = 0u32;
+    let mut rescued = false;
     let event = |status: &str, extra: Value| crate::log::event("step", status, extra);
+    let heal = |out: &mut AgentOutcome, traj: &mut Traj, kind: &str, detail: Value| {
+        out.heals += 1;
+        traj.ev(json!({"type": "heal", "kind": kind, "detail": detail}));
+        crate::log::event("heal", kind, detail);
+    };
     loop {
         if crate::log::cancelled() {
             out.error = "cancelled by user".into();
@@ -492,19 +557,57 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             traj.ev(json!({"type": "error", "message": out.error}));
             break;
         }
+        let (ci, wait) = pick(&chain, &avoid);
+        if !wait.is_zero() {
+            // Every model in the chain is down: wait for the first to half-open, rather than fail.
+            let w = wait.min(left).min(Duration::from_secs(300));
+            heal(&mut out, &mut traj, "wait_recovery", json!({"seconds": w.as_secs(), "model": chain[ci].2, "error": util::take_chars(&last_err, 200)}));
+            say!("{}! every model is unavailable; waiting {}s for {} to recover", cfg.log_prefix, w.as_secs(), chain[ci].2);
+            let until = Instant::now() + w;
+            while Instant::now() < until && !crate::log::cancelled() {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            continue;
+        }
+        let (conn, model, model_id) = (&chain[ci].0, &chain[ci].1, &chain[ci].2);
+        if let Some(prev) = last_idx.filter(|p| *p != ci) {
+            // Reported once per switch: down the chain is a failover, back up is a recovery.
+            let kind = if ci < prev { "recovered" } else { "failover" };
+            let why = if kind == "failover" { util::take_chars(&last_err, 200) } else { String::new() };
+            heal(&mut out, &mut traj, kind, json!({"from": chain[prev].2, "to": model_id, "error": why}));
+            say!("{}! {} from {} to {model_id}", cfg.log_prefix, if kind == "recovered" { "recovered: back" } else { "failing over" }, chain[prev].2);
+        }
+        last_idx = Some(ci);
+        let max_tokens = conn.max_tokens.unwrap_or(cfg.max_tokens).min(conn.window() / 2).max(256);
+        // Chars of conversation the window can hold (~3 chars/token), minus system and reply room.
+        let budget = ((conn.window().saturating_sub(max_tokens) as usize) * 3).saturating_sub(cfg.system.len()).clamp(8_000, 600_000);
         out.steps += 1;
         compact(&mut messages, budget);
-        let resp = match client::chat(&conn, &model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens }, left.max(Duration::from_secs(30))) {
-            Ok(r) => r,
+        let resp = match client::chat(conn, model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens }, left.max(Duration::from_secs(30))) {
+            Ok(r) => {
+                out.served_by = model_id.clone();
+                avoid[ci] = None;
+                last_err.clear();
+                r
+            }
             Err(e) => {
-                out.error = format!("{e}");
-                traj.ev(json!({"type": "error", "message": out.error}));
+                out.steps -= 1;
+                outage_retries += 1;
+                last_err = format!("{e}");
+                traj.ev(json!({"type": "error", "message": format!("{model_id}: {e}")}));
+                // Avoid this model briefly; the next pass picks another, or waits for one.
+                avoid[ci] = Some(Instant::now() + AVOID_AFTER_FAIL);
+                if outage_retries <= 12 && !crate::log::cancelled() {
+                    continue;
+                }
+                out.error = last_err.clone();
                 break;
             }
         };
         out.input_tokens += resp.input_tokens;
         out.output_tokens += resp.output_tokens;
         out.cost_usd += (resp.input_tokens as f64 * conn.input_price + resp.output_tokens as f64 * conn.output_price) / 1e6;
+        let _ = &model;
         if !resp.text.trim().is_empty() {
             traj.ev(json!({"type": "assistant", "text": resp.text}));
         }
@@ -560,11 +663,44 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             if let Some(reason) = run_hooks(cfg, "PostToolUse", &call.name, &call.args, Some(&content)) {
                 content = format!("{content}\n\n[PostToolUse hook] {reason}");
             }
+            // Self-check 1: the same call returning the same thing again and again.
+            let sig = format!("{}:{}", call.name, call.args);
+            let key = obs_key(&content);
+            let entry = seen.entry(sig.clone()).or_insert((0, key.clone()));
+            if entry.1 == key {
+                entry.0 += 1;
+            } else {
+                *entry = (1, key);
+            }
+            if entry.0 >= 3 && call.name != "finish" && warned.insert(sig.clone()) {
+                content.push_str("\n\n[self-check] You have now made this exact call 3 times and got the same result each time. Repeating it will not change the outcome. Change approach: look at what actually exists (list_files, read_file), fix the command or path, or write the deliverable directly.");
+                heal(&mut out, &mut traj, "loop_break", json!({"call": util::take_chars(&sig, 160)}));
+            }
+            // Self-check 2: a streak of failing calls.
+            err_streak = if is_error { err_streak + 1 } else { 0 };
+            if err_streak == 4 {
+                content.push_str("\n\n[self-check] Your last 4 tool calls all failed. Stop and re-read the error messages above. Check which files exist with list_files, use the exact paths shown, and pass every required argument as valid JSON.");
+                heal(&mut out, &mut traj, "error_streak", json!({"streak": err_streak}));
+            }
             traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": if is_error { "error" } else { "ok" }, "output": content}));
             if call.name == "finish" && !is_error {
                 finish = Some(content.clone());
             }
             results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content, is_error });
+        }
+        // Self-check 3: deadline rescue -- budget nearly gone and nothing delivered yet.
+        let steps_left = cfg.max_steps.saturating_sub(out.steps);
+        let time_left = cfg.wall.checked_sub(t0.elapsed()).unwrap_or_default();
+        let near = steps_left <= (cfg.max_steps / 6).max(2) || time_left.as_secs_f64() < cfg.wall.as_secs_f64() * 0.15;
+        if near && !rescued && finish.is_none() && !cfg.rescue_hint.is_empty() {
+            let empty = cfg.rescue_dir.as_ref().map(|d| util::files_sorted(d).iter().all(|p| std::fs::metadata(p).map(|m| m.len() == 0).unwrap_or(true))).unwrap_or(true);
+            if empty {
+                rescued = true;
+                if let Some(last) = results.last_mut() {
+                    last.content.push_str(&format!("\n\n[self-check] Only {steps_left} step(s) and {}s remain. {}", time_left.as_secs(), cfg.rescue_hint));
+                }
+                heal(&mut out, &mut traj, "deadline_rescue", json!({"steps_left": steps_left, "seconds_left": time_left.as_secs()}));
+            }
         }
         messages.push(Msg::Tools(results));
         if let Some(ans) = finish {
@@ -581,7 +717,7 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     }
     traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd,
         "input_tokens": out.input_tokens, "output_tokens": out.output_tokens}));
-    event("end", json!({"steps": out.steps, "in": out.input_tokens, "out": out.output_tokens, "usd": out.cost_usd, "error": out.error, "depth": cfg.depth}));
+    event("end", json!({"steps": out.steps, "in": out.input_tokens, "out": out.output_tokens, "usd": out.cost_usd, "error": out.error, "depth": cfg.depth, "heals": out.heals, "model": out.served_by}));
     Ok(out)
 }
 

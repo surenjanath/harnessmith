@@ -25,16 +25,33 @@
 
 **Result on Qwen2.5-3B (k=1, parallel, 27.5 min on CPU).** Every stage ran and the map tracked it. But the 3B improver kept the base harness in all three edit sessions: it cannot follow a 6–8k-token improvement mission. The adopted output named the right region with a wrong percentage. **The method needs a capable improver.** Use a small local solver if you like, but give the improver and selector a stronger model (local 30B+ or an API model). Roles are configured separately, so a local solver with an API improver works out of the box.
 
+## Chaos test: self-healing on local models
+
+Setup: two llama.cpp servers (Qwen2.5-3B on :8081, Llama-3.2-1B on :8082). Every role was set to `local/qwen2.5-3b, llama/llama3.2-1b`.
+
+1. **Kill the primary model mid-rollout.** The Qwen server was killed 54 s into base1. The agent failed over to Llama at once and base1 still delivered. Before the fix, failover took 28 s, because connection-refused errors were retried 4 times. They now fail fast.
+2. **Kill the UI server mid-run.** On restart the server logged `auto-resuming interrupted run … as …`. The resumed run reused the completed base1 from cache. This was done twice, and the second restart was the upgrade to a new binary.
+3. **Bring the primary back.** inv1 failed over to Llama while Qwen was down. It switched back 35 s later (`recovered: back from llama/llama3.2-1b to local/qwen2.5-3b`). The map showed "Self-healing ×2 — model failover ×1 · recovered ×1".
+
+Found and fixed along the way:
+- failover events were reported twice, and a session could bounce back to a dead model. A per-session avoid list fixed both;
+- the time estimate read ~771 min, because tokens/s on local servers includes prompt time. It now uses measured seconds per call × expected steps (~18 min for the same goal);
+- Doctor marked a busy local server, one that is generating and doesn't answer the probe, as unreachable. It now counts recent successful calls.
+
+The compare tab also showed something about the method. On an earlier 3B run, the adopted harness (agg1) wrote "No regions.csv found", while the unmodified base1 had produced a table. Blind selection with a single final candidate can adopt a regression. See roadmap item 12.
+
 ## Roadmap, by expected value
 
-1. **Hybrid presets.** One-click role presets ("local solver + API improver", "all local", "all API") with a cost and time estimate before Start, from connection prices and measured tokens/s.
+1. **Hybrid presets.** One-click role presets ("local solver + API improver", "all local", "all API"). The cost and time estimate before Start is now built.
 2. **Provider prompt caching.** Improver missions repeat large evidence trees across attempts and stages. Anthropic `cache_control`, Gemini context caching and OpenAI automatic caching would cut improver cost substantially.
 3. **A compact prompt pack for small improvers.** An optional third pack (beside `adapt` and `tts`) with shorter missions and a pre-digested evidence summary. It departs from the paper, so it should be off by default.
 4. **Stronger solver sandbox.** File tools are confined to the workspace, but `bash` is not, and root ignores file permissions. Run solver commands in bubblewrap/nsjail or a container, mount inputs read-only, and cut network access during rollouts (the reference warns that benchmark answers are online).
 5. **Push updates.** The UI polls every 1.2 s. Server-sent events would make the map instant and cheaper.
 6. **Mid-task resume.** Resume is per task: a stopped run re-rolls unfinished stages, and only the content-addressed proposer cache and completed rollouts are reused. Persisting stage results would resume exactly where it stopped.
-7. **Run queue.** Goals currently run concurrently with no limit. A queue with per-connection budgets would let a single local GPU serve several goals in turn.
+7. **Per-connection budgets.** The run queue is built (`HARNESS2_MAX_RUNS`). Spend caps per connection would stop a runaway API bill.
 8. **Library retrieval across domains.** The paper keeps libraries strictly per domain. An opt-in, embedding-ranked "related domains" view would help sparse new domains.
 9. **Rubric-guided reporting.** Goals with a rubric could show judged base vs adopted scores side by side, to show whether adaptation helped on your own tasks.
 10. **Benchmark parity runs.** Run JobBench, LAB and WorkBuddy against the installed datasets and compare a few tasks' summaries with the Python implementation's.
 11. **UI authentication.** The server is for localhost; serving it more widely needs a login and per-user projects.
+12. **Guard against adopting a regression.** Keep base1 as a candidate in selection when the adapted output is empty or says the inputs are missing, or flag it in the UI.
+13. **Health-aware chains.** Order a chain by measured success rate and latency instead of fixed order, and share breaker state across server restarts.

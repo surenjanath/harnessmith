@@ -67,6 +67,15 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
 .steps span.done { color: var(--ok); border-color: var(--ok); }
 .steps span.cur { color: var(--accent); border-color: var(--accent); }
 .hidden { display: none !important; }
+.hpill { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--chip); color: var(--muted); cursor: pointer; border: 0; font-family: inherit; }
+.hpill.bad { color: var(--bad); } .hpill.warn { color: var(--warn); } .hpill.ok { color: var(--ok); }
+.heal { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 99px; background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); margin-top: 3px; }
+.feed { font-size: 12.5px; margin: 0 0 10px; padding: 8px 10px; border-radius: 7px; border: 1px dashed color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.feed b { color: var(--warn); }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 820px) { .cmp { grid-template-columns: 1fr; } }
+.check { display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.check:last-child { border-bottom: 0; }
 /* pipeline map */
 .pg-head { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; font-size: 13px; margin: 4px 0 10px; }
 .pg-head b { font-variant-numeric: tabular-nums; }
@@ -120,8 +129,10 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
     <button data-v="history">History</button>
     <button data-v="harness">Base harness</button>
     <button data-v="library">Library</button>
+    <button data-v="doctor">Doctor</button>
   </nav>
   <div class="spacer"></div>
+  <button class="hpill" id="hpill" title="Model health (circuit breakers). Click for the Doctor." onclick="show('doctor')"><span class="dot"></span><span>models: checking…</span></button>
   <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
   <button class="btn small" id="newproj" title="New project">+ Project</button>
 </header>
@@ -168,6 +179,7 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
       <h2>Connections</h2>
       <p class="hint">A model id is <code>connection/model</code>. Built-in prefixes work from environment variables without setup: <span id="builtins"></span>.</p>
       <table><thead><tr><th>Name</th><th>Provider</th><th>Endpoint</th><th>Key</th><th></th></tr></thead><tbody id="conn-rows"></tbody></table>
+      <h3>Live health</h3><div id="health-table" class="muted">No calls yet.</div>
       <div class="actions"><button class="btn" id="disc-go">Detect local servers</button><span class="hint" id="disc-msg">Ollama, LM Studio, llama.cpp, vLLM, text-generation-webui on their usual ports.</span></div>
       <div id="disc-list"></div>
     </div>
@@ -207,7 +219,7 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
   </div>
   <div class="panel">
     <h2>Roles for this project</h2>
-    <p class="hint">Pick a model id for each role, e.g. <code>openai/gpt-4.1</code>, <code>anthropic/claude-sonnet-4-5</code>, <code>ollama/qwen3</code> or one of your connections. The improver and selector can be stronger (or cheaper) than the solver.</p>
+    <p class="hint">Pick a model id for each role, e.g. <code>openai/gpt-4.1</code>, <code>anthropic/claude-sonnet-4-5</code>, <code>ollama/qwen3</code> or one of your connections. The improver and selector can be stronger (or cheaper) than the solver. <b>Self-healing:</b> list fallbacks after a comma — <code>local/qwen2.5-3b, openai/gpt-4.1-mini</code> — and a failing model hands over automatically.</p>
     <div class="row">
       <div><label>Solver (does the task)</label><input id="r-solver" list="all-models"></div>
       <div><label>Improver (edits the harness)</label><input id="r-improver" list="all-models"></div>
@@ -261,6 +273,24 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
   </div>
 </section>
 
+<!-- DOCTOR -->
+<section id="v-doctor" class="hidden">
+  <div class="panel">
+    <h2>Doctor</h2>
+    <p class="hint">Checks everything around a run (storage, Python, every model the roles use, cached failed rollouts, interrupted or stuck runs, temp files, each project's base harness, local servers) and fixes what it safely can. Safe fixes also run on their own at startup and every 10 minutes.</p>
+    <div class="actions"><button class="btn primary" id="doc-run">Run checks</button><button class="btn" id="doc-heal">Apply safe fixes</button><span id="doc-msg"></span></div>
+    <div id="doc-list" style="margin-top:10px"></div>
+  </div>
+  <div class="panel">
+    <h2>What heals itself</h2>
+    <ul class="muted" style="margin:0;padding-left:18px">
+      <li><b>Model failover:</b> give a role a chain, e.g. <code>local/qwen2.5-7b, openai/gpt-4.1-mini</code>. A failing endpoint trips a circuit breaker after 3 errors and calls move to the next model; when the cooldown ends, the primary is tried again. If every model is down, the agent waits for the first to recover instead of failing.</li>
+      <li><b>Agent self-checks:</b> the same call returning the same result 3 times → "change approach"; 4 failing calls in a row → "re-read the errors"; budget nearly gone with nothing written → "deliver now". Tool calls written as text, or with broken JSON, are repaired.</li>
+      <li><b>Rollouts and runs:</b> a rollout that errors is retried once; a run that fails or ends partial because of a model or transport failure is retried, reusing everything already finished; runs interrupted by a restart resume automatically.</li>
+    </ul>
+  </div>
+</section>
+
 <!-- LIBRARY -->
 <section id="v-library" class="hidden">
   <div class="panel"><h2>Experience library</h2><p class="hint">Lessons the selector wrote after each adopted harness. Later goals in the same project and domain read these before proposing edits.</p><div id="lib"></div></div>
@@ -291,6 +321,8 @@ function show(v) {
   if (v === "history") loadHistory();
   if (v === "harness") loadHarness();
   if (v === "library") loadLibrary();
+  if (v === "doctor") runDoctor();
+  if (v === "models") startHealthTable(); else stopHealthTable();
 }
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.v));
 
@@ -318,11 +350,19 @@ async function refreshProject() {
   updateBudget();
 }
 
+let estTimer = null;
 function updateBudget() {
   const k = +$("#g-k").value, mode = $("#g-mode").value;
   const modes = mode === "both" ? 2 : 1;
-  const runs = k + modes * 3 * k, sessions = modes * 3 * k + (k > 1 ? modes : 0) + modes;
-  $("#g-budget").textContent = `About ${runs} solver runs and ${sessions} improver/selector sessions for this goal.`;
+  const runs = k + modes * 3 * k, sessions = modes * (3 * k + (k > 1 ? 1 : 0) + 1);
+  $("#g-budget").textContent = `${runs} solver runs and ${sessions} improver/selector sessions.`;
+  clearTimeout(estTimer);
+  estTimer = setTimeout(async () => {
+    try {
+      const e = await api(`projects/${encodeURIComponent(project)}/estimate?k=${k}&mode=${mode}`);
+      $("#g-budget").innerHTML = `${runs} solver runs and ${sessions} improver/selector sessions · estimated <b>~${e.minutes < 1 ? "<1" : Math.round(e.minutes)} min</b>, ~${fmtK(e.tokens)} tokens${e.usd ? `, <b>~$${e.usd.toFixed(2)}</b>` : ""} <span class="muted">(${esc(e.basis)})</span>`;
+    } catch (err) {}
+  }, 250);
 }
 $("#g-k").onchange = updateBudget; $("#g-mode").onchange = updateBudget;
 
@@ -349,7 +389,7 @@ const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3)
 const MODE_NAME = {agg: "Parallel recursion", seq: "Sequential recursion"};
 
 function reduceEvents(events) {
-  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null};
+  const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: []};
   const get = (mode, node) => {
     const key = (node.startsWith("base") ? "" : mode) + "|" + node;
     return S.nodes[key] ||= {key, mode, label: node, dim: node.startsWith("base") ? "BASE" : "", edit: {s: "wait"}, run: {s: "wait"}, sel: {s: "wait"}, evs: []};
@@ -358,8 +398,11 @@ function reduceEvents(events) {
     S.t0 ??= e.t; S.t1 = e.t;
     if (e.kind === "task" && e.status === "start") S.plan = {k: e.k, modes: e.modes};
     if (e.kind === "task" && e.status === "done") S.done = e;
+    if (e.kind === "heal") S.heals.push(e);
+    if (e.kind === "task" && e.status === "start" && S.done) S.done = null; // a healing retry restarted the task
     if (!e.node) continue;
     const n = get(e.mode, e.node); n.evs.push(e);
+    if (e.kind === "heal") n.heals = (n.heals || 0) + 1;
     if (e.kind === "stage") {
       n.dim = e.dim || n.dim;
       if (e.status === "start") { n.edit = {s: "active", t: e.t}; }
@@ -421,6 +464,7 @@ function nodeCard(laneId, n, adopted, selected) {
     const bad = n.run.s === "failed" || (n.edit.s === "fell" && n.run.s !== "ok");
     cls = anyActive ? "active" : bad ? "bad" : n.run.s !== "wait" ? "done" : "";
   }
+  if (n.heals) body += `<div class="heal" title="self-healing actions on this node">healed ×${n.heals}</div>`;
   if (adopted) cls += " adopted";
   if (selected) cls += " sel";
   const tag = adopted ? "★ adopted" : (n.dim || (n.label === "select" ? "BLIND" : n.label === "learn" ? "LIBRARY" : ""));
@@ -467,6 +511,12 @@ function renderPipeline(target, S) {
     <div class="bar" title="${pct}% of the planned budget"><i style="width:${S.done ? 100 : pct}%"></i></div></div>`;
   if (S.done) h += `<div class="pg-now">${S.done.status === "ok" || S.done.status === "skipped" ? "✓ Finished" : "Finished with status " + esc(S.done.status)}${(S.done.errors || []).length ? " — " + esc(S.done.errors.join("; ")) : ""}</div>`;
   else if (S.active.length) h += `<div class="pg-now" title="${esc(S.active.map(a => a.n.label + ": " + (a.p.act || "")).join("\n"))}">Now: ${S.active.slice(0, 3).map(a => `<b>${esc(a.n.label === "learn" ? "learn" : a.n.label)}</b> ${a.verb}${a.p.steps ? " (step " + a.p.steps + ")" : ""}`).join(" · ")}</div>`;
+  if (S.heals.length) {
+    const label = {failover: "model failover", recovered: "back on the preferred model", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run"};
+    const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
+    const last = S.heals[S.heals.length - 1];
+    h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
+  }
   h += `<div class="legend"><span><span class="dot active"></span>working</span><span><span class="dot ok"></span>done</span><span><span class="dot warn"></span>fell back / no output</span><span><span class="dot bad"></span>failed</span><span>★ adopted output</span></div>`;
   for (const mode of modes) {
     const L = laneLayout(mode, k), laneId = mode;
@@ -523,6 +573,12 @@ function nodeDrawer(n, t0) {
       cls = "act"; txt = `<span class="muted">${esc(e.phase)} step ${e.step}${e.depth ? " (sub-agent)" : ""}:</span> <code>${esc((e.tools || []).join(", ") || e.say || "(reply)")}</code>`;
     } else if (e.kind === "step" && e.status === "end") {
       cls = e.error ? "bad" : "ok"; txt = `Agent session ended after ${e.steps} steps (${fmtK(e.in)} in / ${fmtK(e.out)} out tokens)${e.error ? ` — <span class="err">${esc(e.error)}</span>` : ""}`;
+    } else if (e.kind === "heal") {
+      cls = "act";
+      const what = {failover: `Failed over ${esc(e.from || "")} → <b>${esc(e.to || "")}</b>`, recovered: `Recovered: back on <b>${esc(e.to || "")}</b> (from ${esc(e.from || "")})`, wait_recovery: `Every model down — waited ${e.seconds}s for <b>${esc(e.model)}</b>`, retry_call: `Retried a failed model call (attempt ${e.attempt})`,
+        loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
+        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`}[e.status] || esc(e.status);
+      txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
     } else if (e.kind === "select") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
       txt = e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
@@ -554,16 +610,57 @@ function watch(runId) {
       liveFrom = r.next; evFrom = ev.next; events = events.concat(ev.events);
       renderPipeline($("#live-graph"), reduceEvents(events));
       $("#live-open").onclick = () => { show("history"); openGoal(r.goal_id); };
-      if (r.status !== "running") {
+      if (r.status === "queued") $("#live-title").textContent = "Queued — waiting for a free run slot…";
+      else if (r.status === "running" && $("#live-title").textContent.startsWith("Queued")) $("#live-title").textContent = "Running…";
+      if (r.status !== "running" && r.status !== "queued") {
         clearInterval(liveTimer);
         $("#live-cancel").classList.add("hidden");
-        $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted"}[r.status] || "Finished with problems";
+        $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically"}[r.status] || "Finished with problems";
         $("#live-status").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : "";
       }
     } catch (e) { $("#live-status").textContent = e.message; }
   };
   tick(); liveTimer = setInterval(tick, 1200);
 }
+
+// ---------- health + doctor ----------
+let healthTimer = null;
+async function refreshHealth() {
+  try {
+    const h = (await api("health")).connections, names = Object.keys(h);
+    const bad = names.filter(n => h[n].state === "open"), deg = names.filter(n => h[n].state === "degraded" || h[n].state === "half-open");
+    const pill = $("#hpill");
+    pill.className = "hpill " + (bad.length ? "bad" : deg.length ? "warn" : names.length ? "ok" : "");
+    pill.innerHTML = `<span class="dot ${bad.length ? "bad" : deg.length ? "warn" : names.length ? "ok" : ""}"></span><span>${bad.length ? bad.length + " model(s) down — failing over" : deg.length ? "models degraded" : names.length ? "models healthy" : "models: no calls yet"}</span>`;
+    const t = $("#health-table");
+    if (t && names.length) t.innerHTML = `<table><thead><tr><th>Connection</th><th>State</th><th>Avg call</th><th>Tokens out</th><th>OK / fail</th><th></th></tr></thead><tbody>${names.map(n => { const x = h[n];
+      return `<tr><td><b>${esc(n)}</b>${x.last_error && x.state !== "healthy" ? `<div class="hint err">${esc(x.last_error.slice(0, 140))}</div>` : ""}</td>
+      <td><span class="chip ${x.state === "healthy" ? "ok" : x.state === "open" ? "bad" : x.state === "unknown" ? "" : "warn"}">${esc(x.state)}${x.state === "open" && x.reopens_in_s != null ? " · retry in " + x.reopens_in_s + "s" : ""}</span></td>
+      <td>${x.latency_ms ? fmtT(x.latency_ms) : "—"}</td><td>${fmtK(x.out_tokens)}</td><td>${x.ok} / ${x.fail}</td>
+      <td>${x.state === "open" || x.state === "degraded" ? `<button class="btn small" onclick="docFix('reset_breaker:${esc(n)}')">Reset</button>` : ""}</td></tr>`; }).join("")}</tbody></table>`;
+  } catch (e) {}
+}
+function startHealthTable() { refreshHealth(); clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 4000); }
+function stopHealthTable() { clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 20000); }
+async function runDoctor() {
+  $("#doc-list").innerHTML = '<p class="muted">Checking…</p>';
+  try {
+    const r = await api("doctor");
+    const order = {fail: 0, warn: 1, info: 2, ok: 3};
+    r.checks.sort((a, b) => order[a.status] - order[b.status]);
+    $("#doc-list").innerHTML = r.checks.map(c => `<div class="check"><div><span class="chip ${c.status === "ok" ? "ok" : c.status === "fail" ? "bad" : c.status === "warn" ? "warn" : ""}">${esc(c.status)}</span></div>
+      <div><b>${esc(c.name)}</b><div class="hint" style="margin:2px 0 0">${esc(c.detail)}</div></div>
+      <div>${c.fix ? `<button class="btn small" onclick="docFix('${esc(c.fix.id)}')">${esc(c.fix.label)}</button>` : ""}</div></div>`).join("");
+    const n = r.checks.filter(c => c.status === "fail" || c.status === "warn").length;
+    msg("#doc-msg", n ? `${n} issue(s) need attention.` : "All clear.", !n);
+  } catch (e) { msg("#doc-msg", e.message); }
+}
+window.docFix = async (id) => {
+  try { const r = await jpost("doctor/fix", {id}); msg("#doc-msg", r.message, true); refreshHealth(); if (!$("#v-doctor").classList.contains("hidden")) runDoctor(); }
+  catch (e) { msg("#doc-msg", e.message); }
+};
+$("#doc-run").onclick = runDoctor;
+$("#doc-heal").onclick = async () => { try { const r = await jpost("doctor/heal", {}); msg("#doc-msg", r.applied.length ? r.applied.join("; ") : "Nothing needed fixing.", true); runDoctor(); } catch (e) { msg("#doc-msg", e.message); } };
 
 // ---------- models ----------
 async function loadModels() {
@@ -702,12 +799,18 @@ function renderGoal() {
       const key = ns.namespace + mode, tab = detailTab[key] || "output";
       const sum = ns.summary.modes[mode] || {};
       h += `<h3>${mode === "agg" ? "Parallel" : "Sequential"} · k=${ns.summary.k} · adopted <code>${esc(r.label || "—")}</code></h3>`;
-      h += `<div class="tabs2">${["output", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
+      h += `<div class="tabs2">${["output", "compare", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
       if (tab === "output") {
         const files = Object.entries(r.files || {});
         h += files.length ? files.map(([n, b]) => `<div class="hint"><b>${esc(n)}</b></div><pre>${esc(b)}</pre>`).join("") : '<p class="muted">No output files.</p>';
         if (r.run_dir) h += `<div class="hint">Files on disk: <code>${esc(r.run_dir)}/workspace/output</code></div>`;
+        const dl = (what) => `projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(d.task.id)}/download?mode=${mode}&what=${what}`;
+        h += `<div class="actions"><a class="btn small" href="/api/${dl("output")}">Download output (.tar.gz)</a><a class="btn small" href="/api/${dl("harness")}">Download adopted harness</a></div>`;
         if (r.usage && r.usage.steps) h += `<div class="hint">${r.usage.steps} steps · ${r.usage.input_tokens} in / ${r.usage.output_tokens} out tokens${r.usage.cost_usd ? ` · $${r.usage.cost_usd.toFixed(4)}` : ""}</div>`;
+      } else if (tab === "compare") {
+        const names = [...new Set([...Object.keys(r.base_files || {}), ...Object.keys(r.files || {})])];
+        h += `<p class="hint">The first base attempt (unmodified harness) beside the adopted output.</p>`;
+        h += names.length ? names.map(n => `<div class="hint"><b>${esc(n)}</b></div><div class="cmp"><div><div class="hint">base1</div><pre>${esc((r.base_files || {})[n] ?? "(not produced)")}</pre></div><div><div class="hint">${esc(r.label)} ★</div><pre>${esc((r.files || {})[n] ?? "(not produced)")}</pre></div></div>`).join("") : '<p class="muted">Nothing to compare.</p>';
       } else if (tab === "why") {
         h += `<div class="kv"><div>Selection</div><div>${esc(r.why || "—")}</div>`;
         const e = r.experience || {};
@@ -776,10 +879,10 @@ async function loadLibrary() {
 
 (async () => {
   try {
-    await loadProjects(); await refreshProject();
+    await loadProjects(); await refreshProject(); stopHealthTable(); refreshHealth();
     show(load("h2.view") || "run");
     const runs = await api("runs");
-    const live = runs.runs.find(r => r.status === "running" && r.project === project);
+    const live = runs.runs.find(r => (r.status === "running" || r.status === "queued") && r.project === project);
     if (live) watch(live.id);
   } catch (e) { document.body.insertAdjacentHTML("afterbegin", `<p class="err" style="padding:12px">${esc(e.message)}</p>`); }
 })();

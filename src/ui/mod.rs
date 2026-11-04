@@ -25,6 +25,8 @@
 //!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
+pub mod doctor;
+
 use crate::benchmarks::goal::{self, GoalAdapter, GoalSettings};
 use crate::core::spec::BenchmarkAdapter;
 use crate::core::{judge, schedule, tree};
@@ -46,7 +48,7 @@ use std::sync::Mutex;
 const INDEX: &str = include_str!("index.html");
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct RunInfo {
+pub(crate) struct RunInfo {
     id: String,
     project: String,
     goal_id: String,
@@ -57,6 +59,25 @@ struct RunInfo {
     error: String,
     k: usize,
     modes: Vec<String>,
+    /// The interrupted run this one resumes, if any.
+    #[serde(default)]
+    resumed_from: String,
+    /// Healing attempts the run made (whole-run retries).
+    #[serde(default)]
+    attempts: u32,
+}
+
+/// At most this many goals run at once; the rest wait as "queued" (HARNESS2_MAX_RUNS).
+static RUN_SLOTS: Lazy<crate::core::proposer::Semaphore> = Lazy::new(|| {
+    crate::core::proposer::Semaphore::new(crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1) as usize)
+});
+
+fn set_status(id: &str, f: impl FnOnce(&mut RunInfo)) {
+    let mut runs = RUNS.lock().unwrap();
+    if let Some(r) = runs.get_mut(id) {
+        f(r);
+        save_run(r);
+    }
 }
 
 static RUNS: Lazy<Mutex<BTreeMap<String, RunInfo>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
@@ -66,24 +87,50 @@ fn runs_dir() -> PathBuf {
     crate::config::get().runs.join("ui-runs")
 }
 
-fn save_run(r: &RunInfo) {
+pub(crate) fn save_run(r: &RunInfo) {
     let _ = util::write(&runs_dir().join(&r.id).join("run.json"), serde_json::to_string_pretty(r).unwrap_or_default());
 }
 
 /// Reload earlier runs so their logs and pipelines survive a restart.
 fn load_runs() {
-    let mut runs = RUNS.lock().unwrap();
-    for e in std::fs::read_dir(runs_dir()).into_iter().flatten().flatten() {
-        let Ok(t) = std::fs::read_to_string(e.path().join("run.json")) else { continue };
-        let Ok(mut r) = serde_json::from_str::<RunInfo>(&t) else { continue };
-        if r.status == "running" {
-            r.status = "interrupted".into();
-            r.error = "the server stopped while this run was in progress; run it again to resume from what finished".into();
-            save_run(&r);
+    let mut interrupted = vec![];
+    {
+        let mut runs = RUNS.lock().unwrap();
+        for e in std::fs::read_dir(runs_dir()).into_iter().flatten().flatten() {
+            let Ok(t) = std::fs::read_to_string(e.path().join("run.json")) else { continue };
+            let Ok(mut r) = serde_json::from_str::<RunInfo>(&t) else { continue };
+            if r.status == "running" || r.status == "queued" {
+                r.status = "interrupted".into();
+                r.error = "the server stopped while this run was in progress".into();
+                save_run(&r);
+                interrupted.push(r.clone());
+            }
+            hlog::register(&r.id, hlog::Sink::load(e.path()));
+            runs.insert(r.id.clone(), r);
         }
-        hlog::register(&r.id, hlog::Sink::load(e.path()));
-        runs.insert(r.id.clone(), r);
     }
+    // Self-healing: pick interrupted runs back up. Completed rollouts and cached improver
+    // replies are reused, so a resumed run only redoes what was in flight.
+    if crate::config::env("HARNESS2_AUTO_RESUME").map(|v| v != "0").unwrap_or(true) {
+        for r in interrupted {
+            let modes: Vec<&'static str> = r.modes.iter().filter_map(|m| schedule::mode_token(m).ok()).collect();
+            match start_run_from(&r.project, &r.goal_id, r.k, if modes.is_empty() { vec!["agg"] } else { modes }, &r.id) {
+                Ok(new) => {
+                    println!("auto-resuming interrupted run {} as {new}", r.id);
+                    set_status(&r.id, |x| {
+                        x.status = "resumed".into();
+                        x.error = format!("resumed automatically as {new}");
+                    });
+                }
+                Err(e) => println!("could not auto-resume {}: {e}", r.id),
+            }
+        }
+    }
+}
+
+/// Model failures that a fresh attempt can plausibly fix.
+fn transient(errors: &[String]) -> bool {
+    errors.iter().any(|e| e.contains("execution failed") || e.contains("transport") || e.contains("HTTP 5") || e.contains("timed out") || e.contains("timeout") || e.contains("connection"))
 }
 
 struct ApiError(anyhow::Error);
@@ -104,7 +151,19 @@ async fn blocking<F: FnOnce() -> Result<Value> + Send + 'static>(f: F) -> ApiRes
 }
 
 pub fn serve(host: &str, port: u16) -> Result<()> {
+    let healed = doctor::heal_all();
+    if !healed.is_empty() {
+        println!("doctor: {}", healed.join("; "));
+    }
     load_runs();
+    // Background healer: every 10 minutes, apply the safe fixes.
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(600));
+        let done = doctor::heal_all();
+        if !done.is_empty() {
+            println!("doctor: {}", done.join("; "));
+        }
+    });
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(async move {
         let app = Router::new()
@@ -116,6 +175,10 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/connections/:name/models", get(list_models))
             .route("/api/roles", put(save_roles))
             .route("/api/discover", get(discover))
+            .route("/api/health", get(health_snapshot))
+            .route("/api/doctor", get(doctor_checks))
+            .route("/api/doctor/fix", post(doctor_fix))
+            .route("/api/doctor/heal", post(doctor_heal))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/:p", get(get_project))
             .route("/api/projects/:p/settings", put(save_settings))
@@ -125,6 +188,8 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/goals/:id/rerun", post(rerun_goal))
             .route("/api/projects/:p/goals/:id/judge", post(judge_goal))
             .route("/api/projects/:p/library", get(get_library))
+            .route("/api/projects/:p/estimate", get(estimate))
+            .route("/api/projects/:p/goals/:id/download", get(download))
             .route("/api/runs", get(list_runs))
             .route("/api/runs/:id/log", get(run_log))
             .route("/api/runs/:id/events", get(run_events))
@@ -214,6 +279,27 @@ async fn list_models(AxPath(name): AxPath<String>) -> ApiResult {
     .await
 }
 
+async fn health_snapshot() -> ApiResult {
+    Ok(Json(json!({"connections": crate::llm::health::snapshot()})))
+}
+
+async fn doctor_checks() -> ApiResult {
+    blocking(|| Ok(json!({"checks": doctor::checks()}))).await
+}
+
+#[derive(Deserialize)]
+struct FixReq {
+    id: String,
+}
+
+async fn doctor_fix(Json(r): Json<FixReq>) -> ApiResult {
+    blocking(move || Ok(json!({"ok": true, "message": doctor::fix(&r.id)?}))).await
+}
+
+async fn doctor_heal() -> ApiResult {
+    blocking(|| Ok(json!({"ok": true, "applied": doctor::heal_all()}))).await
+}
+
 async fn discover() -> ApiResult {
     blocking(|| Ok(json!({"found": client::discover_local()}))).await
 }
@@ -250,7 +336,7 @@ async fn list_projects() -> ApiResult {
 }
 
 fn goal_status(a: &GoalAdapter, id: &str) -> Value {
-    let running = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id && r.status == "running").map(|r| r.id.clone()).next();
+    let running = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id && (r.status == "running" || r.status == "queued")).map(|r| r.id.clone()).next();
     let mut best: Option<Value> = None;
     for dir in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
         let p = dir.path().join(id).join("summary.json");
@@ -305,12 +391,16 @@ async fn save_base(AxPath(p): AxPath<String>, Json(t): Json<tree::Tree>) -> ApiR
 }
 
 fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -> Result<String> {
+    start_run_from(project, goal_id, k, modes, "")
+}
+
+pub(crate) fn start_run_from(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>, resumed_from: &str) -> Result<String> {
     let root = goal::project_dir(project)?;
     let a = GoalAdapter::open(&root)?;
     a.preflight()?;
     let t = a.load_task(goal_id)?;
-    if RUNS.lock().unwrap().values().any(|r| r.goal_id == goal_id && r.status == "running") {
-        anyhow::bail!("this goal is already running");
+    if RUNS.lock().unwrap().values().any(|r| r.goal_id == goal_id && (r.status == "running" || r.status == "queued")) {
+        anyhow::bail!("this goal is already running or queued");
     }
     let id = format!("run-{}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"), &goal_id[goal_id.len().saturating_sub(6)..]);
     let info = RunInfo {
@@ -318,12 +408,14 @@ fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -
         project: project.into(),
         goal_id: goal_id.into(),
         goal: util::take_chars(&t.prompt, 200),
-        status: "running".into(),
+        status: "queued".into(),
         started: util::now_iso(),
         finished: String::new(),
         error: String::new(),
         k,
         modes: modes.iter().map(|m| schedule::mode_name(m).to_string()).collect(),
+        resumed_from: resumed_from.into(),
+        attempts: 0,
     };
     save_run(&info);
     RUNS.lock().unwrap().insert(id.clone(), info);
@@ -331,31 +423,56 @@ fn start_run(project: &str, goal_id: &str, k: usize, modes: Vec<&'static str>) -
     hlog::register(&id, sink.clone());
     let (rid, gid) = (id.clone(), goal_id.to_string());
     std::thread::spawn(move || {
-        hlog::set_current(Some(sink));
-        crate::say!("Starting {} k={k} for goal {gid}", modes.iter().map(|m| schedule::mode_name(m)).collect::<Vec<_>>().join(" + "));
-        let res = crate::cli::run_goal(&a, &gid, k, modes);
-        let mut runs = RUNS.lock().unwrap();
-        let r = runs.get_mut(&rid).unwrap();
-        r.finished = util::now_iso();
-        match res {
-            Ok(v) => {
-                r.status = if v["status"] == "ok" || v["status"] == "skipped" { "done".into() } else { "partial".into() };
-                let errs: Vec<String> = v["errors"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+        hlog::set_current(Some(sink.clone()));
+        crate::say!("Queued (at most {} run(s) at once; HARNESS2_MAX_RUNS)", crate::config::env_int("HARNESS2_MAX_RUNS", 1).unwrap_or(1).max(1));
+        let _slot = RUN_SLOTS.acquire();
+        if sink.is_cancelled() {
+            set_status(&rid, |r| {
+                r.status = "cancelled".into();
+                r.finished = util::now_iso();
+            });
+            crate::say!("Cancelled before it started.");
+            return;
+        }
+        set_status(&rid, |r| r.status = "running".into());
+        let retries = crate::config::env_int("HARNESS2_RUN_RETRIES", 1).unwrap_or(1).max(0) as u32;
+        let mut attempt = 0u32;
+        loop {
+            crate::say!("Starting {} k={k} for goal {gid}{}", modes.iter().map(|m| schedule::mode_name(m)).collect::<Vec<_>>().join(" + "), if attempt > 0 { format!(" (healing attempt {attempt})") } else { String::new() });
+            let res = crate::cli::run_goal(&a, &gid, k, modes.clone());
+            let cancelled = hlog::named(&rid).is_cancelled();
+            let (status, errs): (String, Vec<String>) = match &res {
+                Ok(v) => (
+                    if v["status"] == "ok" || v["status"] == "skipped" { "done".into() } else { "partial".into() },
+                    v["errors"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect()).unwrap_or_default(),
+                ),
+                Err(e) => ("failed".into(), vec![format!("{e}")]),
+            };
+            // Self-healing: a run that failed, or finished partial because a model session or
+            // rollout failed, is retried; finished work is reused, so only the broken parts redo.
+            let heal = !cancelled && attempt < retries && (status == "failed" || (status == "partial" && transient(&errs)));
+            if heal {
+                attempt += 1;
+                let wait = crate::config::env_int("HARNESS2_RUN_RETRY_WAIT", 30).unwrap_or(30).max(0) as u64;
+                hlog::set_mode("");
+                hlog::at("", "");
+                hlog::event("heal", "retry_run", json!({"attempt": attempt, "errors": errs, "wait_s": wait}));
+                crate::say!("! run ended {status} ({}); healing: retrying in {wait}s, reusing finished work", util::take_chars(&errs.join("; "), 200));
+                set_status(&rid, |r| r.attempts = attempt);
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                continue;
+            }
+            set_status(&rid, |r| {
+                r.finished = util::now_iso();
+                r.status = if cancelled { "cancelled".into() } else { status.clone() };
                 r.error = errs.join("; ");
-                if hlog::named(&rid).is_cancelled() {
-                    r.status = "cancelled".into();
-                }
-                save_run(r);
-                drop(runs);
-                crate::say!("Finished: {}", v["status"]);
+                r.attempts = attempt;
+            });
+            match res {
+                Ok(v) => crate::say!("Finished: {}", v["status"]),
+                Err(e) => crate::say!("FAILED: {e}"),
             }
-            Err(e) => {
-                r.status = if hlog::named(&rid).is_cancelled() { "cancelled".into() } else { "failed".into() };
-                r.error = format!("{e}");
-                save_run(r);
-                drop(runs);
-                crate::say!("FAILED: {e}");
-            }
+            break;
         }
     });
     Ok(id)
@@ -446,7 +563,10 @@ async fn get_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
                 let traj = if rd.is_empty() { String::new() } else { a.trajectory(Path::new(&rd), 4000).unwrap_or_default() };
                 let usage: Value = std::fs::read_to_string(Path::new(&rd).join("usage.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
                 let edits = std::fs::read_to_string(a.root.join("runs/adapt").join(&mode_ns).join(&id).join("reflection").join(format!("{mode}{}", summary["k"])).join("edits.md")).unwrap_or_default();
+                let base_rd = summary["base"][0]["run_dir"].as_str().unwrap_or("").to_string();
+                let base_files = if base_rd.is_empty() { json!({}) } else { json!(a.deliverable_files(Path::new(&base_rd)).unwrap_or_default()) };
                 out["results"][&mode] = json!({
+                    "base_files": base_files,
                     "label": label, "run_dir": rd, "files": files, "trajectory": util::take_chars(&traj, 200_000),
                     "harness": harness, "diff": diff, "usage": usage, "why": sel["why"], "experience": sel["experience"], "edits": edits,
                 });
@@ -483,6 +603,128 @@ async fn judge_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
     .await
 }
 
+#[derive(Deserialize)]
+struct EstQ {
+    k: Option<usize>,
+    mode: Option<String>,
+}
+
+/// Time and cost before Start: from this project's finished runs when there are any (mean
+/// solver-rollout and improver-session durations and tokens), else from measured model speed.
+async fn estimate(AxPath(p): AxPath<String>, Query(q): Query<EstQ>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let k = q.k.unwrap_or(1).max(1);
+        let modes = if q.mode.as_deref() == Some("both") { 2 } else { 1 };
+        let n_runs = k + modes * 3 * k;
+        let n_sessions = modes * (3 * k + if k > 1 { 1 } else { 0 } + 1);
+        let (mut roll, mut sess, mut roll_tok, mut sess_tok, mut runs_seen) = (vec![], vec![], vec![], vec![], 0);
+        let ids: Vec<String> = RUNS.lock().unwrap().values().filter(|r| r.project == p && r.status == "done").map(|r| r.id.clone()).collect();
+        for id in ids {
+            runs_seen += 1;
+            let evs = hlog::named(&id).events_from(0);
+            let mut starts: BTreeMap<String, i64> = BTreeMap::new();
+            let mut toks: BTreeMap<String, u64> = BTreeMap::new();
+            for e in &evs {
+                let key = format!("{}|{}|{}", e["mode"].as_str().unwrap_or(""), e["node"].as_str().unwrap_or(""), e["kind"].as_str().unwrap_or(""));
+                let t = e["t"].as_i64().unwrap_or(0);
+                match (e["kind"].as_str(), e["status"].as_str()) {
+                    (Some("stage" | "rollout"), Some("start")) => {
+                        starts.insert(key, t);
+                    }
+                    (Some("step"), Some("end")) if e["depth"].as_u64().unwrap_or(0) == 0 => {
+                        let ph = if e["phase"] == "run" { "rollout" } else { "stage" };
+                        let k2 = format!("{}|{}|{ph}", e["mode"].as_str().unwrap_or(""), e["node"].as_str().unwrap_or(""));
+                        toks.insert(k2, e["in"].as_u64().unwrap_or(0) + e["out"].as_u64().unwrap_or(0));
+                    }
+                    (Some("rollout"), Some("done")) | (Some("stage"), Some("done" | "fell_back")) => {
+                        if let Some(t0) = starts.get(&key) {
+                            let d = (t - t0) as f64 / 1000.0;
+                            let tk = *toks.get(&key).unwrap_or(&0) as f64;
+                            if e["kind"] == "rollout" {
+                                roll.push(d);
+                                roll_tok.push(tk);
+                            } else {
+                                sess.push(d);
+                                sess_tok.push(tk);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mean = |v: &Vec<f64>, d: f64| if v.is_empty() { d } else { v.iter().sum::<f64>() / v.len() as f64 };
+        // Seconds per model call for a role: the measured average latency of its first model.
+        let latency = |m: &str| -> f64 {
+            let id = m.split(',').next().unwrap_or("").trim();
+            connections::resolve(id).map(|(c, _)| crate::llm::health::get(&c.name).latency_ms / 1000.0).unwrap_or(0.0)
+        };
+        let (sl, il) = (latency(&a.settings.solver_model), latency(&a.settings.improver_model));
+        let basis = if !roll.is_empty() { format!("{runs_seen} earlier run(s) in this project") } else if sl > 0.0 { "measured model latency".into() } else { "rough defaults (no history yet)".into() };
+        // Without history: about 70% of the step budget (capped at 15 steps) at the measured
+        // per-call latency, or 15 s per call when the model has not been called yet.
+        let steps = |n: u32| (n.min(15) as f64 * 0.7).max(3.0);
+        let roll_s = mean(&roll, steps(a.settings.solver_steps) * if sl > 0.0 { sl } else { 15.0 });
+        let sess_s = mean(&sess, steps(a.settings.improver_steps) * if il > 0.0 { il } else { 15.0 });
+        let width = a.settings.parallelism.max(1) as f64;
+        let minutes = (k as f64 * roll_s + (n_runs - k) as f64 * roll_s / width.min(2.0) + n_sessions as f64 * sess_s / width.min(2.0)) / 60.0;
+        let price = |m: &str| -> (f64, f64) {
+            let id = m.split(',').next().unwrap_or("").trim();
+            connections::resolve(id).map(|(c, _)| (c.input_price, c.output_price)).unwrap_or((0.0, 0.0))
+        };
+        let (si, so) = price(&a.settings.solver_model);
+        let (ii, io) = price(&a.settings.improver_model);
+        let rt = mean(&roll_tok, 20_000.0);
+        let st = mean(&sess_tok, 30_000.0);
+        // ~92% of tokens are prompt tokens in these sessions.
+        let usd = n_runs as f64 * rt * (0.92 * si + 0.08 * so) / 1e6 + n_sessions as f64 * st * (0.92 * ii + 0.08 * io) / 1e6;
+        Ok(json!({"runs": n_runs, "sessions": n_sessions, "minutes": (minutes * 10.0).round() / 10.0, "usd": (usd * 1000.0).round() / 1000.0, "basis": basis, "tokens": (n_runs as f64 * rt + n_sessions as f64 * st).round()}))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct DlQ {
+    mode: Option<String>,
+    what: Option<String>,
+}
+
+/// The adopted output files, or the adopted harness, as a .tar.gz.
+async fn download(AxPath((p, id)): AxPath<(String, String)>, Query(q): Query<DlQ>) -> Response {
+    let res = tokio::task::spawn_blocking(move || -> Result<(String, Vec<u8>)> {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let mode = q.mode.unwrap_or_else(|| "agg".into());
+        let what = q.what.unwrap_or_else(|| "output".into());
+        let mut dir = None;
+        for d in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
+            let Ok(t) = std::fs::read_to_string(d.path().join(&id).join("summary.json")) else { continue };
+            let v: Value = serde_json::from_str(&t)?;
+            let sel = &v["selections"][&mode];
+            let ns = d.file_name().to_string_lossy().replacen("-agg", &format!("-{mode}"), 1);
+            dir = Some(if what == "harness" {
+                a.root.join("runs/adapt").join(ns).join(&id).join("harnesses").join(sel["chosen_label"].as_str().unwrap_or(""))
+            } else {
+                PathBuf::from(sel["chosen_run_dir"].as_str().unwrap_or("")).join("workspace/output")
+            });
+        }
+        let dir = dir.filter(|d| d.is_dir()).ok_or_else(|| anyhow::anyhow!("nothing to download yet"))?;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        {
+            let mut tar = tar::Builder::new(&mut gz);
+            tar.append_dir_all(&what, &dir)?;
+            tar.finish()?;
+        }
+        Ok((format!("{id}-{mode}-{what}.tar.gz"), gz.finish()?))
+    })
+    .await;
+    match res {
+        Ok(Ok((name, bytes))) => ([(header::CONTENT_TYPE, "application/gzip".to_string()), (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{name}\""))], bytes).into_response(),
+        Ok(Err(e)) => (StatusCode::NOT_FOUND, Json(json!({"error": format!("{e}")}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e}")}))).into_response(),
+    }
+}
+
 async fn get_library(AxPath(p): AxPath<String>) -> ApiResult {
     blocking(move || {
         let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
@@ -504,7 +746,7 @@ async fn list_runs() -> ApiResult {
         .unwrap()
         .values()
         .rev()
-        .map(|r| json!({"id": r.id, "project": r.project, "goal_id": r.goal_id, "goal": r.goal, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "lines": hlog::named(&r.id).len(), "events": hlog::named(&r.id).n_events()}))
+        .map(|r| json!({"id": r.id, "project": r.project, "goal_id": r.goal_id, "goal": r.goal, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "lines": hlog::named(&r.id).len(), "events": hlog::named(&r.id).n_events(), "resumed_from": r.resumed_from, "attempts": r.attempts}))
         .collect();
     Ok(Json(json!({"runs": runs})))
 }
@@ -542,7 +784,7 @@ async fn run_events(AxPath(id): AxPath<String>, Query(q): Query<LogQ>) -> Respon
 }
 
 async fn cancel_run(AxPath(id): AxPath<String>) -> ApiResult {
-    let running = RUNS.lock().unwrap().get(&id).map(|r| r.status == "running").unwrap_or(false);
+    let running = RUNS.lock().unwrap().get(&id).map(|r| r.status == "running" || r.status == "queued").unwrap_or(false);
     if !running {
         return Err(anyhow::anyhow!("run {id} is not running").into());
     }

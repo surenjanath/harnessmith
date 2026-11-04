@@ -102,6 +102,45 @@ What the runtime does for small local models:
 - **Max parallel requests** per connection (default 1 for Ollama) queues requests instead of timing them out. With one local model serving every role, also set **Parallel stages = 1** (Models → Advanced) so the server's prompt cache is reused across an agent's turns. Otherwise interleaved sessions re-evaluate the whole prompt every turn.
 - A rollout whose session died before producing anything (server error, cancel) is reported as failed and is not cached, so a rerun tries it again.
 
+## Self-healing
+
+Runs are built to survive a crashed model server, a stuck agent or a killed UI server without you stepping in.
+
+**Model failover.** Any role can name a chain of models, tried in order:
+
+```
+local/qwen2.5-7b, llama/llama3.2-3b, anthropic/claude-sonnet-5-5
+```
+
+Each connection has a circuit breaker. After 3 consecutive failures it opens for 30 s (doubling up to 10 min), then lets one trial request through. An agent whose model fails switches to the next healthy model in its chain mid-session, keeping its conversation. It switches back when the first model recovers. If every model is down it waits for one to come back instead of failing.
+
+**Agent self-checks.** These are written into the agent's tool results as `[self-check]` notes:
+- the same tool call with the same result 3 times in a row (a loop);
+- 4 tool errors in a row;
+- near the step or time limit with nothing written yet, which tells the agent to write its best deliverable now.
+
+**Run recovery.**
+- A failed rollout is retried once.
+- A failed run, or a partial run caused by transient errors, is retried as a whole. Completed rollouts are reused from cache.
+- Runs wait in a queue, so one local GPU is not shared by several goals at once.
+- When the server restarts, interrupted runs resume automatically.
+
+**Doctor** (the Doctor tab) checks storage, Python, every role's model, connection file permissions, dead rollouts, stuck runs, stale temp folders and base-harness validity. Each problem has a one-click fix: reset a breaker, cancel a stuck run, restore the base harness, clean temp, or resume everything. Safe fixes also run at startup and every 10 minutes.
+
+Every heal shows on the pipeline map. A node shows a "healed ×n" badge, and the run shows a self-healing feed listing each failover and recovery.
+
+![Self-healing feed on the pipeline map](docs/img/self_healing.png)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HARNESS2_MAX_RUNS` | 1 | runs at once; the rest queue |
+| `HARNESS2_RUN_RETRIES` | 1 | whole-run retries after failure |
+| `HARNESS2_RUN_RETRY_WAIT` | 30 | seconds before a run retry |
+| `HARNESS2_ROLLOUT_RETRY_WAIT` | 10 | seconds before a rollout retry |
+| `HARNESS2_AUTO_RESUME` | 1 | resume interrupted runs at startup (0 to disable) |
+
+The History view also has a **compare** tab, which shows the first base attempt beside the adopted output, and download buttons for the output and the adopted harness. Run a goal shows a time and cost estimate before you start it, based on past runs when there are any.
+
 ## Goals from the command line
 
 ```bash

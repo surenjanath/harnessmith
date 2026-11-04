@@ -30,6 +30,7 @@ pub fn run_improver_session(spec: &ChannelSpec, cwd: &Path, mission: &str, syste
         "medium" => 8192,
         _ => 16384,
     };
+    cfg.rescue_hint = "Finish now: complete any edit in context/harness/ you have started, then reply with your final <notes> block (or the requested output). Unfinished work is lost when the budget ends.".into();
     let prompt = "Read MISSION.md first. Do what it asks. Reply with the requested output as your final message AND save it verbatim to output/answer.md.";
     let out = agent::run(&cfg, prompt)?;
     let ans = util::read_lossy(&cwd.join("output/answer.md")).unwrap_or_default();
