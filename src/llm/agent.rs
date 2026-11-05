@@ -125,6 +125,11 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
             parameters: obj(json!({"path": {"type": "string"}, "content": {"type": "string"}}), &["path", "content"]),
         },
         ToolDef {
+            name: "append_file".into(),
+            description: "Add text to the end of a file (creating it if needed). Use it to build a long document one section at a time.".into(),
+            parameters: obj(json!({"path": {"type": "string"}, "content": {"type": "string"}}), &["path", "content"]),
+        },
+        ToolDef {
             name: "edit_file".into(),
             description: "Replace an exact substring in a file. old_string must occur exactly once unless replace_all is true.".into(),
             parameters: obj(
@@ -367,7 +372,7 @@ fn list_files(ws: &Path, dir: &Path) -> String {
 fn required(tool: &str) -> &'static [&'static str] {
     match tool {
         "read_file" | "delete_file" => &["path"],
-        "write_file" => &["path", "content"],
+        "write_file" | "append_file" => &["path", "content"],
         "edit_file" => &["path", "old_string", "new_string"],
         "bash" => &["command"],
         "skill" => &["name"],
@@ -451,6 +456,20 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             let c = s("content");
             util::write(&p, &c)?;
             Ok(format!("wrote {} ({} chars)", util::rel(ws, &p), util::char_len(&c)))
+        }
+        "append_file" => {
+            let p = safe_path(ws, &s("path"))?;
+            let mut body = if p.is_file() { util::read_lossy(&p)? } else { String::new() };
+            let c = s("content");
+            if !body.is_empty() && !body.ends_with('\n') {
+                body.push('\n');
+            }
+            if !body.is_empty() && !c.starts_with('\n') {
+                body.push('\n');
+            }
+            body.push_str(&c);
+            util::write(&p, &body)?;
+            Ok(format!("appended {} chars to {} (now {} chars)", util::char_len(&c), util::rel(ws, &p), util::char_len(&body)))
         }
         "edit_file" => {
             let p = safe_path(ws, &s("path"))?;
@@ -700,6 +719,9 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let mut nudges = 0;
     let mut idle_nudges = 0;
     let mut finish_refusals = 0;
+    let mut last_review_size: u64 = 0;
+    // Refusals allowed: 2, or up to 4 while each fix makes the deliverables bigger.
+    let out_size = |cfg: &AgentConfig| cfg.rescue_dir.as_ref().map(|d| util::files_sorted(d).iter().map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum::<u64>()).unwrap_or(0);
     // Nothing delivered yet? (Only when the caller names a deliverables folder.)
     let undelivered = |cfg: &AgentConfig| cfg.rescue_dir.as_ref().map(|d| util::files_sorted(d).iter().all(|p| std::fs::metadata(p).map(|m| m.len() == 0).unwrap_or(true))).unwrap_or(false);
     let mut outage_retries = 0u32;
@@ -832,16 +854,18 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         }
         // Self-check 4: a prose-only reply ends the session only once something is delivered, and
         // the delivery passes review. Small models often narrate tools instead of calling them.
-        let review_issues: Vec<String> = if resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && finish_refusals < 2 && out.steps + 1 < cfg.max_steps {
+        let review_issues: Vec<String> = if resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && finish_refusals < (if out_size(cfg) > last_review_size && finish_refusals >= 2 { 4 } else { 2 }) && out.steps + 1 < cfg.max_steps {
             cfg.rescue_dir.as_ref().map(|d| super::review::review(task, d)).unwrap_or_default()
         } else {
             vec![]
         };
         if !review_issues.is_empty() {
             finish_refusals += 1;
+            last_review_size = out_size(cfg);
             heal(&mut out, &mut traj, "finish_refused", json!({"issues": review_issues}));
             messages.push(Msg::Assistant { text: resp.text.clone(), calls: vec![] });
-            messages.push(Msg::User(format!("[self-check] Not done yet — the deliverables do not meet the goal:\n{}\nFix every point with real tool calls (rewrite files completely with write_file), then call finish.", review_issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n"))));
+            let dir = cfg.rescue_dir.clone().unwrap_or_default();
+            messages.push(Msg::User(format!("[self-check] Not done yet — the deliverables do not meet the goal:\n{}\n{}", review_issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n"), super::review::next_step(&review_issues, &dir))));
             continue;
         }
         if resp.calls.is_empty() && cfg.depth == 0 && idle_nudges < 3 && out.steps + 1 < cfg.max_steps && undelivered(cfg) {
@@ -935,17 +959,20 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             }
             traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": if is_error { "error" } else { "ok" }, "output": content}));
             // Self-check 5: review the deliverables against the goal before letting it finish.
-            if call.name == "finish" && !is_error && cfg.depth == 0 && finish_refusals < 2 {
+            let size_now = out_size(cfg);
+            let budget = if finish_refusals >= 2 && size_now > last_review_size { 4 } else { 2 };
+            if call.name == "finish" && !is_error && cfg.depth == 0 && finish_refusals < budget {
                 if let Some(dir) = &cfg.rescue_dir {
                     let issues = super::review::review(task, dir);
                     if !issues.is_empty() {
                         finish_refusals += 1;
+                        last_review_size = size_now;
                         heal(&mut out, &mut traj, "finish_refused", json!({"issues": issues}));
                         say!("{}! review: {}", cfg.log_prefix, util::take_chars(&issues.join("; "), 240));
                         results.push(ToolResult {
                             id: call.id.clone(),
                             name: call.name.clone(),
-                            content: format!("[self-check] finish refused — the deliverables do not meet the goal yet:\n{}\nFix every point (rewrite files completely with write_file), read them back, then call finish again.", issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")),
+                            content: format!("[self-check] finish refused — the deliverables do not meet the goal yet:\n{}\n{}", issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n"), super::review::next_step(&issues, dir)),
                             is_error: true,
                         });
                         continue;

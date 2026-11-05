@@ -79,6 +79,28 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
     issues
 }
 
+/// One concrete next action for a model that keeps calling finish: small models act on a single
+/// instruction far better than on a list of problems.
+pub fn next_step(issues: &[String], out_dir: &Path) -> String {
+    let main = crate::util::files_sorted(out_dir)
+        .into_iter()
+        .filter(|p| p.extension().map(|e| matches!(e.to_string_lossy().as_ref(), "md" | "txt" | "markdown")).unwrap_or(false))
+        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .map(|p| format!("output/{}", crate::util::rel(out_dir, &p)))
+        .unwrap_or_else(|| "output/report.md".into());
+    let first = issues.first().map(|s| s.as_str()).unwrap_or("");
+    let step = if first.contains("words") {
+        format!("NEXT STEP: call append_file on {main} to add ONE complete new section (a heading plus at least 150 words of specific content). Repeat append_file for each missing part. Calling finish again without new content will be refused.")
+    } else if first.contains("cut off") || first.contains("no styling") || first.contains("DOCTYPE") || first.contains(".html") {
+        "NEXT STEP: call write_file on output/index.html with the COMPLETE page: <!DOCTYPE html>, <html>, <head> with <meta charset> and an inline <style> block (layout, typography, colours, spacing), <body> with the content, and </html>. Then read it back.".to_string()
+    } else if first.contains("output/ is empty") {
+        "NEXT STEP: call write_file to create the deliverable under output/.".to_string()
+    } else {
+        "NEXT STEP: fix the first point above with write_file, read the file back, then fix the next one. Calling finish without changes will be refused.".to_string()
+    };
+    step
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

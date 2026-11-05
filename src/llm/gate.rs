@@ -106,7 +106,7 @@ impl Gate {
         }
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().trim_start_matches("./").to_string();
         match tool {
-            "write_file" | "edit_file" | "delete_file" => {
+            "write_file" | "append_file" | "edit_file" | "delete_file" => {
                 if path.starts_with(".harness") {
                     return Some(v("harness-readonly", "the installed harness is read-only during a run"));
                 }

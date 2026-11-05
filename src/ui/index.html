@@ -33,12 +33,20 @@
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 a { color: var(--accent); }
-header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header { display: flex; align-items: center; gap: 12px 20px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header { display: grid !important; grid-template-columns: auto 1fr; grid-template-areas: "brand right" "nav nav"; row-gap: 8px !important; padding-bottom: 0 !important; }
+header h1 { grid-area: brand; }
+header nav { grid-area: nav; margin: 0 -8px; padding: 0 8px 8px; overflow-x: auto; flex-wrap: nowrap !important; scrollbar-width: none; }
+header nav::-webkit-scrollbar { display: none; }
+header nav button { white-space: nowrap; }
+.hright { grid-area: right; display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.projsel { display: flex; align-items: center; gap: 8px; }
+.projsel select { width: 190px; }
 header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
 header h1 sup { font-size: 10px; }
 header h1 small { font: 11px var(--mono); color: var(--faint); font-weight: 400; margin-left: 6px; }
-nav { display: flex; gap: 2px; flex-wrap: wrap; }
-nav button { background: none; border: 1px solid transparent; padding: 6px 11px; border-radius: 6px; color: var(--muted); cursor: pointer; font: 500 13px Inter, system-ui, sans-serif; }
+nav { display: flex; gap: 6px; flex-wrap: wrap; }
+nav button { background: none; border: 1px solid transparent; padding: 6px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; font: 500 13px Inter, system-ui, sans-serif; }
 nav button:hover { color: var(--ink); }
 nav button.on { background: var(--panel2); border-color: var(--line); color: var(--ink); }
 .spacer { flex: 1; }
@@ -56,9 +64,15 @@ main { max-width: 1320px; margin: 0 auto; padding: 18px 16px 60px; }
 .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line2); background: var(--panel2); color: var(--ink); padding: 6px 13px; border-radius: 6px; cursor: pointer; font: 500 13px Inter, system-ui, sans-serif; text-decoration: none; }
 .btn:hover { border-color: var(--muted); }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; }
-.btn.small { padding: 3px 9px; font-size: 12px; }
+.btn.small { padding: 4px 11px; font-size: 12px; }
+/* Buttons that sit next to each other inline (tables, hints, text) always get a gap. */
+.btn + .btn, .btn + a.btn, a.btn + .btn, a.btn + a.btn { margin-left: 8px; }
+.actions .btn + .btn, .actions a.btn + .btn, .actions .btn + a.btn, .actions a.btn + a.btn,
+.btnrow .btn + .btn, .btnrow a.btn + a.btn, .btnrow .btn + a.btn, .btnrow a.btn + .btn,
+.projsel .btn + .btn { margin-left: 0; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
 .btn:disabled { opacity: .5; cursor: default; }
-.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+.actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
 pre, code, .mono { font-family: var(--mono); font-size: 12.5px; }
@@ -72,14 +86,20 @@ th { font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercas
 td { font-size: 13px; }
 .chip { display: inline-block; padding: 0 8px; border-radius: 99px; background: var(--chip); font: 11.5px/1.7 var(--mono); }
 .chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
-.tabs2 { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
-.tabs2 button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 6px; padding: 3px 10px; cursor: pointer; font: 12px var(--mono); }
+.tabs2 { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 12px; }
+.tabs2 button { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 6px; padding: 4px 12px; cursor: pointer; font: 12px var(--mono); }
 .tabs2 button.on { background: var(--panel2); color: var(--ink); border-color: var(--line2); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .grid2.hist { grid-template-columns: minmax(240px, 1fr) 2.2fr; }
 .grid2.top { grid-template-columns: 1.15fr 1fr; align-items: start; }
 .grid2 > * { min-width: 0; }
-@media (max-width: 860px) { .grid2, .grid2.top { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .grid2, .grid2.top, .grid2.hist { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  header { grid-template-columns: 1fr !important; grid-template-areas: "brand" "right" "nav" !important; }
+  .hright { justify-content: flex-start; }
+  .projsel { flex: 1 1 100%; }
+  .projsel select { flex: 1; width: auto; }
+}
 .goal-item { padding: 10px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .goal-item:hover .gtitle { color: var(--accent); }
 .gtitle { font-weight: 600; }
@@ -116,7 +136,7 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .appr .r { grid-template-columns: 12px minmax(0, 1fr) auto; }
 .mcp-row { display: grid; grid-template-columns: 12px minmax(90px, max-content) minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
 .kpi .kl { font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .kpi .kv { font: 650 22px/1.2 Inter, system-ui, sans-serif; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .kpi .ks { font: 11px var(--mono); color: var(--faint); }
@@ -130,12 +150,20 @@ svg .bar-b { fill: var(--line2); } svg .bar-a { fill: var(--accent); } svg .axis
 .spark { border-color: color-mix(in srgb, var(--selector) 60%, var(--line2)) !important; color: var(--selector) !important; }
 .fgroup { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 .fgroup.adopted { border-color: var(--warn); }
-.frow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 3px 0; font: 12.5px var(--mono); }
+.frow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 5px 0; font: 12.5px var(--mono); border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.frow .btn + .btn { margin-left: 0; }
+.fgroup { padding: 10px 14px !important; }
+.fgroup .live-head { gap: 10px; }
+.fgroup .live-head .btn + .btn { margin-left: 0; }
 .path { font: 11.5px var(--mono); color: var(--muted); word-break: break-all; }
 .slow { color: var(--warn); font: 11.5px var(--mono); }
 .slowhint { border-left: 3px solid var(--warn); padding: 6px 10px; margin: 6px 0 10px; font-size: 12.5px; color: var(--muted); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .hw { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .hw .kv { overflow-wrap: anywhere; font-size: 15px !important; line-height: 1.3; }
+#adv-body .ph { margin-top: 18px; }
+#adv-body .hw + .legend { margin-top: 4px; }
+.panel .ph + .rows, .panel .ph + .pol { margin-top: 2px; }
+.rows + .ph, .pol + .ph, .rows + .keyline { margin-top: 14px; }
 .advtab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .advtab td, .advtab th { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; white-space: nowrap; }
 .advtab td.n { font: 12px var(--mono); text-align: right; }
@@ -305,13 +333,13 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
     <button data-v="memory">Memory</button>
     <button data-v="doctor">Doctor</button>
   </nav>
-  <div class="spacer"></div>
+  <div class="hright">
   <button class="hpill" id="hpill" title="Model health (circuit breakers). Click for the Doctor." onclick="show('doctor')"><span class="dot"></span><span>models: checking…</span></button>
   <button class="hpill warn hidden" id="apill" onclick="window.scrollTo(0,0)"><span class="dot warn"></span><span id="apill-t"></span></button>
   <button class="theme-t" id="theme-t" title="Switch light / dark"></button>
-  <div style="min-width:180px"><select id="project" title="Project: goals in one project share an experience library"></select></div>
-  <button class="btn small" id="newproj" title="New project">+ Project</button>
+  <div class="projsel"><select id="project" title="Project: goals in one project share an experience library"></select><button class="btn small" id="newproj" title="New project">+ Project</button></div>
   <a class="btn small hidden" id="signout" href="/logout" title="Sign out">Sign out</a>
+  </div>
 </header>
 <main>
 <div id="approvals" class="appr hidden"></div>
@@ -1313,7 +1341,7 @@ function renderGoal() {
       if (tab === "output") {
         const files = Object.entries(r.files || {});
         h += files.length ? files.map(([n, b]) => `<div class="hint"><b>${esc(n)}</b></div><pre>${esc(b)}</pre>`).join("") : '<p class="muted">No output files.</p>';
-        if (r.run_dir) h += `<div class="hint">Files on disk: <code>${esc(r.run_dir)}/workspace/output</code> <button class="btn small" onclick="openOS(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Open folder</button> <button class="btn small" onclick="copyPath(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Copy path</button> <button class="btn small" onclick="detailTab['${key}']='files';renderGoal()">All files</button></div>`;
+        if (r.run_dir) h += `<div class="hint" style="margin-top:10px">Files on disk:</div><div class="path">${esc(r.run_dir)}/workspace/output</div><div class="btnrow"><button class="btn small" onclick="openOS(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Open folder</button><button class="btn small" onclick="copyPath(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Copy path</button><button class="btn small" onclick="detailTab['${key}']='files';renderGoal()">All files</button></div>`;
         const dl = (what) => `projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(d.task.id)}/download?mode=${mode}&what=${what}`;
         h += `<div class="actions"><a class="btn small" href="/api/${dl("output")}">Download output (.tar.gz)</a><a class="btn small" href="/api/${dl("harness")}">Download adopted harness</a></div>`;
         if (r.usage && r.usage.steps) h += `<div class="hint">${r.usage.steps} steps · ${r.usage.input_tokens} in / ${r.usage.output_tokens} out tokens${r.usage.cost_usd ? ` · $${r.usage.cost_usd.toFixed(4)}` : ""}</div>`;
@@ -1676,7 +1704,7 @@ function renderMcp() {
   const list = (projectData.settings.mcp_servers || []);
   $("#mcp-list").innerHTML = list.length ? list.map((m, i) => `<div class="mcp-row"><span class="dot ${m.enabled === false ? "hollow" : "pink"}"></span><span class="k mono">${esc(m.name)}</span>
       <span class="v" style="white-space:normal">$ ${esc([m.command, ...(m.args || [])].join(" "))}${Object.keys(m.env || {}).length ? " · env " + Object.keys(m.env).map(esc).join(", ") : ""}${m.ask ? ' · <span class="st warn">asks before each call</span>' : ""}<div id="mcp-t-${i}" class="hint"></div></span>
-      <span class="s" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end"><button class="btn small" onclick="mcpTest(${i})">Test</button><button class="btn small" onclick="mcpToggle(${i},'enabled')">${m.enabled === false ? "Enable" : "Disable"}</button><button class="btn small" onclick="mcpToggle(${i},'ask')">${m.ask ? "Don't ask" : "Ask first"}</button><button class="btn small" onclick="mcpDel(${i})">Remove</button></span></div>`).join("")
+      <span class="s btnrow" style="margin:0;justify-content:flex-end"><button class="btn small" onclick="mcpTest(${i})">Test</button><button class="btn small" onclick="mcpToggle(${i},'enabled')">${m.enabled === false ? "Enable" : "Disable"}</button><button class="btn small" onclick="mcpToggle(${i},'ask')">${m.ask ? "Don't ask" : "Ask first"}</button><button class="btn small" onclick="mcpDel(${i})">Remove</button></span></div>`).join("")
     : '<p class="hint">No MCP servers yet. Add one below, e.g. <code>npx -y @modelcontextprotocol/server-filesystem /data</code>.</p>';
 }
 async function saveMcp(list, note) {
@@ -1703,7 +1731,7 @@ async function loadSchedules() {
     const r = await api(`projects/${encodeURIComponent(project)}/schedules`), list = projectData.settings.schedules || [], h = r.hooks;
     $("#sched-list").innerHTML = list.length ? list.map((x, i) => { const st = r.state[x.id] || {};
       return `<div class="r"><span class="dot ${x.enabled ? "learner" : "hollow"}"></span><span class="k mono">every ${x.every_minutes >= 1440 ? Math.round(x.every_minutes / 1440) + "d" : x.every_minutes >= 60 ? Math.round(x.every_minutes / 60) + "h" : x.every_minutes + "m"}</span><span class="v" style="white-space:normal">${esc(x.goal.slice(0, 120))}${st.last ? ` · last ${esc(st.last.slice(0, 16).replace("T", " "))}` : " · not run yet"}${st.error ? ` · <span class="err">${esc(st.error)}</span>` : ""}</span>
-        <span class="s" style="display:flex;gap:4px"><button class="btn small" onclick="schedToggle(${i})">${x.enabled ? "Pause" : "Resume"}</button><button class="btn small" onclick="schedDel(${i})">Remove</button></span></div>`; }).join("")
+        <span class="s btnrow" style="margin:0"><button class="btn small" onclick="schedToggle(${i})">${x.enabled ? "Pause" : "Resume"}</button><button class="btn small" onclick="schedDel(${i})">Remove</button></span></div>`; }).join("")
       : '<p class="hint">No schedules. Pick “Repeat” before Start to run a goal on a timer.</p>';
     const on = (b) => b ? '<span class="st ok">on</span>' : '<span class="st idle">off</span>';
     const origin = location.origin;
@@ -1833,11 +1861,11 @@ function renderMemory() {
   const list = memNotes.filter(keep);
   const dot = (n) => n.status === "active" ? "ok" : n.status === "candidate" ? "warn" : "hollow";
   const from = (n) => n.source.by === "user" ? "you" : `${(n.source.goal || "").slice(0, 15)} · ${n.source.node || "?"}`;
-  $("#m-list").innerHTML = list.length ? list.map(n => `<div class="r" style="grid-template-columns:12px minmax(0,1fr) auto;padding:6px 0;border-bottom:1px solid var(--line)">
+  $("#m-list").innerHTML = list.length ? list.map(n => `<div class="r" style="grid-template-columns:12px minmax(0,1fr);padding:10px 0;border-bottom:1px solid var(--line)">
       <span class="dot ${dot(n)}"></span>
       <span><span style="font-size:13.5px">${n.pinned ? '<b style="color:var(--selector)">★</b> ' : ""}${esc(n.text)}</span>
         <div class="v" style="white-space:normal">${esc(n.id)} · ${esc(n.status)}${n.vec_model ? " · semantic" : ""}${n.tags.length ? " · " + n.tags.map(esc).join(", ") : ""} · from ${esc(from(n))} · used ${n.uses}×${n.promoted ? ' · <span class="st ok">in LongTermMEMORY.md</span>' : ""}${n.note ? " · " + esc(n.note) : ""}</div></span>
-      <span class="s" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+      <span></span><span class="btnrow" style="margin-top:4px">
         <button class="btn small" onclick="memEdit('${n.id}',{pinned:${!n.pinned}})">${n.pinned ? "Unpin" : "Pin"}</button>
         ${!n.promoted && n.status !== "archived" ? `<button class="btn small" onclick="memPromote('${n.id}')">Promote</button>` : ""}
         ${n.status !== "archived" ? `<button class="btn small" onclick="memShare('${n.id}')" title="Copy to the store other projects can recall">Share</button>` : ""}
