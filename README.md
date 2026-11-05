@@ -6,6 +6,8 @@
 
 It is a Rust port of [google-research/harness2](https://github.com/google-research/harness2), *Recursive Agent Harnessing for an Open World*. It adds a model-agnostic agent runtime and a web UI where you connect models and hand the system a goal. The command-line tool is still called `harness2`. This is an independent project, not an official Google product.
 
+![Harnessmith's live Overview: a goal moving through the gate, its run slot and the recursion, with the model serving it](docs/img/hero.png)
+
 ```bash
 cargo build --release
 ```
@@ -14,7 +16,7 @@ cargo build --release
 ./target/release/harness2 serve --port 8765
 ```
 
-Then open http://127.0.0.1:8765.
+Then open http://127.0.0.1:8765. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
 
 Other ways to install:
 - **Prebuilt binaries** for Linux (x86_64, arm64) and macOS (Apple silicon, Intel) are on the [Releases](https://github.com/surenjanath/harnessmith/releases) page. On Windows, use WSL or Docker: the agent's tools need bash.
@@ -24,7 +26,7 @@ Other ways to install:
 docker run -p 8765:8765 -v harnessmith:/data ghcr.io/surenjanath/harnessmith:latest
 ```
 
-  Inside Docker the container is the isolation; the bubblewrap sandbox usually needs `--privileged` or a seccomp profile that allows user namespaces. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
+  Inside Docker the container is the isolation; the bubblewrap sandbox usually needs `--privileged` or a seccomp profile that allows user namespaces.
 
 A **harness** is everything around a model that makes it an agent: system prompt, guardrails, memory, tool guidance, skills, sub-agents, scripts, and in-loop hooks or plugins. Harness² improves that harness for each task, with no ground-truth feedback:
 
@@ -36,7 +38,6 @@ A **harness** is everything around a model that makes it an agent: system prompt
 6. **Learn.** A reflection writes a lesson into a per-domain library, which later tasks read.
 
 Budget per task and mode: R = 4k solver rollouts and P = 3k improver sessions. The ledger enforces this.
-
 
 **New here?** Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md): a first goal in five minutes with no API key. [docs/UPSTREAM_ISSUES.md](docs/UPSTREAM_ISSUES.md) tracks every issue on the original repo against this port.
 
@@ -128,6 +129,10 @@ NVIDIA's free developer tier is rate-limited; keep **Max parallel requests** at 
 
 Solver extras: `export_pdf` turns Markdown or HTML into a real PDF (headless Chrome when installed, a built-in writer otherwise), and optional web access adds `web_fetch` plus `web_search` with `BRAVE_API_KEY` or `TAVILY_API_KEY`.
 
+![Compare: the unmodified base attempt beside the adopted output, with your own choice](docs/img/compare.png)
+
+![Results: base vs adopted scores, wins and losses, spend and time per goal](docs/img/results.png)
+
 ## Watching a run: the pipeline map
 
 The map is drawn like a network diagram. Each stage is a box whose line shows the role and status, and links are labelled with what flows along them (`traces`, `edits`, `output`, `verdict`). A link takes the colour of the role that receives it: blue solver, green improver, purple selector, yellow library. The striped trunk marks the path to the adopted output, and dashed boxes are stages that haven't started. Above the run form, **Wiring** shows which model chain serves each role, with its live status (`Live`, `Backup n`, `Degraded`, `Down`). **Self-healing policy** shows the retry and failover rules currently in force.
@@ -143,7 +148,7 @@ sequential  base runs ─► round 1 inv/dom ─► checkpoint c1 ─► round 2
 
 Each card shows its state as it changes: which tool the agent is calling, step count, tokens, whether the improver *kept* or *edited* the harness (or fell back after an invalid proposal), and whether the probe delivered. The adopted output is marked ★. Click a card for its timeline: every agent turn, the proposal notes, rejected attempts and why, and the selector's reasoning. The header tracks elapsed time, solver runs and improver sessions against the 4k/3k budget, tokens, and cost. **Stop** cancels after the current model call.
 
-![Live pipeline map on a local model](docs/img/pipeline-live-local.png)
+![A run in progress: each stage shows its model, step count, live "thinking" timer and latest tool call](docs/img/run_live.png)
 
 Runs are saved under `runs/ui-runs/<id>/` (`run.json`, `log.txt`, `events.jsonl`), so the map and log survive a server restart. **History → Journey** replays the map for any past goal.
 
@@ -199,7 +204,9 @@ Each connection has a circuit breaker. After 3 consecutive failures it opens for
 
 Every heal shows on the pipeline map. A node shows a "healed ×n" badge, and the run shows a self-healing feed listing each failover and recovery.
 
-![Self-healing feed on the pipeline map](docs/img/self_healing.png)
+![Self-healing on a real run: the primary local model died, the agent failed over to the backup, then waited for recovery](docs/img/self_healing.png)
+
+![Doctor: every check, with one-click fixes](docs/img/doctor.png)
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -272,7 +279,7 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 - **GitHub issues:** add a repository webhook (JSON content type; Issues and Issue comments events) pointing at `/api/hooks/github`, and set `HARNESS2_GITHUB_SECRET` to the webhook's secret. Signatures are verified. An issue labelled `harnessmith` (or `HARNESS2_GITHUB_LABEL`), or a comment starting with `/harnessmith …`, becomes a goal in project `HARNESS2_GITHUB_PROJECT` (default: owner-repo). The result is posted back on the issue using `HARNESS2_GITHUB_TOKEN`.
 - **Schedules:** choose **Repeat hourly / every 6 h / daily / weekly** next to Start. The Run page lists schedules with Pause and Remove, along with each one's last run. A schedule never overlaps its own previous run.
 
-![MCP servers](docs/img/mcp.png)
+![Base harness: MCP servers, wired and built-in tools, pinned files and earlier versions](docs/img/harness.png)
 
 ## Cost and live updates
 
@@ -280,8 +287,6 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 - **Prompt caching.** Anthropic requests mark the tools, the system prompt and the last two user turns as cache breakpoints, so each turn re-reads the conversation from the cache. Cached input from Anthropic, OpenAI-compatible servers and Gemini is counted separately and priced at the connection's cached rate (default 10% of input for Anthropic, 50% otherwise, editable).
 - **Push updates.** The run map is pushed over server-sent events (`/api/runs/:id/stream`) instead of being polled, and falls back to polling if the stream drops. The Overview listens to `/api/live`. The figure animates: a goal's slot lights up with the model serving it, the active stage glows, finished stages turn green, packets travel along the queue, tool-gate and model wires, and the gate, models and store boxes flash on gate, heal and memory events. **Where it reaches now** lists every working stage with its model (including "thinking" while a call is in flight), step and latest tool call.
 - `HARNESS2_MOCK_DELAY_MS` slows the offline mock model, for demos.
-
-![Live Overview](docs/img/overview_live.png)
 
 ## Results, login and Stop
 
@@ -309,8 +314,11 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
   - **Downloads:** suggests models worth pulling for your memory budget, with a **Download** button for Ollama.
 - **Agents that act.** A small model that narrates instead of calling tools is told so and pushed to real tool calls while `output/` is empty, and `finish` is refused until something is written. Tool calls written as JSON in prose are recovered.
 
-![Goal assistant](docs/img/assist.png)
-![Model advisor](docs/img/advisor.png)
+![✨ Improve with AI: a one-line goal expanded into a full brief with grading criteria](docs/img/assist.png)
+
+![Files: every attempt's output folder, with View, Copy path and Open folder](docs/img/files.png)
+
+![Model advisor: hardware, every model found, measured speed and one-click setups](docs/img/advisor.png)
 
 ## Memory
 
