@@ -3,6 +3,7 @@
 //! the same way the model is: a missing file type, a cut-off HTML page, an unstyled "sleek"
 //! page, a "research document" of a few sentences, an empty file, broken JSON or CSV.
 
+use regex::Regex;
 use std::path::Path;
 
 fn words(s: &str) -> usize {
@@ -63,7 +64,14 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
                     issues.push(format!("{} has rows with different numbers of columns", rel(p)));
                 }
             }
-            "md" | "txt" | "markdown" => text_words += words(&body),
+            "md" | "markdown" => {
+                text_words += words(&body);
+                let tags = Regex::new(r"(?i)<(h[1-6]|p|ul|ol|li|div|br)\b").unwrap().find_iter(&body).count();
+                if tags > 4 && !body.lines().any(|l| l.trim_start().starts_with('#')) {
+                    issues.push(format!("{} is written with HTML tags (<h2>, <p>…); a Markdown file needs Markdown: '## ' headings, blank-line paragraphs, '- ' lists. Rewrite it with write_file", rel(p)));
+                }
+            }
+            "txt" => text_words += words(&body),
             _ => {}
         }
         let t = body.trim_start();
@@ -129,6 +137,8 @@ mod tests {
         assert!(i.iter().any(|x| x.contains("only 5 words")), "{i:?}");
         let i = review("make a landing page in html", d.path());
         assert!(i.iter().any(|x| x.contains(".html file")), "{i:?}");
+        std::fs::write(d.path().join("answer.md"), format!("<h2>History</h2><p>{}</p><h2>Breeds</h2><p>x</p><ul><li>a</li></ul>", "word ".repeat(700))).unwrap();
+        assert!(review("i want a research document on dogs", d.path()).iter().any(|x| x.contains("written with HTML tags")));
         std::fs::write(d.path().join("answer.md"), "{\"status\":\"ERROR\",\"data\":{}}").unwrap();
         assert!(review("anything", d.path()).iter().any(|x| x.contains("error message")));
     }
