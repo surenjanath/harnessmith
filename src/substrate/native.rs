@@ -239,7 +239,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     extra.insert("error".into(), Value::String(out.error.clone()));
     util::write(
         &run_dir.join("usage.json"),
-        serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error, "heals": out.heals, "model": out.served_by}))?,
+        serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error, "heals": out.heals, "model": out.served_by, "review_open": out.review_open}))?,
     )?;
     runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
     Ok(run_dir.to_path_buf())

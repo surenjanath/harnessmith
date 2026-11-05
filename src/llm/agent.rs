@@ -98,6 +98,8 @@ pub struct AgentOutcome {
     pub heals: u32,
     /// The model id that produced the last reply.
     pub served_by: String,
+    /// Review problems still open when the session ended (empty when the deliverables passed).
+    pub review_open: Vec<String>,
 }
 
 fn obj(props: Value, required: &[&str]) -> Value {
@@ -854,7 +856,10 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         }
         // Self-check 4: a prose-only reply ends the session only once something is delivered, and
         // the delivery passes review. Small models often narrate tools instead of calling them.
-        let review_issues: Vec<String> = if resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && finish_refusals < (if out_size(cfg) > last_review_size && finish_refusals >= 2 { 4 } else { 2 }) && out.steps + 1 < cfg.max_steps {
+        // A reply that only announces work ("I'll re-append…", "Let's…") is not a finished answer.
+        let announces = Regex::new(r"(?i)\b(i'?ll|i will|let'?s|let me|next,? i|i am going to|i'm going to|now i will)\b").unwrap().is_match(resp.text.trim());
+        let extra = if announces { 2 } else { 0 };
+        let review_issues: Vec<String> = if resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && finish_refusals < (if out_size(cfg) > last_review_size && finish_refusals >= 2 { 4 } else { 2 }) + extra && out.steps + 1 < cfg.max_steps {
             cfg.rescue_dir.as_ref().map(|d| super::review::review(task, d)).unwrap_or_default()
         } else {
             vec![]
@@ -1011,7 +1016,12 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             break;
         }
     }
-    traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd,
+    if cfg.depth == 0 {
+        if let Some(d) = &cfg.rescue_dir {
+            out.review_open = super::review::review(task, d);
+        }
+    }
+    traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd, "review_open": out.review_open,
         "input_tokens": out.input_tokens, "output_tokens": out.output_tokens}));
     event("end", json!({"steps": out.steps, "in": out.input_tokens, "out": out.output_tokens, "usd": out.cost_usd, "error": out.error, "depth": cfg.depth, "heals": out.heals, "model": out.served_by}));
     Ok(out)

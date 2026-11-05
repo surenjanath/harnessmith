@@ -73,7 +73,9 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
     }
     // 2. Depth: a "research document" of a few sentences is not one.
     let has_doc = files.iter().any(|p| matches!(ext(p).as_str(), "md" | "txt" | "markdown" | "html" | "docx" | "pdf"));
-    if long_wanted && has_doc && text_words > 0 && text_words < 350 && !files.iter().any(|p| matches!(ext(p).as_str(), "html" | "docx" | "pdf")) {
+    let deep = ["research", "report", "whitepaper", "study", "analysis"].iter().any(|w| g.contains(w));
+    let min_words = if deep { 600 } else { 350 };
+    if long_wanted && has_doc && text_words > 0 && text_words < min_words && !files.iter().any(|p| matches!(ext(p).as_str(), "html" | "docx" | "pdf")) {
         issues.push(format!("the written deliverable has only {text_words} words; the goal asks for a {} — cover each part in real depth with headings, specifics and sources", ["research document", "report", "document", "essay", "article", "guide", "analysis", "study", "overview", "brief"].iter().find(|w| g.contains(*w)).unwrap_or(&"document")));
     }
     issues
