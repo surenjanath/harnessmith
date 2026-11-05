@@ -109,6 +109,24 @@ pub struct GoalSettings {
     /// Let the solver fetch web pages (and search, when a search API key is set).
     #[serde(default)]
     pub web_access: bool,
+    /// Base-harness files the improver may not change or delete (upstream #94).
+    #[serde(default)]
+    pub pinned_paths: Vec<String>,
+}
+
+/// Characters that hide text from a human reviewer but not from a model: zero-width, bidi
+/// overrides and Unicode tag characters (upstream #96).
+pub fn hidden_chars(s: &str) -> Vec<char> {
+    let mut found: Vec<char> = s
+        .chars()
+        .filter(|c| matches!(*c as u32, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF | 0xE0000..=0xE007F))
+        .collect();
+    // A BOM at the very start of a file is harmless.
+    if s.starts_with('\u{FEFF}') {
+        found.remove(0);
+    }
+    found.dedup();
+    found
 }
 fn three() -> usize {
     3
@@ -202,6 +220,7 @@ impl Default for GoalSettings {
             improver_brief: true,
             judge_repeats: 3,
             web_access: false,
+            pinned_paths: vec![],
         }
     }
 }
@@ -437,8 +456,25 @@ impl BenchmarkAdapter for GoalAdapter {
     fn base_harness(&self) -> Result<PathBuf> {
         Ok(self.root.join("base"))
     }
-    fn validate_tree(&self, _t: &Tree) -> Result<()> {
-        Ok(())
+    fn validate_tree(&self, t: &Tree) -> Result<()> {
+        let mut errs = vec![];
+        for (rel, body) in t {
+            let h = hidden_chars(body);
+            if !h.is_empty() {
+                errs.push(format!("{rel} contains hidden characters ({}); remove them, every character in the harness must be visible", h.iter().take(4).map(|c| format!("U+{:04X}", *c as u32)).collect::<Vec<_>>().join(", ")));
+            }
+        }
+        if !self.settings.pinned_paths.is_empty() {
+            let base = tree::read_tree(&native::native_surface(), &self.root.join("base"), None);
+            for p in &self.settings.pinned_paths {
+                match (base.get(p), t.get(p)) {
+                    (Some(b), Some(n)) if b != n => errs.push(format!("{p} is pinned by the project owner and must stay exactly as it is; undo your changes to it")),
+                    (Some(_), None) => errs.push(format!("{p} is pinned by the project owner and cannot be removed")),
+                    _ => {}
+                }
+            }
+        }
+        if errs.is_empty() { Ok(()) } else { bail!("{}", errs.join(" | ")) }
     }
     fn preflight(&self) -> Result<()> {
         for (role, m) in [("solver", &self.settings.solver_model), ("improver", &self.settings.improver_model), ("selector", &self.settings.selector_model)] {
@@ -520,4 +556,33 @@ pub fn project_dir(name: &str) -> Result<PathBuf> {
         bail!("project name {name:?} must be letters, digits, '.', '_' or '-'");
     }
     Ok(projects_root().join(name))
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+
+    #[test]
+    fn pinned_files_and_hidden_characters_are_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let mut a = GoalAdapter::open(d.path()).unwrap();
+        let base = tree::read_tree(&native::native_surface(), &d.path().join("base"), None);
+        assert!(a.validate_tree(&base).is_ok());
+        // upstream #96: zero-width / bidi / tag characters hide instructions from a reviewer
+        let mut t = base.clone();
+        t.insert("guardrails.md".into(), "- Be careful.\u{200B}\u{202E}hidden\n".into());
+        let e = a.validate_tree(&t).unwrap_err().to_string();
+        assert!(e.contains("hidden characters") && e.contains("U+200B"), "{e}");
+        // upstream #94: pinned files cannot change or disappear
+        a.settings.pinned_paths = vec!["guardrails.md".into()];
+        let mut t = base.clone();
+        t.insert("guardrails.md".into(), "- anything goes\n".into());
+        assert!(a.validate_tree(&t).unwrap_err().to_string().contains("pinned"));
+        let mut t = base.clone();
+        t.remove("guardrails.md");
+        assert!(a.validate_tree(&t).unwrap_err().to_string().contains("cannot be removed"));
+        let mut t = base.clone();
+        t.insert("systemprompt.md".into(), "Edited prompt.\n".into());
+        assert!(a.validate_tree(&t).is_ok(), "unpinned files stay editable");
+    }
 }

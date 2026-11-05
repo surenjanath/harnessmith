@@ -37,6 +37,9 @@ A **harness** is everything around a model that makes it an agent: system prompt
 
 Budget per task and mode: R = 4k solver rollouts and P = 3k improver sessions. The ledger enforces this.
 
+
+**New here?** Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md): a first goal in five minutes with no API key. [docs/UPSTREAM_ISSUES.md](docs/UPSTREAM_ISSUES.md) tracks every issue on the original repo against this port.
+
 ## Quick start
 
 ```bash

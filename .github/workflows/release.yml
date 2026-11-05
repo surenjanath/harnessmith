@@ -38,6 +38,10 @@ jobs:
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/harness2" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
+          # Benchmark mode needs the runner sources and pins next to the binary.
+          cp -R third_party "dist/$name/"
+          mkdir -p "dist/$name/dependencies"
+          cp dependencies/README.md dependencies/PINNED.md dependencies/ASSETS.json "dist/$name/dependencies/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           shasum -a 256 "dist/$name.tar.gz" > "dist/$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4

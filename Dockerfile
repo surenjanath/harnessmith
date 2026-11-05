@@ -9,11 +9,15 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates bash python3 git bubblewrap curl \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1000 harness \
- && mkdir -p /data && chown harness:harness /data
+ && mkdir -p /data /opt/harnessmith && chown harness:harness /data /opt/harnessmith
 COPY --from=build /src/target/release/harness2 /usr/local/bin/harness2
+# Benchmark mode: runner sources and dependency pins (setup downloads into dependencies/).
+COPY --chown=harness:harness third_party /opt/harnessmith/third_party
+COPY --chown=harness:harness dependencies/README.md dependencies/PINNED.md dependencies/ASSETS.json /opt/harnessmith/dependencies/
 USER harness
 WORKDIR /home/harness
-ENV HARNESS2_RUNS_DIR=/data/runs \
+ENV HARNESS2_ROOT=/opt/harnessmith \
+    HARNESS2_RUNS_DIR=/data/runs \
     HARNESS2_CONNECTIONS=/data/connections.json
 VOLUME ["/data"]
 EXPOSE 8765

@@ -580,9 +580,11 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
     <div class="actions">
       <button class="btn" id="h-apply">Apply to this file</button>
       <button class="btn" id="h-del">Remove file</button>
+      <button class="btn" id="h-pin" title="A pinned file can be edited here, but the improver may not change or remove it">📌 Pin</button>
       <button class="btn primary" id="h-save">Save harness</button>
       <span id="h-msg"></span>
     </div>
+    <details id="h-versions" style="margin-top:14px"><summary>Earlier versions · restore any of them</summary><div class="rows" id="h-vlist" style="margin-top:8px"><p class="hint">Loading…</p></div></details>
   </div>
 </section>
 
@@ -1708,6 +1710,11 @@ function renderGoal() {
       } else if (tab === "compare") {
         const names = [...new Set([...Object.keys(r.base_files || {}), ...Object.keys(r.files || {})])];
         const both = names.filter(n => (r.base_files || {})[n] != null && (r.files || {})[n] != null);
+        const pref = ((detail.preferences || {})[mode] || {}).choice;
+        h += `<div class="btnrow" style="margin:4px 0 10px"><span class="hint" style="margin:0">Which is better?</span>
+          <button class="btn small ${pref === "base" ? "primary" : ""}" onclick="preferOut('${esc(mode)}','base')">Prefer base1</button>
+          <button class="btn small ${pref === "adopted" ? "primary" : ""}" onclick="preferOut('${esc(mode)}','adopted')">Prefer ${esc(r.label || "adopted")} ★</button>
+          ${pref ? `<button class="btn small" onclick="preferOut('${esc(mode)}','')">Clear</button><span class="st ok">your choice: ${pref === "base" ? "base1" : esc(r.label)}</span>` : ""}</div>`;
         if (both.length) h += both.map(n => `<div class="hint"><b>${esc(n)}</b> — changed lines highlighted</div><div class="cmp">${lineDiff(r.base_files[n], r.files[n], "base1", esc(r.label) + " ★")}</div>`).join("");
         const rest = names.filter(n => !both.includes(n));
         if (!both.length) h += `<p class="hint">The first base attempt (unmodified harness) beside the adopted output.</p>`;
@@ -1826,6 +1833,13 @@ window.judgeIt = async () => {
   try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/judge`, {}); openGoal(detail.task.id); }
   catch (e) { msg("#gd-msg", e.message); }
 };
+window.preferOut = async (mode, choice) => {
+  try {
+    const note = choice === "base" ? (prompt("Optional: what was better about the base attempt? (saved as a memory note)") || "") : "";
+    await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/prefer`, {mode, choice, note});
+    openGoal(detail.task.id);
+  } catch (e) { alert(e.message); }
+};
 window.adoptBase = async (s) => {
   if (!confirm("Replace this project's base harness with the adopted one?")) return;
   try { await jpost(`projects/${encodeURIComponent(project)}/base`, JSON.parse(s), "PUT"); msg("#gd-msg", "Base harness updated.", true); }
@@ -1864,19 +1878,42 @@ $("#t-new").onclick = () => {
 };
 $("#t-starter").onclick = () => { Object.assign(baseTree, projectData.starter_tools); renderHarnessFiles(); renderTools(); selectFile("tools/csv_profile.json"); msg("#h-msg", "Added csv_profile (not saved yet).", true); };
 
+async function loadVersions() {
+  try {
+    const r = await api(`projects/${encodeURIComponent(project)}/base/history`);
+    $("#h-vlist").innerHTML = r.versions.length ? r.versions.map(v => `<div class="r"><span class="dot hollow"></span><span class="k mono">${esc((v.at || "").slice(0, 19).replace("T", " "))}</span><span class="v">${esc(v.reason || "")} · ${v.files || "?"} file(s)</span><span class="s"><button class="btn small" onclick="restoreVersion('${esc(v.id)}')">Restore</button></span></div>`).join("")
+      : '<p class="hint">No earlier versions yet. A copy is kept every time the base harness changes (your edits, adopting a harness, promoting memory notes).</p>';
+  } catch (e) { $("#h-vlist").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+window.restoreVersion = async (id) => {
+  if (!confirm("Restore this version of the base harness? The current one is kept as a version too.")) return;
+  try { const r = await jpost(`projects/${encodeURIComponent(project)}/base/history/${id}/restore`, {}); msg("#h-msg", `Restored (${r.files} files).`, true); loadHarness(); }
+  catch (e) { msg("#h-msg", e.message); }
+};
+
 async function loadHarness() {
   await refreshProject();
   baseTree = Object.assign({}, projectData.base);
-  renderHarnessFiles(); renderTools(); renderMcp(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
+  renderHarnessFiles(); renderTools(); renderMcp(); loadVersions(); selectFile(hSel && baseTree[hSel] !== undefined ? hSel : Object.keys(baseTree)[0]);
 }
 $("#mcp-add").onclick = () => { const m = mcpFromForm(); if (!m.name || !m.command) return msg("#mcp-msg", "Give it a name and a command."); const l = JSON.parse(JSON.stringify(projectData.settings.mcp_servers || [])); if (l.some(x => x.name === m.name)) return msg("#mcp-msg", "That name is taken."); l.push(m); saveMcp(l, "Added. Use Test to list its tools."); };
 $("#mcp-try").onclick = async () => { const m = mcpFromForm(); msg("#mcp-msg", "Starting…", true); try { const r = await jpost("mcp/test", m); msg("#mcp-msg", `${r.tools.length} tool(s): ${r.tools.slice(0, 10).map(t => t.name).join(", ")}`, true); } catch (e) { msg("#mcp-msg", e.message); } };
 function renderHarnessFiles() {
-  $("#h-files").innerHTML = Object.keys(baseTree).sort().map(p => `<button class="${p === hSel ? "on" : ""}" onclick="selectFile('${esc(p)}')">${esc(p)}</button>`).join("") + `<button onclick="selectFile('')">+ new file</button>`;
+  const pins = (projectData && projectData.settings.pinned_paths) || [];
+  if ($("#h-pin")) $("#h-pin").textContent = hSel && pins.includes(hSel) ? "📌 Unpin" : "📌 Pin";
+  $("#h-files").innerHTML = Object.keys(baseTree).sort().map(p => `<button class="${p === hSel ? "on" : ""}" onclick="selectFile('${esc(p)}')" title="${pins.includes(p) ? "pinned: the improver cannot change it" : ""}">${pins.includes(p) ? "📌 " : ""}${esc(p)}</button>`).join("") + `<button onclick="selectFile('')">+ new file</button>`;
 }
 window.selectFile = (p) => { hSel = p; $("#h-path").value = p || ""; $("#h-body").value = p ? baseTree[p] : ""; renderHarnessFiles(); };
 $("#h-apply").onclick = () => { const p = $("#h-path").value.trim(); if (!p) return msg("#h-msg", "Give the file a path."); if (hSel && hSel !== p) delete baseTree[hSel]; baseTree[p] = $("#h-body").value; hSel = p; renderHarnessFiles(); renderTools(); msg("#h-msg", "Applied (not saved yet).", true); };
 $("#h-del").onclick = () => { if (hSel) { delete baseTree[hSel]; hSel = null; renderHarnessFiles(); selectFile(Object.keys(baseTree)[0]); msg("#h-msg", "Removed (not saved yet).", true); } };
+$("#h-pin").onclick = async () => {
+  if (!hSel) return msg("#h-msg", "Pick a file first.");
+  const pins = new Set(projectData.settings.pinned_paths || []);
+  if (pins.has(hSel)) pins.delete(hSel); else pins.add(hSel);
+  const s = Object.assign({}, projectData.settings, {pinned_paths: [...pins]});
+  try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); renderHarnessFiles(); msg("#h-msg", pins.has(hSel) ? `${hSel} is pinned: the improver can no longer change or remove it.` : `${hSel} is editable by the improver again.`, true); }
+  catch (e) { msg("#h-msg", e.message); }
+};
 $("#h-save").onclick = async () => {
   $("#h-apply").onclick();
   try { const r = await jpost(`projects/${encodeURIComponent(project)}/base`, baseTree, "PUT"); msg("#h-msg", `Saved ${r.files} files.`, true); loadHarness(); }
@@ -2277,7 +2314,7 @@ async function loadResults() {
   $("#res-table").innerHTML = g.length ? `<table class="restab"><tr><th>#</th><th>Goal</th><th>Adopted</th><th class="n">Base</th><th class="n">Adopted</th><th>Verdict</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Heals</th><th class="n">Gate</th></tr>${g.map((x, i) => `<tr>
       <td class="n">${judged.indexOf(x) >= 0 ? judged.indexOf(x) + 1 : ""}</td><td><a href="#" onclick="show('history');openGoal('${esc(x.id)}');return false">${esc(plainTitle(x.prompt))}</a><div class="hint mono">${esc(x.created_at.slice(0, 16).replace("T", " "))} · ${esc(x.domain)}${x.has_rubric ? " · rubric" : ""}</div></td>
       <td class="mono" style="font-size:12px">${x.chosen.filter(c => !/:$/.test(c)).map(c => esc(c.replace(/^agg:/, "parallel: ").replace(/^seq:/, "sequential: "))).join(", ") || (x.run_status ? esc(x.run_status) : "—")}${x.chosen_is_base ? ' <span class="st warn">base kept</span>' : ""}</td>
-      <td class="n">${pct(x.base_score)}</td><td class="n">${pct(x.adopted_score)}</td><td><span class="st ${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "info"}">${x.verdict === "kept" ? "base kept" : x.verdict || "—"}</span>${x.run_status === "review" ? ' <span class="st warn">needs review</span>' : ""}</td>
+      <td class="n">${pct(x.base_score)}</td><td class="n">${pct(x.adopted_score)}</td><td><span class="st ${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "info"}">${x.verdict === "kept" ? "base kept" : x.verdict || "—"}</span>${x.run_status === "review" ? ' <span class="st warn">needs review</span>' : ""}${(x.human || []).length ? `<div class="hint mono">you preferred: ${x.human.map(esc).join(", ")}</div>` : ""}</td>
       <td class="n">${x.usd ? "$" + x.usd.toFixed(3) : "—"}</td><td class="n">${x.minutes != null ? fmtT(x.minutes * 60000) : "—"}</td><td class="n">${x.heals || ""}</td><td class="n">${x.gates || ""}</td></tr>`).join("")}</table>` : '<p class="muted">No goals in this project yet.</p>';
 }
 

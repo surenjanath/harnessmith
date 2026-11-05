@@ -217,6 +217,9 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p", get(get_project))
             .route("/api/projects/:p/settings", put(save_settings))
             .route("/api/projects/:p/base", put(save_base))
+            .route("/api/projects/:p/base/history", get(base_history))
+            .route("/api/projects/:p/goals/:id/prefer", post(prefer_output))
+            .route("/api/projects/:p/base/history/:id/restore", post(base_restore))
             .route("/api/projects/:p/goals", post(new_goal))
             .route("/api/projects/:p/goals/:id", get(get_goal).delete(report::trash))
             .route("/api/projects/:p/goals/:id/report", get(report::download))
@@ -553,8 +556,114 @@ async fn save_base(AxPath(p): AxPath<String>, Json(t): Json<tree::Tree>) -> ApiR
         t.retain(|k, _| tree::is_allowed(&surface, k));
         tree::autotrigger(&surface, &mut t, None);
         tree::validate(&surface, &t, a.settings.allow_subagents, None, &tree::reserved_default())?;
+        snapshot_base(&a, "before an edit")?;
         tree::write_tree(&surface, &t, &a.base_harness()?, false)?;
         Ok(json!({"ok": true, "files": t.len()}))
+    })
+    .await
+}
+
+/// Keep the base harness as it is now under `<project>/base_history/<ts>/`, so any change can be
+/// rolled back (upstream #149). The 40 newest versions are kept.
+pub(crate) fn snapshot_base(a: &GoalAdapter, reason: &str) -> Result<()> {
+    let base = a.base_harness()?;
+    if !base.is_dir() {
+        return Ok(());
+    }
+    let surface = a.surface();
+    let cur = tree::read_tree(&surface, &base, None);
+    let hist = a.root.join("base_history");
+    // Skip when nothing changed since the newest version.
+    let mut ids: Vec<String> = std::fs::read_dir(&hist).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
+    ids.sort();
+    if let Some(last) = ids.last() {
+        if tree::read_tree(&surface, &hist.join(last).join("tree"), None) == cur {
+            return Ok(());
+        }
+    }
+    let id = chrono::Utc::now().format("%Y%m%d-%H%M%S%3f").to_string();
+    let dir = hist.join(&id);
+    tree::write_tree(&surface, &cur, &dir.join("tree"), false)?;
+    util::write(&dir.join("meta.json"), json!({"at": util::now_iso(), "reason": reason, "files": cur.len()}).to_string())?;
+    ids.push(id);
+    for old in ids.iter().take(ids.len().saturating_sub(40)) {
+        util::rmtree(&hist.join(old));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct PreferReq {
+    mode: String,
+    /// "base" (the unmodified attempt), "adopted", or "" to clear.
+    choice: String,
+    #[serde(default)]
+    note: String,
+}
+
+/// A person's verdict on a goal: which output they prefer for a mode (upstream #2). Stored with
+/// the goal, shown in History and Results, and saved as a memory note so later goals in the
+/// project can learn from it.
+async fn prefer_output(AxPath((p, id)): AxPath<(String, String)>, Json(r): Json<PreferReq>) -> ApiResult {
+    blocking(move || {
+        if !["base", "adopted", ""].contains(&r.choice.as_str()) {
+            anyhow::bail!("choice is base, adopted, or empty to clear");
+        }
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let t = a.load_task(&id)?;
+        let f = a.task_dir(&id).join("preferences.json");
+        let mut prefs: serde_json::Map<String, Value> = std::fs::read_to_string(&f).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        if r.choice.is_empty() {
+            prefs.remove(&r.mode);
+        } else {
+            prefs.insert(r.mode.clone(), json!({"choice": r.choice, "note": r.note, "at": util::now_iso()}));
+            if r.choice == "base" && a.settings.memory_enabled {
+                let text = format!("For a goal like \"{}\", the person preferred the unmodified base attempt over the adapted harness{}.", util::take_chars(t.prompt.trim(), 120), if r.note.trim().is_empty() { String::new() } else { format!(": {}", util::take_chars(r.note.trim(), 200)) });
+                let _ = crate::llm::memory::Store::open(&a.root).remember(&text, &["human-feedback".into()], crate::llm::memory::Source { goal: id.clone(), by: "user".into(), ..Default::default() }, "active");
+            }
+        }
+        util::write(&f, serde_json::to_string_pretty(&prefs)?)?;
+        Ok(json!({"preferences": prefs}))
+    })
+    .await
+}
+
+async fn base_history(AxPath(p): AxPath<String>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let hist = a.root.join("base_history");
+        let mut out: Vec<Value> = std::fs::read_dir(&hist)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| {
+                        let id = e.file_name().to_string_lossy().to_string();
+                        let meta: Value = std::fs::read_to_string(e.path().join("meta.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+                        json!({"id": id, "at": meta["at"], "reason": meta["reason"], "files": meta["files"]})
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort_by(|x, y| y["id"].as_str().cmp(&x["id"].as_str()));
+        Ok(json!({"versions": out}))
+    })
+    .await
+}
+
+async fn base_restore(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
+    blocking(move || {
+        if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            anyhow::bail!("bad version id");
+        }
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let src = a.root.join("base_history").join(&id).join("tree");
+        let surface = a.surface();
+        let t = tree::read_tree(&surface, &src, None);
+        if t.is_empty() {
+            anyhow::bail!("version {id} not found");
+        }
+        snapshot_base(&a, &format!("before restoring {id}"))?;
+        tree::write_tree(&surface, &t, &a.base_harness()?, false)?;
+        Ok(json!({"restored": id, "files": t.len()}))
     })
     .await
 }
@@ -782,6 +891,7 @@ fn settle_memory(a: &GoalAdapter, gid: &str, rid: &str) {
     let mut promoted = 0;
     if a.settings.memory_promote && !won.is_empty() {
         if let Ok(base) = a.base_harness() {
+            let _ = snapshot_base(a, "before promoting memory notes");
             promoted = store.promote(&base, &won.iter().map(|n| n.id.clone()).collect::<Vec<_>>()).unwrap_or(0);
         }
     }
@@ -1145,7 +1255,8 @@ async fn get_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
             judged = serde_json::from_str(&s).unwrap_or(json!(null));
         }
         let runs: Vec<Value> = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id).rev().map(|r| json!({"id": r.id, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "attempts": r.attempts, "source": r.source})).collect();
-        Ok(json!({"task": t, "base": base, "namespaces": namespaces, "state": goal_status(&a, &id), "judged": judged, "runs": runs}))
+        let preferences: Value = std::fs::read_to_string(a.task_dir(&id).join("preferences.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+        Ok(json!({"task": t, "base": base, "namespaces": namespaces, "state": goal_status(&a, &id), "judged": judged, "runs": runs, "preferences": preferences}))
     })
     .await
 }
@@ -1245,7 +1356,9 @@ async fn results(AxPath(p): AxPath<String>) -> ApiResult {
                 (Some(_), Some(_)) => "tie",
                 _ => "",
             };
-            out.push(json!({"id": t.id, "prompt": util::take_chars(&t.prompt, 160), "domain": t.domain, "created_at": t.created_at, "has_rubric": !t.rubric.is_empty(),
+            let prefs: Value = std::fs::read_to_string(a.task_dir(&t.id).join("preferences.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+            let human: Vec<String> = prefs.as_object().map(|m| m.values().filter_map(|v| v["choice"].as_str().map(String::from)).collect()).unwrap_or_default();
+            out.push(json!({"human": human, "id": t.id, "prompt": util::take_chars(&t.prompt, 160), "domain": t.domain, "created_at": t.created_at, "has_rubric": !t.rubric.is_empty(),
                 "status": status, "chosen": chosen, "chosen_is_base": chosen_is_base, "base_score": base_frac, "adopted_score": adopted_frac, "verdict": verdict,
                 "usd": (usd * 10000.0).round() / 10000.0, "minutes": minutes, "heals": heals, "gates": gates, "run_status": last.map(|r| r.status.clone())}));
         }

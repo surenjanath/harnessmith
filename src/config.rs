@@ -176,6 +176,15 @@ fn find_root() -> PathBuf {
             return d.to_path_buf();
         }
     }
+    // A release tarball or install: `third_party/` sits next to the binary (or one level up),
+    // so benchmark mode works from any directory (upstream #146 / #144, our version).
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+        for d in [exe_dir.clone(), exe_dir.join(".."), exe_dir.join("../share/harnessmith")] {
+            if d.join("third_party").is_dir() {
+                return d.canonicalize().unwrap_or(d);
+            }
+        }
+    }
     cwd
 }
 
