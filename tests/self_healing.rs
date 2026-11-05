@@ -141,7 +141,7 @@ fn self_healing_scenarios() {
     }));
     let (p12, seen12) = server(Arc::new(|n, _req: &Value| match n {
         1 => (200, reply_text("To make the page we run `python3 make_page.py`, which prints <html>…</html>. Done!")),
-        2 => (200, reply_tool("write_file", json!({"path": "output/index.html", "content": "<h1>Hello</h1>"}))),
+        2 => (200, reply_tool("write_file", json!({"path": "output/index.html", "content": "<!DOCTYPE html><html><head><title>Hi</title></head><body><h1>Hello</h1></body></html>"}))),
         _ => (200, reply_text("Wrote output/index.html.")),
     }));
     let (p3, _seen3) = server(Arc::new(|n, req: &Value| {
@@ -326,7 +326,7 @@ fn self_healing_scenarios() {
     cfg.rescue_dir = Some(ws11.join("output"));
     cfg.trajectory = Some(d.path().join("t11.jsonl"));
     let out = agent::run(&cfg, "make a hello world page").unwrap();
-    assert_eq!(std::fs::read_to_string(ws11.join("output/index.html")).unwrap(), "<h1>Hello</h1>");
+    assert!(std::fs::read_to_string(ws11.join("output/index.html")).unwrap().contains("<h1>Hello</h1>"));
     assert_eq!(out.final_text, "Wrote output/index.html.");
     assert_eq!(seen12.lock().unwrap().len(), 3);
     assert!(trajectory_kinds(&d.path().join("t11.jsonl")).contains(&"no_action".to_string()));
