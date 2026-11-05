@@ -73,6 +73,7 @@ A model id is `connection/model`. These prefixes work with no setup if the key i
 | `gemini/…`, `google/…` | Google Gemini | `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
 | `ollama/…` | local Ollama | none |
 | `openrouter/`, `groq/`, `deepseek/`, `together/`, `mistral/` | OpenAI-compatible | `<NAME>_API_KEY` |
+| `nvidia/…` (e.g. `nvidia/mistralai/mistral-large-4-1t-a52b`) | NVIDIA hosted models, OpenAI-compatible | `NVIDIA_API_KEY` |
 | `mock/…` | deterministic offline stand-in for smoke tests | none |
 
 You can also register any other OpenAI-compatible server (vLLM, LM Studio, a gateway) in the UI or from the command line:
@@ -89,7 +90,40 @@ harness2 models test local/qwen3-32b
 harness2 models role solver local/qwen3-32b
 ```
 
-Connections are saved to `connections.json` (override with `HARNESS2_CONNECTIONS`). Prefer `api_key_env` over a literal key; the file is written with mode 0600. Loopback and `NO_PROXY` hosts bypass `HTTPS_PROXY`.
+Connections are saved to `connections.json` (override with `HARNESS2_CONNECTIONS`), written with mode 0600. Loopback and `NO_PROXY` hosts bypass `HTTPS_PROXY`.
+
+### API keys
+
+Keys live in a `.env` file in the harnessmith folder (git-ignored, mode 0600), never in `connections.json`. On **Models → Add a connection** the single **API key** field accepts:
+
+| you type | what happens |
+|---|---|
+| `NVIDIA_API_KEY=<your key>` | the key is written to `.env` under that name and the connection reads it from there |
+| just the key | written to `.env` under a sensible name (`NVIDIA_API_KEY`, `OPENROUTER_API_KEY`, …) |
+| a name like `NVIDIA_API_KEY` | the connection reads that existing variable |
+
+After saving, the form only shows whether the key is set (never the key). A key added to `.env` works at once, with no restart: the file is read again whenever a key is missing. A connection with no key fails fast with a message naming the variable and the file, instead of an HTTP 401 mid-run. Older connections that stored a key in `connections.json` get a **Move to .env** button. `.env.example` lists the variable names.
+
+### NVIDIA's hosted models
+
+1. Models → **Quick fill: NVIDIA**, paste your key in **API key**, **Save & test**.
+2. **Find free NVIDIA models** tries the most promising chat models with your key (about a minute) and shows which answer and which can call tools (the solver and improver need tool calls). **Solver** / **Improver** buttons set a role, keeping your local model as the fallback.
+3. Which models work depends on the account: a model that answers "not found for account" is skipped for the next one in the chain and does not count against the connection's breaker, so the models that do work keep working.
+
+NVIDIA's free developer tier is rate-limited; keep **Max parallel requests** at 1–2 and a local model at the end of each role's chain.
+
+## Is adaptation helping?
+
+- **Improver brief.** Before each improver session, the code writes `context/brief.md`: what each rollout produced, failed and repeated calls, self-heals, missing file types and placeholders. Small improvers act on it instead of reading 100k+ tokens of trajectories. This is on for goal projects and off for the paper benchmarks (Project settings → Improver brief).
+- **Stable judging.** Each output is graded 3 times and each criterion takes the majority vote (Project settings → Judge gradings).
+- **A/B test.** On a goal with grading criteria, *A/B test* runs the base harness and the adopted harness 3 times each, grades every output, and reports mean ± spread with a verdict.
+- **Needs review.** A run whose adopted output misses a requested file type, is fake (a `.pdf` that is really text), still has placeholders, or scores under 50% ends as *needs review*, not *done*.
+- **Model shootout.** Run a goal on several solver models (e.g. a local model against NVIDIA ones), n times each, and compare score, delivered outputs, review problems, time and tokens.
+- **Find free NVIDIA models.** On the Models tab, this tries NVIDIA's chat models with your key and shows which answer and which can call tools, with one click to use one as solver or improver.
+- **Report.** Each goal has a downloadable Markdown report: goal, criteria, adopted output, scores, A/B and shootout results.
+- **Goal templates and estimates.** Run a goal offers templates (report, landing page, data brief, PDF, script), a time, token and cost estimate split by role, and a warning when the improver is a small local model.
+
+Solver extras: `export_pdf` turns Markdown or HTML into a real PDF (headless Chrome when installed, a built-in writer otherwise), and optional web access adds `web_fetch` plus `web_search` with `BRAVE_API_KEY` or `TAVILY_API_KEY`.
 
 ## Watching a run: the pipeline map
 
@@ -143,9 +177,14 @@ local/qwen2.5-7b, llama/llama3.2-3b, anthropic/claude-sonnet-5-5
 Each connection has a circuit breaker. After 3 consecutive failures it opens for 30 s (doubling up to 10 min), then lets one trial request through. An agent whose model fails switches to the next healthy model in its chain mid-session, keeping its conversation. It switches back when the first model recovers. If every model is down it waits for one to come back instead of failing.
 
 **Agent self-checks.** These are written into the agent's tool results as `[self-check]` notes:
-- the same tool call with the same result 3 times in a row (a loop);
+- the same tool call 3 times: "change approach"; 5 times (3 for a sub-agent): the call is blocked, and a session that keeps repeating blocked calls is ended;
 - 4 tool errors in a row;
-- near the step or time limit with nothing written yet, which tells the agent to write its best deliverable now.
+- near the step or time limit with nothing written yet, which tells the agent to write its best deliverable now;
+- `finish` is refused while the deliverable fails review: a requested file type is missing, a `.pdf` is really text, placeholders such as `[Your Name]` remain, or citations have no references;
+- an improver that makes 15 calls without editing is asked to decide;
+- a tool's JSON schema sent back as its arguments, or an unknown tool, gets a refusal that shows the right form.
+
+**Models over time.** A connection that has failed most of its recent calls moves behind the healthy ones in each chain. Breaker state and measured speed are saved to `runs/health.json`, so a restart remembers them.
 
 **Run recovery.**
 - A failed rollout is retried once.
@@ -153,7 +192,7 @@ Each connection has a circuit breaker. After 3 consecutive failures it opens for
 - Runs wait in a queue, so one local GPU is not shared by several goals at once.
 - When the server restarts, interrupted runs resume automatically.
 
-**Doctor** (the Doctor tab) checks storage, Python, every role's model, connection file permissions, dead rollouts, stuck runs, stale temp folders and base-harness validity. Each problem has a one-click fix: reset a breaker, cancel a stuck run, restore the base harness, clean temp, or resume everything. Safe fixes also run at startup and every 10 minutes.
+**Doctor** (the Doctor tab) opens with a summary ("All clear", or how many problems) and lists only what needs attention, each with a plain next step. The rest is grouped (Models & keys, Runs, Projects, Storage, Tools & environment). It checks every role's model (reachable, the model exists, breaker state, API key present), saved connections' keys, `.env` and connection file permissions, runs from the last 24 hours that failed or need review, dead rollouts, stuck runs, stale temp folders, base-harness validity, PDF export and web search. One-click fixes: reset a breaker, cancel a stuck run, restore the base harness, clean temp, make `.env` private, or resume everything. A live model-health table sits below. Safe fixes also run at startup and every 10 minutes.
 
 Every heal shows on the pipeline map. A node shows a "healed ×n" badge, and the run shows a self-healing feed listing each failover and recovery.
 
@@ -167,7 +206,7 @@ Every heal shows on the pipeline map. A node shows a "healed ×n" badge, and the
 | `HARNESS2_ROLLOUT_RETRY_WAIT` | 10 | seconds before a rollout retry |
 | `HARNESS2_AUTO_RESUME` | 1 | resume interrupted runs at startup (0 to disable) |
 
-The History view also has a **compare** tab, which shows the first base attempt beside the adopted output, and download buttons for the output and the adopted harness. Run a goal shows a time and cost estimate before you start it, based on past runs when there are any.
+**History** lists goals by day with search and filters (status, domain), each showing its status, rubric score, run time and age; ↑/↓ moves between goals, and each goal has its own link (`#goal=<id>`). A goal page opens with a summary (last run, score against the base attempt, time, runs), the full goal behind a toggle, and every run of the goal. Its **compare** tab shows the first base attempt beside the adopted output with changed lines highlighted; Markdown output is rendered (with a source view); there are downloads for the output, the adopted harness and a **Report (.md)**, and **Delete** moves a goal to the project's trash. Run a goal shows a time and cost estimate before you start it, based on past runs when there are any.
 
 ## Tools and the guardrail gate
 

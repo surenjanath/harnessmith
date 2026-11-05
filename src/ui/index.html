@@ -100,7 +100,17 @@ td { font-size: 13px; }
   .projsel { flex: 1 1 100%; }
   .projsel select { flex: 1; width: auto; }
 }
-.goal-item { padding: 10px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.goal-item { padding: 9px 8px; margin: 0 -8px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 6px; }
+.goal-item.on { background: color-mix(in srgb, var(--accent) 9%, transparent); } .goal-item.on .gtitle { color: var(--accent); }
+.goal-item .gtitle { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13.5px; }
+.hlist { align-self: start; position: sticky; top: 10px; max-height: calc(100vh - 20px); display: flex; flex-direction: column; } .hlist #goal-list { overflow: auto; min-height: 0; flex: 1; }
+.glfilters { display: flex; gap: 6px; margin: 6px 0 4px; } .glfilters select { flex: 1; min-width: 0; }
+.glday { font: 600 10.5px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .07em; margin: 12px 0 2px; }
+.scorepill { font: 600 11px var(--mono); padding: 1px 6px; border-radius: 9px; background: var(--chip); } .scorepill.hi { color: var(--ok); } .scorepill.lo { color: var(--bad); }
+.gsum { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
+.gsum .kpi .kv { font-size: 17px; }
+.goalfull { margin: 4px 0 8px; } .goalfull summary { cursor: pointer; font-size: 12.5px; color: var(--muted); } .goalfull pre { max-height: 360px; }
+@media (max-width: 860px) { .hlist { position: static; max-height: none; } }
 .goal-item:hover .gtitle { color: var(--accent); }
 .gtitle { font-weight: 600; }
 .goal-item .hint, .gmeta { font-family: var(--mono); font-size: 11.5px; }
@@ -128,6 +138,11 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 @media (max-width: 820px) { .cmp { grid-template-columns: 1fr; } }
 .check { display: grid; grid-template-columns: 16px 1fr auto auto; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .check:last-child { border-bottom: 0; }
+.check .dhint { font-size: 12.5px; margin-top: 4px; color: var(--ink); } .check .dhint code { font-size: 11.5px; }
+.docsum { display: grid; grid-template-columns: minmax(180px, auto) 1fr; gap: 14px; align-items: center; margin: 4px 0 10px; }
+.docbig { font: 650 20px/1.2 Inter, system-ui, sans-serif; } .docbig.ok { color: var(--ok); } .docbig.warn { color: var(--warn); } .docbig.bad { color: var(--bad); }
+.docsec { border-top: 1px solid var(--line); padding: 8px 0; } .docsec summary { cursor: pointer; list-style-position: inside; } .docsec .docgroup { margin-top: 4px; }
+@media (max-width: 700px) { .docsum { grid-template-columns: 1fr; } }
 .check .cd { font: 11.5px/1.45 var(--mono); color: var(--muted); margin-top: 1px; word-break: break-word; }
 .st { font: 11.5px var(--mono); white-space: nowrap; }
 .st.ok { color: var(--ok); } .st.bad { color: var(--bad); } .st.warn { color: var(--warn); } .st.info, .st.idle { color: var(--muted); }
@@ -138,7 +153,7 @@ details summary { cursor: pointer; color: var(--muted); margin: 6px 0; font-size
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
 .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
 .kpi .kl { font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.kpi .kv { font: 650 22px/1.2 Inter, system-ui, sans-serif; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.kpi .kv { display: block; font: 650 22px/1.2 Inter, system-ui, sans-serif; margin-top: 4px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi .ks { font: 11px var(--mono); color: var(--faint); }
 .restab { width: 100%; border-collapse: collapse; font-size: 13px; }
 .restab td, .restab th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
@@ -264,7 +279,17 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 .bar i { display: block; height: 100%; background: repeating-linear-gradient(90deg, var(--solver) 0 10px, var(--improver) 10px 20px); transition: width .4s; }
 .pg-now { font: 12.5px var(--mono); padding: 7px 12px; border-radius: 7px; background: var(--panel2); border: 1px solid var(--line); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .pg-now b { color: var(--ink); }
-.lane { position: relative; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 16px; margin-bottom: 12px; overflow-x: auto; background: var(--bg); }
+.lane { position: relative; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 16px; margin-bottom: 12px; overflow-x: auto; background: var(--bg); scrollbar-width: thin; }
+.lane::-webkit-scrollbar { height: 8px; } .lane::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 4px; }
+.lane-wrap { position: relative; } .lane-wrap.more::after { content: "scroll →"; position: absolute; right: 1px; top: 1px; bottom: 13px; width: 86px; display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; font: 11px var(--mono); color: var(--muted); background: linear-gradient(to right, transparent, var(--bg) 70%); border-radius: 0 10px 10px 0; pointer-events: none; }
+.warn-txt { color: var(--warn); }
+input::placeholder, textarea::placeholder { color: var(--faint); font-style: italic; opacity: 1; }
+.md { background: var(--code); border: 1px solid var(--line); padding: 14px 18px; border-radius: 7px; max-height: 620px; overflow: auto; line-height: 1.55; margin: 6px 0; }
+.md h1 { font-size: 20px; margin: 4px 0 10px; } .md h2 { font-size: 16px; margin: 16px 0 6px; } .md h1, .md h2, .md h3, .md h4 { font-family: Inter, system-ui, sans-serif; text-transform: none; letter-spacing: normal; color: var(--ink); } .md h3, .md h4 { font-size: 14px; margin: 12px 0 4px; }
+.md table { border-collapse: collapse; margin: 8px 0; } .md td, .md th { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; } .md ul, .md ol { padding-left: 22px; margin: 6px 0; } .md p { margin: 6px 0; }
+.md code { font: 12.5px var(--mono); background: var(--bg); padding: 1px 4px; border-radius: 4px; } .md pre { max-height: none; }
+.srcbtn { margin-left: 8px; }
 .lane-title { font: 600 11px var(--mono); color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .lane-cols { position: relative; display: flex; gap: 58px; align-items: center; min-width: min-content; z-index: 1; padding: 0 4px; }
 .col { display: flex; flex-direction: column; gap: 16px; }
@@ -315,6 +340,24 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 .tl .tx { min-width: 0; overflow-wrap: anywhere; }
 .live-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .live-head h2 { margin: 0; }
+.panel > .live-head { margin-bottom: 12px; }
+.tplrow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; } .tplrow select { width: auto; }
+.abbox { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.abbars { display: grid; grid-template-columns: 90px 1fr 70px; gap: 6px 10px; align-items: center; font-size: 13px; margin: 8px 0; }
+.abbar { height: 10px; background: var(--chip); border-radius: 5px; position: relative; } .abbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; } .abbar b { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink); opacity: .35; }
+.libcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; } .libcard.pinned { border-color: color-mix(in srgb, var(--learner) 60%, var(--line)); }
+.libcard .cue { font-weight: 600; } .libcard .meta { font: 11.5px var(--mono); color: var(--muted); margin-top: 6px; }
+.dl-del { background: color-mix(in srgb, var(--bad) 14%, transparent); display: block; } .dl-add { background: color-mix(in srgb, var(--ok) 16%, transparent); display: block; }
+.restab tr.best td { background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.btn.danger-ghost { color: var(--bad); }
+.keyin { display: flex; gap: 6px; } .keyin input { flex: 1; font-family: var(--mono); font-size: 13px; }
+.keystat { font-size: 12.5px; margin: 5px 0 2px; min-height: 18px; } .keystat .ok { color: var(--ok); } .keystat .bad { color: var(--bad); } .keystat .warn { color: var(--warn); } .keystat code { font-size: 11.5px; }
+#cf-keyrow.dim { opacity: .55; }
+#conn-rows .chip { white-space: nowrap; }
+.cfadv { margin: 6px 0 2px; } .cfadv summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 0; }
+input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+#nv-probe-out .restab { margin-top: 6px; } #nv-probe-out .btn + .btn { margin-left: 4px; }
+.tlfilter { float: right; font-weight: 400; } .tlfilter button { font-size: 11px; }
 @media (max-width: 600px) { .r .v .muted { display: none; } .r { grid-template-columns: 12px minmax(70px, max-content) minmax(0, 1fr); } .r .s { grid-column: 2 / -1; text-align: left; } header { padding: 10px 16px; } }
 
 </style>
@@ -368,6 +411,7 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
   </div>
   <div class="panel">
     <div class="live-head"><h2>What should the agent do?</h2><div class="spacer"></div><button class="btn small spark" id="g-assist" title="Rewrite your goal into a detailed brief with grading criteria">✨ Improve with AI</button></div>
+    <div class="tplrow"><span class="hint">Start from a template:</span> <select id="g-tpl"><option value="">—</option><option value="report">Research report</option><option value="page">Landing page</option><option value="data">Data brief from a CSV</option><option value="pdf">PDF document</option><option value="code">Small script or tool</option></select></div>
     <textarea id="g-text" rows="5" placeholder="e.g. Read the attached sales.csv, find the three regions with the largest quarter-over-quarter decline, and write a one-page brief with a table to output/brief.md"></textarea>
     <div id="g-assist-box" class="assist hidden"></div>
     <div class="row">
@@ -420,38 +464,43 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
       <div id="disc-list"></div>
     </div>
     <div class="panel">
-      <h2 id="cf-title">Add a connection</h2>
+      <div class="live-head"><h2 id="cf-title">Add a connection</h2><div class="spacer"></div><button class="btn small hidden" id="cf-new">+ New connection</button></div>
+      <div class="actions quickfill"><span class="hint">Quick fill:</span><button class="btn small" data-qf="nvidia">NVIDIA</button><button class="btn small" data-qf="openrouter">OpenRouter</button><button class="btn small" data-qf="groq">Groq</button><button class="btn small" data-qf="ollama">Ollama (local)</button><button class="btn small spark" id="nv-probe" title="Try NVIDIA's chat models with your key and show which answer and which can call tools">Find free NVIDIA models</button></div>
+      <div id="nv-probe-out"></div>
       <div class="row">
-        <div><label>Name</label><input id="cf-name" placeholder="work"></div>
+        <div><label>Name <span class="muted">(prefix of model ids)</span></label><input id="cf-name" placeholder="e.g. nvidia"></div>
         <div><label>Provider</label><select id="cf-provider">
           <option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="ollama">Ollama (local)</option><option value="mock">Mock (offline test)</option></select></div>
       </div>
       <label>Base URL <span class="muted" id="cf-base-hint"></span></label><input id="cf-base" placeholder="leave empty for the provider default">
-      <div class="row">
-        <div><label>API key env var (preferred)</label><input id="cf-keyenv" placeholder="OPENAI_API_KEY"></div>
-        <div><label>…or API key</label><input id="cf-key" type="password" placeholder="stored in connections.json"></div>
+      <div id="cf-keyrow">
+        <label>API key</label>
+        <div class="keyin"><input id="cf-keyin" type="password" autocomplete="off" spellcheck="false" placeholder="NVIDIA_API_KEY=nvapi-…   or just the key   or a variable name"><button class="btn small" id="cf-keyshow" type="button" title="Show or hide what you typed">Show</button></div>
+        <div class="keystat" id="cf-keystat"></div>
       </div>
       <div class="row">
-        <div><label>Default model</label><input id="cf-model" list="cf-models" placeholder="gpt-4.1"><datalist id="cf-models"></datalist></div>
-        <div><label>Max output tokens</label><input id="cf-maxtok" type="number" placeholder="8192"></div>
+        <div><label>Default model</label><input id="cf-model" list="cf-models" placeholder="pick after “Fetch models”"><datalist id="cf-models"></datalist></div>
+        <div><label>Max parallel requests</label><input id="cf-conc" type="number" placeholder="hosted: 2 · local: 1"></div>
       </div>
-      <div class="row">
-        <div><label>Context window (tokens)</label><input id="cf-ctx" type="number" placeholder="Ollama: 32768"></div>
-        <div><label>Max parallel requests</label><input id="cf-conc" type="number" placeholder="Ollama: 1"></div>
-      </div>
-      <p class="hint">Local server? Ollama: provider “Ollama”, base <code>http://localhost:11434</code>. LM Studio / llama.cpp / vLLM: “OpenAI-compatible” with <code>http://localhost:1234/v1</code> (or your port). Set max parallel requests to 1 and, in Advanced, parallel stages to 1 when one local model serves every role.</p>
-      <div class="row">
-        <div><label>$ / 1M input tokens</label><input id="cf-pin" type="number" step="0.01" placeholder="0"></div>
-        <div><label>$ / 1M output tokens</label><input id="cf-pout" type="number" step="0.01" placeholder="0"></div>
-      </div>
-      <div class="row">
-        <div><label>$ / 1M cached input</label><input id="cf-pcache" type="number" step="0.01" placeholder="Anthropic 10%, else 50%"></div>
-        <div><label>Daily $ cap · then fail over</label><input id="cf-cap" type="number" step="0.01" placeholder="no cap"></div>
-      </div>
+      <details class="cfadv"><summary>Advanced: tokens, context window, prices, spending cap</summary>
+        <div class="row">
+          <div><label>Max output tokens</label><input id="cf-maxtok" type="number" placeholder="8192"></div>
+          <div><label>Context window (tokens)</label><input id="cf-ctx" type="number" placeholder="Ollama: 32768"></div>
+        </div>
+        <div class="row">
+          <div><label>$ / 1M input tokens</label><input id="cf-pin" type="number" step="0.01" placeholder="0 (free)"></div>
+          <div><label>$ / 1M output tokens</label><input id="cf-pout" type="number" step="0.01" placeholder="0 (free)"></div>
+        </div>
+        <div class="row">
+          <div><label>$ / 1M cached input</label><input id="cf-pcache" type="number" step="0.01" placeholder="Anthropic 10%, else 50%"></div>
+          <div><label>Daily $ cap · then fail over</label><input id="cf-cap" type="number" step="0.01" placeholder="no cap"></div>
+        </div>
+        <p class="hint">Local server? Ollama: provider “Ollama”, base <code>http://localhost:11434</code>. LM Studio / llama.cpp / vLLM: “OpenAI-compatible” with <code>http://localhost:1234/v1</code> (or your port). Set max parallel requests to 1 and parallel stages to 1 when one local model serves every role.</p>
+      </details>
       <div class="actions">
-        <button class="btn primary" id="cf-save">Save</button>
+        <button class="btn primary" id="cf-savetest">Save &amp; test</button>
+        <button class="btn" id="cf-save">Save</button>
         <button class="btn" id="cf-list">Fetch models</button>
-        <button class="btn" id="cf-test">Test</button>
         <button class="btn" id="cf-clear">Clear</button>
         <span id="cf-msg"></span>
       </div>
@@ -478,6 +527,9 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
         <div><label>Shell tool for the agent</label><select id="s-shell"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
         <div><label>Sub-agents</label><select id="s-subs"><option value="true">Allowed</option><option value="false">Disabled</option></select></div>
         <div><label>Max $ per run (0 = no cap)</label><input id="s-maxusd" type="number" step="0.1" min="0"></div>
+        <div><label>Improver brief</label><select id="s-brief"><option value="true">On: digest of failures for the improver</option><option value="false">Off (paper-exact evidence)</option></select></div>
+        <div><label>Judge gradings per output</label><select id="s-jrep"><option value="1">1 (fast, noisy)</option><option value="3">3 (majority vote)</option><option value="5">5</option></select></div>
+        <div><label>Web access for the solver</label><select id="s-web"><option value="false">Off</option><option value="true">On: web_fetch (+ web_search with BRAVE_API_KEY or TAVILY_API_KEY)</option></select></div>
         <div><label>Parallel stages</label><select id="s-par"><option value="1">1 (best for one local model)</option><option value="2">2 (reference)</option><option value="4">4</option></select></div>
       </div>
     </details>
@@ -492,7 +544,10 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 <!-- HISTORY -->
 <section id="v-history" class="hidden">
   <div class="grid2 hist">
-    <div class="panel"><h2>Goals</h2><div id="goal-list" class="muted">Loading…</div></div>
+    <div class="panel hlist"><div class="live-head"><h2>Goals <span class="muted" id="gl-count" style="font-weight:400"></span></h2></div>
+      <input id="gl-q" type="search" placeholder="Search goals…" autocomplete="off">
+      <div class="glfilters"><select id="gl-st"><option value="">All statuses</option><option value="running">Running</option><option value="review">Needs review</option><option value="done">Done</option><option value="failed">Failed / partial</option><option value="cancelled">Cancelled</option><option value="notrun">Not run</option></select><select id="gl-dom"><option value="">All domains</option></select></div>
+      <div id="goal-list" class="muted">Loading…</div><div class="hint" style="margin-top:8px">↑ ↓ to move between goals</div></div>
     <div class="panel" id="goal-detail"><h2>Select a goal</h2><p class="muted">Results, the adopted harness and what changed appear here.</p></div>
   </div>
 </section>
@@ -534,16 +589,22 @@ svg .num text { font: 600 11px Georgia, serif; fill: var(--ink); text-anchor: mi
 <!-- DOCTOR -->
 <section id="v-doctor" class="hidden">
   <div class="panel">
-    <h2>Doctor</h2>
-    <p class="hint">Checks everything around a run (storage, Python, every model the roles use, cached failed rollouts, interrupted or stuck runs, temp files, each project's base harness, local servers) and fixes what it safely can. Safe fixes also run on their own at startup and every 10 minutes.</p>
-    <div class="actions"><button class="btn primary" id="doc-run">Run checks</button><button class="btn" id="doc-heal">Apply safe fixes</button><span id="doc-msg"></span></div>
-    <div id="doc-list" style="margin-top:10px"></div>
+    <div class="live-head"><h2>Doctor</h2><div class="spacer"></div><span class="hint" id="doc-when"></span><button class="btn primary small" id="doc-run">Run checks</button><button class="btn small" id="doc-heal">Apply safe fixes</button></div>
+    <p class="hint">Checks everything around a run: models and their API keys, recent runs, each project's base harness, storage and tools. Fixes what it safely can; safe fixes also run on their own at startup and every 10 minutes.</p>
+    <div id="doc-sum" class="docsum"></div>
+    <span id="doc-msg"></span>
+    <div id="doc-list" style="margin-top:6px"></div>
+  </div>
+  <div class="panel">
+    <div class="live-head"><h2>Model health right now</h2><div class="spacer"></div><span class="hint">calls this server has made · saved across restarts</span></div>
+    <div id="doc-health" class="muted">No calls yet.</div>
   </div>
   <div class="panel">
     <h2>What heals itself</h2>
     <ul class="muted" style="margin:0;padding-left:18px">
       <li><b>Model failover:</b> give a role a chain, e.g. <code>local/qwen2.5-7b, openai/gpt-4.1-mini</code>. A failing endpoint trips a circuit breaker after 3 errors and calls move to the next model; when the cooldown ends, the primary is tried again. If every model is down, the agent waits for the first to recover instead of failing.</li>
-      <li><b>Agent self-checks:</b> the same call returning the same result 3 times → "change approach"; 4 failing calls in a row → "re-read the errors"; budget nearly gone with nothing written → "deliver now". Tool calls written as text, or with broken JSON, are repaired.</li>
+      <li><b>Agent self-checks:</b> the same call 3 times → "change approach", 5 times → blocked (3 for sub-agents), and a session that keeps repeating is ended; 4 failing calls in a row → "re-read the errors"; budget nearly gone with nothing written → "deliver now"; <code>finish</code> is refused while the deliverable fails review (missing file type, fake PDF, placeholders). Tool calls written as text, or with broken JSON, are repaired; a tool schema sent back as arguments is refused with an example.</li>
+      <li><b>Models over time:</b> a model that has failed most of its recent calls moves behind the healthy ones in its chain; breaker state and measured speed are saved, so a restart remembers them. A key added to <code>.env</code> is picked up without a restart.</li>
       <li><b>Rollouts and runs:</b> a rollout that errors is retried once; a run that fails or ends partial because of a model or transport failure is retried, reusing everything already finished; runs interrupted by a restart resume automatically.</li>
     </ul>
   </div>
@@ -677,7 +738,7 @@ async function refreshProject() {
 
 // ---------- wiring + policy (diagram legend panels) ----------
 let healthCache = {}, statusCache = null;
-const BUILTIN_TOOLS_N = 9;
+const BUILTIN_TOOLS_N = 11;
 const ROLE_DEFS = [
   ["solver", "Solver", "solver_model", "attempts the goal · base runs and every probe"],
   ["improver", "Improver", "improver_model", "reads traces · edits the harness (INV, DOM, compose)"],
@@ -716,7 +777,7 @@ function renderPolicy() {
   const line = (cls, k, txt) => `<div><span class="dot ${cls}"></span><span><b>${k}</b> ${txt}</span></div>`;
   el.innerHTML = [
     line("solver", "MODELS →", "next in chain after a failure; breaker opens after 3 in a row, 30s → 10m cooldown, then a trial call"),
-    line("improver", "AGENT:", "same call ×3 → change approach · errors ×4 → re-read · budget low, nothing written → deliver now"),
+    line("improver", "AGENT:", "same call ×3 → change approach, ×5 → blocked · errors ×4 → re-read · budget low, nothing written → deliver now · finish refused until the deliverable passes review"),
     line("selector", "ROLLOUTS:", `retried once after <span class="mono">${p.rollout_retry_wait_s ?? 10}s</span>; dead ones never cached`),
     line("learner", "RUNS:", `retry ×<span class="mono">${p.run_retries ?? 1}</span> after <span class="mono">${p.run_retry_wait_s ?? 30}s</span> · queue <span class="mono">${p.max_runs ?? 1}</span> at once · resume after restart <span class="st ${p.auto_resume === false ? "bad" : "ok"}">${p.auto_resume === false ? "off" : "on"}</span>`),
     line("cyan", "DOCTOR:", `safe fixes at startup and every 10 min · <a href="#" onclick="show('doctor');return false">open</a>`),
@@ -734,11 +795,43 @@ function updateBudget() {
   estTimer = setTimeout(async () => {
     try {
       const e = await api(`projects/${encodeURIComponent(project)}/estimate?k=${k}&mode=${mode}`);
-      $("#g-budget").innerHTML = `${runs} solver runs and ${sessions} improver/selector sessions · estimated <b>~${e.minutes < 1 ? "<1" : Math.round(e.minutes)} min</b>, ~${fmtK(e.tokens)} tokens${e.usd ? `, <b>~$${e.usd.toFixed(2)}</b>` : ""} <span class="muted">(${esc(e.basis)})</span>`;
+      const cap = (projectData && projectData.settings || {}).max_usd_per_run || 0;
+      $("#g-budget").innerHTML = `${runs} solver runs and ${sessions} improver/selector sessions · estimated <b>~${e.minutes < 1 ? "<1" : Math.round(e.minutes)} min</b>, ~${fmtK(e.tokens)} tokens${e.usd ? `, <b>~$${e.usd.toFixed(2)}</b> ${cap ? `<span class="muted">(cap $${cap} per run)</span>` : `<span class="warn-txt">· no spending cap (Models → Roles)</span>`}` : ""} <span class="muted">(${esc(e.basis)})</span>`
+        + (e.roles ? `<div class="hint mono" style="margin-top:4px">${e.roles.map(r => `${esc(r.role)}: ${r.calls}× · ~${Math.max(1, Math.round(r.minutes))} min · ${fmtK(r.tokens)} tok${r.usd ? ` · $${r.usd.toFixed(2)}` : " · free"}`).join(" &nbsp;|&nbsp; ")}</div>` : "") + improverWarning();
     } catch (err) {}
   }, 250);
 }
 $("#g-k").onchange = updateBudget; $("#g-mode").onchange = updateBudget;
+// Goal templates: a goal, grading criteria and a domain to start from.
+const GOAL_TEMPLATES = {
+  report: {domain: "research", goal: "Write a well-organised research report on <TOPIC> for <AUDIENCE>.\n\nCover: background, the key facts and how they connect, open questions, and practical takeaways. Use headings, keep each section specific, and list the sources you relied on with their URLs. Save it as output/report.md.",
+    rubric: "Covers background, key facts, open questions and takeaways\nEvery section has specific content, not generalities\nNo placeholders such as [Your Name] or [citation needed]\nSources are listed and real\nSaved as output/report.md"},
+  page: {domain: "web", goal: "Build a sleek, responsive single-page website for <PRODUCT>.\n\nInclude a hero with a clear headline and call to action, three feature blocks, and a footer. Use modern CSS (layout, typography, colours, spacing) inside the page. Save it as output/index.html.",
+    rubric: "A complete HTML page (doctype, head, body)\nHero with headline and call to action\nThree feature blocks\nStyled with CSS and readable on a phone\nSaved as output/index.html"},
+  data: {domain: "data", goal: "Read the attached CSV and write a one-page brief on <QUESTION>.\n\nInclude a table of the key numbers, say how you computed them, and state the main finding in the first sentence. Save it as output/brief.md.",
+    rubric: "Main finding stated in the first sentence\nA table of the key numbers\nNumbers match the CSV\nMethod explained\nSaved as output/brief.md"},
+  pdf: {domain: "documents", goal: "Produce a PDF document on <TOPIC> for <AUDIENCE> (about <N> pages).\n\nWrite it as Markdown first (output/document.md), then convert it with export_pdf to output/document.pdf.",
+    rubric: "output/document.pdf is a real PDF\nCovers the requested topic in the requested depth\nClear headings and structure\nNo placeholders left"},
+  code: {domain: "code", goal: "Write a Python script that <DOES WHAT>.\n\nInclude usage instructions at the top, handle bad input gracefully, and run it once on an example to show it works. Save it as output/script.py and the example output as output/example.txt.",
+    rubric: "Script runs without errors\nDoes what was asked\nHandles bad input\nUsage instructions included\nExample output saved"},
+};
+$("#g-tpl").onchange = () => {
+  const t = GOAL_TEMPLATES[$("#g-tpl").value]; if (!t) return;
+  if ($("#g-text").value.trim() && !$("#g-text").value.includes("<")) { if (!window.__tplOk) { window.__tplOk = true; msg("#g-msg", "Template replaces the goal text; pick it again to apply.", true); $("#g-tpl").value = ""; return; } }
+  $("#g-text").value = t.goal; $("#g-rubric").value = t.rubric; $("#g-domain").value = t.domain;
+  const det = $("#g-rubric").closest("details"); if (det) det.open = true;
+  msg("#g-msg", "Template filled: replace the <PLACEHOLDERS> with your details.", true);
+};
+// Small local improvers keep the base harness almost every time: say so before Start.
+function improverWarning() {
+  const s = (projectData && projectData.settings) || {}, imp = (s.improver_model || "").split(",")[0].trim();
+  if (!imp) return "";
+  const conn = imp.split("/")[0], m = imp.match(/(\d+(?:\.\d+)?)b\b/i), size = m ? +m[1] : null;
+  const c = (((typeof conns !== "undefined" && conns) || {}).connections || []).find(x => x.name === conn) || {};
+  const local = conn === "ollama" || c.provider === "ollama" || /localhost|127\.0\.0\.1/.test(c.base_url || "");
+  if (!local || (size != null && size >= 30)) return "";
+  return `<div class="slowhint" style="margin-top:8px">⚠ The improver is a ${size ? size + "B " : ""}local model (<code>${esc(imp)}</code>). Small improvers usually keep the base harness, so adaptation does little. Put a stronger model on the improver and selector, e.g. <code>nvidia/mistralai/mistral-large-4-1t-a52b</code> (Models → Roles), and keep the solver local.</div>`;
+}
 
 $("#g-go").onclick = async () => {
   const text = $("#g-text").value.trim();
@@ -777,7 +870,7 @@ function reduceEvents(events) {
   for (const e of events) {
     S.t0 ??= e.t; S.t1 = e.t;
     if (e.kind === "task" && e.status === "start") S.plan = {k: e.k, modes: e.modes};
-    if (e.kind === "task" && e.status === "done") S.done = e;
+    if (e.kind === "task" && e.status !== "start") S.done = e;
     if (e.kind === "heal") S.heals.push(e);
     if (e.kind === "gate") S.gates.push(e);
     if (e.kind === "memory") S.mem.push(e);
@@ -903,7 +996,9 @@ function renderPipeline(target, S) {
   pgState = S; pgTarget = target;
   if (!S.plan) { target.innerHTML = '<p class="muted">Waiting for the run to start…</p>'; return; }
   const {k, modes} = S.plan;
-  const planR = k + modes.length * 3 * k, planP = modes.length * (3 * k + (k > 1 ? 1 : 0) + 1);
+  // Per mode: 3k edit sessions, a selector (k>1, or k=1 with the regression guard adding base1), and the lesson.
+  const guard = !projectData || projectData.settings.select_guard !== false;
+  const planR = k + modes.length * 3 * k, planP = modes.length * (3 * k + (k > 1 || guard ? 1 : 0) + 1);
   const end = S.done ? S.t1 : Date.now();
   const pct = Math.min(100, Math.round(100 * (S.runs + S.sessions) / (planR + planP)));
   let h = `<div class="pg-head"><span>Elapsed <b>${fmtT(end - S.t0)}</b></span><span>Solver runs <b>${S.runs}/${planR}</b></span>
@@ -916,7 +1011,7 @@ function renderPipeline(target, S) {
     h += `<div class="slowhint">⏱ Slowest model call: <b>${fmtT(sl.ms)}</b> at <b>${esc(sl.node)}</b>${sl.model ? " on " + esc(sl.model) : ""}${sl.inTok > 0 ? `, reading ${fmtK(sl.inTok)} new tokens of prompt` : ""}. ${big ? "Long prompts dominate on local models (prompt processing is slow without enough GPU): give the improver a faster model, raise GPU offload, or lower the connection's context window." : "The model itself is slow here: try a smaller or better-quantised model, or check the Model advisor on the Models tab."}</div>`;
   }
   if (S.heals.length) {
-    const label = {failover: "model failover", recovered: "back on the preferred model", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run", no_action: "pushed a text-only reply to act", finish_refused: "refused finish with nothing written", budget_cap: "spending cap reached", spend_cap: "daily cap reached on every model"};
+    const label = {failover: "model failover", recovered: "back on the preferred model", loop_block: "stopped a repeated call", read_streak: "nudged a read-only improver", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run", no_action: "pushed a text-only reply to act", finish_refused: "refused finish with nothing written", budget_cap: "spending cap reached", spend_cap: "daily cap reached on every model"};
     const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
     const last = S.heals[S.heals.length - 1];
     h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
@@ -933,7 +1028,7 @@ function renderPipeline(target, S) {
   for (const mode of modes) {
     const L = laneLayout(mode, k), laneId = mode;
     const adoptedLabel = (S.nodes[mode + "|select"] || {sel: {}}).sel.chosen;
-    h += `<div class="lane" id="lane-${mode}"><div class="lane-title">${MODE_NAME[mode] || mode}</div><div class="lane-cols">`;
+    h += `<div class="lane-wrap"><div class="lane" id="lane-${mode}"><div class="lane-title">${MODE_NAME[mode] || mode}</div><div class="lane-cols">`;
     for (const [title, labels] of L.cols) {
       h += `<div class="col"><div class="col-h">${esc(title)}</div>`;
       for (const lab of labels) {
@@ -943,7 +1038,7 @@ function renderPipeline(target, S) {
       }
       h += `</div>`;
     }
-    h += `</div><svg data-edges='${JSON.stringify(L.edges)}' data-lane="${laneId}"></svg></div>`;
+    h += `</div><svg data-edges='${JSON.stringify(L.edges)}' data-lane="${laneId}"></svg></div></div>`;
   }
   if (pgPicked && S.nodes[pgPicked]) h += nodeDrawer(S.nodes[pgPicked], S.t0);
   target.innerHTML = h;
@@ -960,6 +1055,9 @@ function wireKind(a, b) {
 }
 function drawEdges(target, S) {
   target.querySelectorAll(".lane").forEach(lane => {
+    // Show a "scroll →" cue while part of the map is off to the right.
+    const cue = () => lane.parentElement.classList.toggle("more", lane.scrollWidth - lane.clientWidth - lane.scrollLeft > 4);
+    cue(); lane.onscroll = cue;
     const svg = lane.querySelector("svg"), edges = JSON.parse(svg.dataset.edges), id = svg.dataset.lane;
     const cols = lane.querySelector(".lane-cols"), box = lane.getBoundingClientRect();
     svg.setAttribute("width", cols.scrollWidth + 40); svg.setAttribute("height", lane.scrollHeight);
@@ -992,6 +1090,20 @@ function drawEdges(target, S) {
 }
 window.addEventListener("resize", () => { if (pgTarget && pgState) drawEdges(pgTarget, pgState); });
 
+// Side-by-side line diff (LCS); removed lines red on the left, added green on the right.
+function lineDiff(a, b, la, lb) {
+  const A = String(a).split("\n").slice(0, 600), B = String(b).split("\n").slice(0, 600), n = A.length, m = B.length;
+  const L = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, left = "", right = "";
+  while (i < n || j < m) {
+    if (i < n && j < m && A[i] === B[j]) { left += esc(A[i]) + "\n"; right += esc(B[j]) + "\n"; i++; j++; }
+    else if (j < m && (i >= n || L[i][j + 1] >= L[i + 1][j])) { right += `<span class="dl-add">${esc(B[j]) || " "}</span>`; j++; }
+    else { left += `<span class="dl-del">${esc(A[i]) || " "}</span>`; i++; }
+  }
+  return `<div><div class="hint">${la}</div><pre>${left}</pre></div><div><div class="hint">${lb}</div><pre>${right}</pre></div>`;
+}
+let tlFilter = "all";
 function nodeDrawer(n, t0) {
   const rel = (t) => "+" + fmtT(t - t0);
   const callAt = {}, lastIn = {};
@@ -1016,7 +1128,7 @@ function nodeDrawer(n, t0) {
     } else if (e.kind === "heal") {
       cls = "act";
       const what = {failover: `Failed over ${esc(e.from || "")} → <b>${esc(e.to || "")}</b>`, recovered: `Recovered: back on <b>${esc(e.to || "")}</b> (from ${esc(e.from || "")})`, wait_recovery: `Every model down — waited ${e.seconds}s for <b>${esc(e.model)}</b>`, retry_call: `Retried a failed model call (attempt ${e.attempt})`,
-        loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
+        loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, loop_block: `Loop stop: blocked <code>${esc(e.call)}</code> after too many repeats`, read_streak: `Improver read ${e.calls} times without editing: asked it to decide`, finish_refused: `Finish refused: the deliverable still had problems`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
         deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: output/ was still empty`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
     } else if (e.kind === "memory") {
@@ -1031,9 +1143,11 @@ function nodeDrawer(n, t0) {
       txt = e.status === "start" ? "Reflecting on what each edit did" : e.status === "done" ? (e.entry ? `Lesson: <b>${esc(e.cue)}</b> → ${esc(e.lesson)}` : "No lesson the evidence supports") : `<span class="err">${esc(e.error)}</span>`;
     } else return "";
     if (e.kind === "heal") cls = "heal";
+    if (tlFilter === "problems" && cls !== "bad" && cls !== "heal" && !/class="err"/.test(txt)) return "";
     return `<li class="${cls}"><span class="tx">${txt}</span><span class="when">${rel(e.t)}</span></li>`;
   }).join("");
-  return `<div class="drawer"><h3>${esc(n.label)}${n.dim ? " · " + esc(n.dim) : ""} · timeline</h3><ul class="tl">${items || '<li><span class="tx muted">No events yet.</span></li>'}</ul></div>`;
+  const fbtn = (v, l) => `<button class="btn small ${tlFilter === v ? "primary" : ""}" onclick="tlFilter='${v}';if(pgState&&pgTarget)renderPipeline(pgTarget,pgState)">${l}</button>`;
+  return `<div class="drawer"><h3>${esc(n.label)}${n.dim ? " · " + esc(n.dim) : ""} · timeline <span class="tlfilter">${fbtn("all", "All")} ${fbtn("problems", "Errors & self-heals")}</span></h3><ul class="tl">${items || '<li><span class="tx muted">No events yet.</span></li>'}</ul></div>`;
 }
 
 function watch(runId) {
@@ -1060,7 +1174,8 @@ function watch(runId) {
       if (r.status !== "running" && r.status !== "queued") {
         clearInterval(liveTimer);
         $("#live-cancel").classList.add("hidden");
-        $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically"}[r.status] || "Finished with problems";
+        $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically", review: "Finished — needs review"}[r.status] || "Finished with problems";
+        notifyDone(r.status, r.error);
         $("#live-status").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : "";
       }
     } catch (e) { $("#live-status").textContent = e.message; }
@@ -1080,7 +1195,8 @@ function watch(runId) {
     else if (d.status === "running" && $("#live-title").textContent.startsWith("Queued")) $("#live-title").textContent = "Running…";
     if (d.status !== "running" && d.status !== "queued") {
       $("#live-cancel").classList.add("hidden");
-      $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically", capped: "Stopped at the spending cap"}[d.status] || "Finished with problems";
+      $("#live-title").textContent = {done: "Finished", failed: "Failed", cancelled: "Stopped", interrupted: "Interrupted", resumed: "Interrupted — resumed automatically", capped: "Stopped at the spending cap", review: "Finished — needs review"}[d.status] || "Finished with problems";
+      notifyDone(d.status, d.error);
       $("#live-status").innerHTML = d.error ? `<span class="err">${esc(d.error)}</span>` : "";
       return true;
     }
@@ -1103,11 +1219,11 @@ let healthTimer = null;
 async function refreshHealth() {
   try {
     const h = (await api("health")).connections, names = Object.keys(h);
-    healthCache = h; renderWiring();
+    healthCache = h; renderWiring(); renderDocHealth();
     const bad = names.filter(n => h[n].state === "open"), deg = names.filter(n => h[n].state === "degraded" || h[n].state === "half-open");
     const pill = $("#hpill");
     pill.className = "hpill " + (bad.length ? "bad" : deg.length ? "warn" : names.length ? "ok" : "");
-    pill.innerHTML = `<span class="dot ${bad.length ? "bad" : deg.length ? "warn" : names.length ? "ok" : ""}"></span><span>${bad.length ? bad.length + " model(s) down — failing over" : deg.length ? "models degraded" : names.length ? "models healthy" : "models: no calls yet"}</span>`;
+    pill.innerHTML = `<span class="dot ${bad.length ? "bad" : deg.length ? "warn" : names.length ? "ok" : ""}"></span><span>${bad.length ? bad.length + " model(s) down — failing over" : deg.length ? "models degraded" : names.length ? "models healthy" : "models: idle"}</span>`;
     const t = $("#health-table");
     if (t && names.length) t.innerHTML = `<table><thead><tr><th>Connection</th><th>State</th><th>Avg call</th><th>Tokens out</th><th>OK / fail</th><th></th></tr></thead><tbody>${names.map(n => { const x = h[n];
       return `<tr><td><b>${esc(n)}</b>${x.last_error && x.state !== "healthy" ? `<div class="hint err">${esc(x.last_error.slice(0, 140))}</div>` : ""}</td>
@@ -1118,20 +1234,53 @@ async function refreshHealth() {
 }
 function startHealthTable() { refreshHealth(); clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 4000); }
 function stopHealthTable() { clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 20000); }
+// What to do about a problem the Doctor cannot fix itself.
+function docHint(c) {
+  const id = c.id || "";
+  if (id.startsWith("key:") || /no API key/.test(c.detail)) return `Open <code>.env</code> in the harnessmith folder, add the key line, save, then <a href="#" onclick="runDoctor();return false">check again</a> (no restart needed).`;
+  if (id.startsWith("model:") && /unreachable/.test(c.detail)) return `Start the model server (for Ollama: <code>ollama serve</code>) or fix its URL on the <a href="#" onclick="show('models');return false">Models</a> tab.`;
+  if (id.startsWith("model:") && /not among/.test(c.detail)) return `Pick a model this server has on the <a href="#" onclick="show('models');return false">Models</a> tab, or pull it (<code>ollama pull …</code>).`;
+  if (id === "recent_runs") return `Open <a href="#" onclick="show('history');return false">History</a> and filter by "needs review" or "failed".`;
+  if (id === "sandbox") return "Optional on a personal machine. For isolation, run harnessmith in Docker.";
+  if (id === "models") return `Set a solver, improver and selector on the <a href="#" onclick="show('models');return false">Models</a> tab.`;
+  return "";
+}
+let docLast = null;
 async function runDoctor() {
-  $("#doc-list").innerHTML = '<p class="muted">Checking…</p>';
+  $("#doc-list").innerHTML = '<p class="muted">Checking… (probes every model the roles use)</p>';
   try {
     const r = await api("doctor");
+    docLast = r;
     const order = {fail: 0, warn: 1, info: 2, ok: 3};
-    r.checks.sort((a, b) => order[a.status] - order[b.status]);
     const sc = (st) => st === "ok" ? "ok" : st === "fail" ? "bad" : st === "warn" ? "warn" : "info";
-    $("#doc-list").innerHTML = r.checks.map(c => `<div class="check"><span class="dot ${sc(c.status) === "info" ? "hollow" : sc(c.status)}"></span>
-      <div><b>${esc(c.name)}</b><div class="cd">${esc(c.detail)}</div></div>
+    const row = (c) => `<div class="check ${c.status}"><span class="dot ${sc(c.status) === "info" ? "hollow" : sc(c.status)}"></span>
+      <div><b>${esc(c.name)}</b><div class="cd">${esc(c.detail)}</div>${(c.status === "fail" || c.status === "warn") && docHint(c) ? `<div class="dhint">${docHint(c)}</div>` : ""}</div>
       <span class="st ${sc(c.status)}">${{ok: "OK", fail: "Fail", warn: "Warn", info: "Info"}[c.status] || esc(c.status)}</span>
-      <div>${c.fix ? `<button class="btn small" onclick="docFix('${esc(c.fix.id)}')">${esc(c.fix.label)}</button>` : ""}</div></div>`).join("");
-    const n = r.checks.filter(c => c.status === "fail" || c.status === "warn").length;
-    msg("#doc-msg", n ? `${n} issue(s) need attention.` : "All clear.", !n);
-  } catch (e) { msg("#doc-msg", e.message); }
+      <div>${c.fix ? `<button class="btn small" onclick="docFix('${esc(c.fix.id)}')">${esc(c.fix.label)}</button>` : ""}</div></div>`;
+    const cnt = (st) => r.checks.filter(c => c.status === st).length;
+    const bad = r.checks.filter(c => c.status === "fail" || c.status === "warn").sort((a, b) => order[a.status] - order[b.status]);
+    $("#doc-sum").innerHTML = `<div class="docbig ${cnt("fail") ? "bad" : cnt("warn") ? "warn" : "ok"}">${cnt("fail") ? `${cnt("fail")} problem${cnt("fail") > 1 ? "s" : ""} to fix` : cnt("warn") ? `${cnt("warn")} warning${cnt("warn") > 1 ? "s" : ""}` : "All clear"}</div>
+      <div class="kpis"><div class="kpi"><div class="kl">Failing</div><div class="kv" style="color:var(--bad)">${cnt("fail")}</div></div><div class="kpi"><div class="kl">Warnings</div><div class="kv" style="color:var(--warn)">${cnt("warn")}</div></div><div class="kpi"><div class="kl">OK</div><div class="kv" style="color:var(--ok)">${cnt("ok")}</div></div><div class="kpi"><div class="kl">Info</div><div class="kv">${cnt("info")}</div></div></div>`;
+    $("#doc-when").textContent = "checked " + new Date(r.checked_at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+    const groups = ["Models & keys", "Runs", "Projects", "Storage", "Tools & environment"];
+    let h = bad.length ? `<div class="ph" style="margin-top:4px">Needs attention</div><div class="docgroup">${bad.map(row).join("")}</div>` : "";
+    for (const g of groups) {
+      const items = r.checks.filter(c => (c.group || "Tools & environment") === g).sort((a, b) => order[a.status] - order[b.status]);
+      if (!items.length) continue;
+      const nb = items.filter(c => c.status === "fail" || c.status === "warn").length;
+      h += `<details class="docsec" ${nb ? "" : ""}><summary><b>${g}</b> <span class="muted">· ${items.length} check${items.length > 1 ? "s" : ""}</span>${nb ? ` <span class="st warn">${nb} issue${nb > 1 ? "s" : ""}</span>` : ' <span class="st ok">all OK</span>'}</summary><div class="docgroup">${items.map(row).join("")}</div></details>`;
+    }
+    $("#doc-list").innerHTML = h;
+    msg("#doc-msg", "", true);
+  } catch (e) { $("#doc-list").innerHTML = ""; msg("#doc-msg", e.message); }
+  renderDocHealth();
+}
+function renderDocHealth() {
+  const el = $("#doc-health"); if (!el) return;
+  const h = healthCache || {}, names = Object.keys(h);
+  if (!names.length) { el.innerHTML = '<p class="muted" style="margin:0">No model calls yet since this data was saved.</p>'; return; }
+  el.innerHTML = `<table class="restab"><tr><th>Connection</th><th>State</th><th class="n">OK</th><th class="n">Failed</th><th class="n">Avg call</th><th>Last error</th><th></th></tr>${names.map(n => { const x = h[n];
+    return `<tr><td><b>${esc(n)}</b></td><td><span class="chip ${x.state === "healthy" ? "ok" : x.state === "open" ? "bad" : x.state === "unknown" ? "" : "warn"}">${esc(x.state)}</span></td><td class="n">${x.ok ?? 0}</td><td class="n">${x.fail ?? 0}</td><td class="n">${x.latency_ms ? fmtT(x.latency_ms) : "—"}</td><td class="hint" style="max-width:420px">${x.last_error && x.state !== "healthy" ? esc(String(x.last_error).slice(0, 120)) : ""}</td><td>${x.state === "open" || x.state === "degraded" ? `<button class="btn small" onclick="docFix('reset_breaker:${esc(n)}')">Reset</button>` : ""}</td></tr>`; }).join("")}</table>`;
 }
 window.docFix = async (id) => {
   try { const r = await jpost("doctor/fix", {id}); msg("#doc-msg", r.message, true); refreshHealth(); if (!$("#v-doctor").classList.contains("hidden")) runDoctor(); }
@@ -1207,7 +1356,7 @@ async function loadModels() {
   $("#conn-rows").innerHTML = conns.connections.length ? conns.connections.map(c => `<tr>
     <td><b>${esc(c.name)}</b><div class="hint">${esc(c.default_model || "")}</div></td><td>${esc(c.provider)}</td>
     <td class="muted" style="word-break:break-all">${esc(c.base_url || "(default)")}</td>
-    <td>${c.has_key ? '<span class="chip ok">set</span>' : (c.provider === "ollama" || c.provider === "mock" || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(c.base_url || "")) ? '<span class="chip">not needed</span>' : '<span class="chip warn">none</span>'}</td>
+    <td>${c.has_key ? `<span class="chip ok" title="${c.key_source === "file" ? "stored in connections.json" : esc(c.api_key_env) + " in the environment / .env"}">✓ ${c.key_tail ? esc(c.key_tail) : "set"}</span>${c.key_source === "file" ? ' <span class="chip warn" title="move it to .env from Edit">in file</span>' : ""}` : (c.provider === "ollama" || c.provider === "mock" || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(c.base_url || "")) ? '<span class="chip">not needed</span>' : `<span class="chip bad" title="${esc(c.api_key_env || "no key")}">missing</span>`}</td>
     <td style="white-space:nowrap"><button class="btn small" onclick="editConn('${esc(c.name)}')">Edit</button> <button class="btn small" onclick="delConn('${esc(c.name)}')">×</button></td></tr>`).join("")
     : `<tr><td colspan="5" class="muted">No saved connections yet. Built-in prefixes still work if their API key is in the environment.</td></tr>`;
   await refreshProject();
@@ -1216,6 +1365,7 @@ async function loadModels() {
   $("#s-channel").value = s.improver_channel; $("#s-ssteps").value = s.solver_steps; $("#s-isteps").value = s.improver_steps;
   $("#s-stime").value = s.solver_timeout; $("#s-itime").value = s.improver_timeout; $("#s-effort").value = s.effort;
   $("#s-shell").value = String(s.allow_shell); $("#s-subs").value = String(s.allow_subagents); $("#s-par").value = String(s.parallelism || 2); $("#s-maxusd").value = s.max_usd_per_run || 0;
+  $("#s-brief").value = String(s.improver_brief !== false); $("#s-jrep").value = String(s.judge_repeats || 3); $("#s-web").value = String(!!s.web_access);
   const ids = new Set();
   conns.connections.forEach(c => { if (c.default_model) ids.add(`${c.name}/${c.default_model}`); });
   ["openai/gpt-4.1", "anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro", "ollama/qwen3", "mock/mock-1"].forEach(x => ids.add(x));
@@ -1244,36 +1394,135 @@ window.addFound = async (i) => {
   } catch (e) { msg("#disc-msg", e.message); }
 };
 const BASES = {openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com", ollama: "http://localhost:11434", mock: ""};
-$("#cf-provider").onchange = () => { $("#cf-base-hint").textContent = BASES[$("#cf-provider").value] ? "(default " + BASES[$("#cf-provider").value] + ")" : ""; };
+// Hosted OpenAI-compatible services: fill the form; the key stays in an environment variable.
+const QUICKFILL = {
+  nvidia: {name: "nvidia", base: "https://integrate.api.nvidia.com/v1", env: "NVIDIA_API_KEY", model: "mistralai/mistral-large-4-1t-a52b", conc: 2},
+  openrouter: {name: "openrouter", base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY", model: "", conc: ""},
+  groq: {name: "groq", base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY", model: "", conc: ""},
+  ollama: {name: "ollama", provider: "ollama", base: "http://127.0.0.1:11434", env: "", model: "", conc: 1},
+};
+// Key state of the connection in the form: its variable name, whether a key is stored in connections.json.
+let cfKey = {env: "", literal: "", source: "none", tail: ""};
+const isLocalForm = () => ["ollama", "mock"].includes($("#cf-provider").value) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test($("#cf-base").value);
+const defaultEnvFor = () => {
+  if (cfKey.env) return cfKey.env;
+  const b = $("#cf-base").value, map = [["nvidia.com", "NVIDIA_API_KEY"], ["openrouter.ai", "OPENROUTER_API_KEY"], ["groq.com", "GROQ_API_KEY"], ["deepseek.com", "DEEPSEEK_API_KEY"], ["together.xyz", "TOGETHER_API_KEY"], ["mistral.ai", "MISTRAL_API_KEY"], ["anthropic.com", "ANTHROPIC_API_KEY"], ["api.openai.com", "OPENAI_API_KEY"]];
+  const hit = map.find(([h]) => b.includes(h)); if (hit) return hit[1];
+  if ($("#cf-provider").value === "anthropic") return "ANTHROPIC_API_KEY"; if ($("#cf-provider").value === "gemini") return "GEMINI_API_KEY";
+  return (($("#cf-name").value.trim() || "MY").toUpperCase().replace(/[^A-Z0-9]/g, "_")) + "_API_KEY";
+};
+// What the key field will do when saved, and the current state when it is empty.
+function renderKeyStat() {
+  const v = $("#cf-keyin").value.trim(), el = $("#cf-keystat");
+  $("#cf-keyrow").classList.toggle("dim", isLocalForm() && !v);
+  if (v) {
+    const m = v.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+    if (m) return el.innerHTML = `Will save the key to <code>.env</code> as <code>${esc(m[1])}</code> (never in connections.json).`;
+    if (/^[A-Z][A-Z0-9_]*_[A-Z0-9_]+$/.test(v)) return el.innerHTML = `Will read the key from the variable <code>${esc(v)}</code>.`;
+    return el.innerHTML = `Will save this key to <code>.env</code> as <code>${esc(defaultEnvFor())}</code>. Type <code>NAME=key</code> to choose the name.`;
+  }
+  if (isLocalForm()) return el.innerHTML = '<span class="muted">Local server: no key needed.</span>';
+  if (cfKey.source === "env") return el.innerHTML = `<span class="ok">✓ <code>${esc(cfKey.env)}</code> is set${cfKey.tail ? " (" + esc(cfKey.tail) + ")" : ""}</span> <span class="muted">· paste a new key to replace it</span>`;
+  if (cfKey.source === "file") return el.innerHTML = `<span class="warn">Key stored in connections.json${cfKey.tail ? " (" + esc(cfKey.tail) + ")" : ""}.</span> <button class="btn small" type="button" onclick="moveKey()">Move to .env</button>`;
+  if (cfKey.source === "env_missing") return el.innerHTML = `<span class="bad">✗ <code>${esc(cfKey.env)}</code> is not set.</span> Paste the key above (it goes into <code>.env</code>).`;
+  return el.innerHTML = `<span class="muted">Paste <code>${esc(defaultEnvFor())}=your-key</code> or just the key.</span>`;
+}
+window.moveKey = async () => {
+  const name = $("#cf-name").value.trim();
+  try { const r = await jpost(`connections/${encodeURIComponent(name)}/move_key`, {}); msg("#cf-msg", `Moved the key to .env as ${r.env}.`, true); await loadModels(); editConn(name); } catch (e) { msg("#cf-msg", e.message); }
+};
+$("#cf-keyin").oninput = renderKeyStat;
+$("#cf-keyshow").onclick = () => { const i = $("#cf-keyin"); i.type = i.type === "password" ? "text" : "password"; $("#cf-keyshow").textContent = i.type === "password" ? "Show" : "Hide"; };
+$("#cf-base").addEventListener("input", renderKeyStat); $("#cf-name").addEventListener("input", renderKeyStat);
+document.querySelectorAll("[data-qf]").forEach(b => b.onclick = () => {
+  const q = QUICKFILL[b.dataset.qf];
+  const existing = (conns && conns.connections || []).find(c => c.name === q.name);
+  if (existing) { editConn(q.name); return msg("#cf-msg", `You already have “${q.name}”; editing it.`, true); }
+  cfReset();
+  $("#cf-name").value = q.name; $("#cf-provider").value = q.provider || "openai"; $("#cf-base").value = q.base; $("#cf-model").value = q.model; $("#cf-conc").value = q.conc;
+  cfKey = {env: q.env, literal: "", source: q.env ? "none" : "none", tail: ""};
+  $("#cf-provider").onchange();
+  msg("#cf-msg", q.env ? `Filled for ${b.textContent}. Paste your key in “API key”, then Save & test.` : `Filled for ${b.textContent}. Save & test.`, true);
+  if (q.env) $("#cf-keyin").focus();
+});
+// NVIDIA's hosted catalog runs on a free, rate-limited developer tier; which models answer for a
+// given key varies, so try them: a tiny tool-calling request each (agents need tool calls).
+$("#nv-probe").onclick = async () => {
+  const out = $("#nv-probe-out"), name = $("#cf-name").value.trim() && /nvidia/.test($("#cf-base").value) ? $("#cf-name").value.trim() : "nvidia";
+  out.innerHTML = '<p class="hint">Trying up to 16 chat models (about 30–60 s)…</p>';
+  try {
+    const r = await jpost(`connections/${encodeURIComponent(name)}/probe`, {});
+    const rows = r.results.sort((a, b) => (b.ok - a.ok) || (b.tools - a.tools) || (a.ms - b.ms));
+    out.innerHTML = `<p class="hint">${rows.filter(x => x.ok).length} of ${r.tried} tried answered with your key (${r.listed} models listed). These run on NVIDIA's free developer tier, which is rate-limited. <b>Tools ✓</b> matters for the solver and improver.</p>
+      <table class="restab"><tr><th>Model</th><th>Answers</th><th>Tools</th><th class="n">Time</th><th></th></tr>${rows.map(x => `<tr><td class="mono">${esc(x.model)}</td><td>${x.ok ? '<span class="st ok">✓</span>' : `<span class="st bad" title="${esc(x.error || "")}">✗</span>`}</td><td>${x.ok ? (x.tools ? '<span class="st ok">✓</span>' : '<span class="st warn">no</span>') : ""}</td><td class="n">${fmtT(x.ms)}</td>
+        <td>${x.ok && x.tools ? `<button class="btn small" onclick="useModel('r-solver','${esc(name + "/" + x.model)}')">Solver</button><button class="btn small" onclick="useModel('r-improver','${esc(name + "/" + x.model)}');useModel('r-selector','${esc(name + "/" + x.model)}')">Improver</button>` : ""}</td></tr>`).join("")}</table>`;
+  } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+};
+window.useModel = (field, id) => {
+  const el = $("#" + field); if (!el) return;
+  const cur = el.value.split(",").map(x => x.trim()).filter(x => x && x !== id);
+  el.value = [id, ...cur.filter(x => x.startsWith("ollama/"))].join(", ");
+  el.scrollIntoView({block: "center"}); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1200);
+  msg("#r-msg", "Role updated (local model kept as fallback). Click “Save roles” to keep it.", true);
+};
+$("#cf-provider").onchange = () => { $("#cf-base-hint").textContent = BASES[$("#cf-provider").value] ? "(default " + BASES[$("#cf-provider").value] + ")" : ""; renderKeyStat(); };
 function connForm() {
   const num = (s) => s.value === "" ? null : +s.value;
-  return {name: $("#cf-name").value.trim(), provider: $("#cf-provider").value, base_url: $("#cf-base").value.trim(), api_key: $("#cf-key").value,
-    api_key_env: $("#cf-keyenv").value.trim(), default_model: $("#cf-model").value.trim(), input_price: +($("#cf-pin").value || 0),
+  return {name: $("#cf-name").value.trim(), provider: $("#cf-provider").value, base_url: $("#cf-base").value.trim(), api_key: cfKey.literal ? "••••••" : "",
+    api_key_env: cfKey.env || "", key_input: $("#cf-keyin").value, default_model: $("#cf-model").value.trim(), input_price: +($("#cf-pin").value || 0),
     output_price: +($("#cf-pout").value || 0), max_tokens: num($("#cf-maxtok")), temperature: null,
     context_window: num($("#cf-ctx")), max_concurrency: num($("#cf-conc")), cached_input_price: num($("#cf-pcache")), daily_usd: num($("#cf-cap")), prompt_cache: null};
 }
 window.editConn = (name) => {
   const c = conns.connections.find(x => x.name === name); if (!c) return;
-  $("#cf-title").textContent = "Edit " + name;
-  $("#cf-name").value = c.name; $("#cf-provider").value = c.provider; $("#cf-base").value = c.base_url; $("#cf-key").value = c.api_key;
-  $("#cf-keyenv").value = c.api_key_env; $("#cf-model").value = c.default_model; $("#cf-maxtok").value = c.max_tokens ?? "";
+  cfReset();
+  $("#cf-title").textContent = "Edit “" + name + "”"; $("#cf-new").classList.remove("hidden");
+  $("#cf-name").value = c.name; $("#cf-provider").value = c.provider; $("#cf-base").value = c.base_url;
+  cfKey = {env: c.api_key_env || "", literal: c.api_key || "", source: c.key_source || "none", tail: c.key_tail || ""};
+  $("#cf-model").value = c.default_model; $("#cf-maxtok").value = c.max_tokens ?? "";
   $("#cf-pin").value = c.input_price || ""; $("#cf-pout").value = c.output_price || ""; $("#cf-ctx").value = c.context_window ?? ""; $("#cf-conc").value = c.max_concurrency ?? ""; $("#cf-pcache").value = c.cached_input_price ?? ""; $("#cf-cap").value = c.daily_usd ?? ""; $("#cf-provider").onchange();
+  if (c.max_tokens || c.context_window || c.input_price || c.output_price || c.daily_usd) document.querySelector(".cfadv").open = true;
+  $("#cf-title").scrollIntoView({block: "nearest"});
+  fetchModelsQuiet(c.name);
 };
+function cfReset() {
+  ["#cf-name", "#cf-base", "#cf-keyin", "#cf-model", "#cf-maxtok", "#cf-pin", "#cf-pout", "#cf-ctx", "#cf-conc", "#cf-pcache", "#cf-cap"].forEach(s => $(s).value = "");
+  $("#cf-provider").value = "openai"; cfKey = {env: "", literal: "", source: "none", tail: ""};
+  $("#cf-title").textContent = "Add a connection"; $("#cf-new").classList.add("hidden"); $("#cf-models").innerHTML = ""; $("#cf-keyin").type = "password"; $("#cf-keyshow").textContent = "Show";
+  $("#cf-provider").onchange();
+}
+async function fetchModelsQuiet(name) {
+  try { const r = await api(`connections/${encodeURIComponent(name)}/models`); $("#cf-models").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join(""); return r.models.length; } catch (e) { return null; }
+}
+async function saveConn() {
+  const f = connForm();
+  if (!f.name) throw new Error("Give the connection a name first (it becomes the prefix of model ids, e.g. nvidia/…).");
+  const r = await jpost("connections", f);
+  $("#cf-keyin").value = ""; $("#cf-keyin").type = "password"; $("#cf-keyshow").textContent = "Show";
+  const c = r.connection || {};
+  cfKey = {env: c.api_key_env || "", literal: c.api_key || "", source: c.key_source || "none", tail: c.key_tail || ""};
+  $("#cf-title").textContent = "Edit “" + f.name + "”"; $("#cf-new").classList.remove("hidden");
+  renderKeyStat(); loadModels();
+  return r;
+}
 window.delConn = async (name) => { if (!confirm("Remove connection " + name + "?")) return; await api("connections/" + encodeURIComponent(name), {method: "DELETE"}); loadModels(); };
-$("#cf-clear").onclick = () => { ["#cf-name", "#cf-base", "#cf-key", "#cf-keyenv", "#cf-model", "#cf-maxtok", "#cf-pin", "#cf-pout", "#cf-ctx", "#cf-conc", "#cf-pcache", "#cf-cap"].forEach(s => $(s).value = ""); $("#cf-title").textContent = "Add a connection"; };
+$("#cf-clear").onclick = () => { cfReset(); msg("#cf-msg", "", true); };
+$("#cf-new").onclick = () => { cfReset(); msg("#cf-msg", "", true); $("#cf-name").focus(); };
 $("#cf-save").onclick = async () => {
-  try { await jpost("connections", connForm()); msg("#cf-msg", "Saved.", true); loadModels(); } catch (e) { msg("#cf-msg", e.message); }
+  try { const r = await saveConn(); msg("#cf-msg", "Saved" + (r.key_note ? ": " + r.key_note : "") + ".", true); } catch (e) { msg("#cf-msg", e.message); }
+};
+$("#cf-savetest").onclick = async () => {
+  let r; try { r = await saveConn(); } catch (e) { return msg("#cf-msg", e.message); }
+  const name = $("#cf-name").value.trim();
+  msg("#cf-msg", "Saved" + (r.key_note ? ": " + r.key_note : "") + ". Testing…", true);
+  if (!$("#cf-model").value.trim()) { const n = await fetchModelsQuiet(name); return msg("#cf-msg", n != null ? `Saved. ${n} models found: pick a “Default model”, then Save & test again.` : "Saved. Pick a default model, then test.", n != null); }
+  try { const t = await jpost("connections/test", {model: name + "/" + $("#cf-model").value.trim()}); msg("#cf-msg", `✓ Saved and working: replied in ${fmtT(t.ms)} (“${t.reply.slice(0, 60)}”).`, true); fetchModelsQuiet(name); }
+  catch (e) { msg("#cf-msg", e.message); }
 };
 $("#cf-list").onclick = async () => {
   const f = connForm(); if (!f.name) return msg("#cf-msg", "Save the connection first.");
   msg("#cf-msg", "Fetching…", true);
   try { const r = await api(`connections/${encodeURIComponent(f.name)}/models`); $("#cf-models").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join(""); msg("#cf-msg", `${r.models.length} models available — pick one in “Default model”.`, true); }
-  catch (e) { msg("#cf-msg", e.message); }
-};
-$("#cf-test").onclick = async () => {
-  const f = connForm(); if (!f.name) return msg("#cf-msg", "Save the connection first.");
-  msg("#cf-msg", "Testing…", true);
-  try { const r = await jpost("connections/test", {model: f.name + (f.default_model ? "/" + f.default_model : "")}); msg("#cf-msg", `OK in ${r.ms} ms: “${r.reply.slice(0, 80)}”`, true); }
   catch (e) { msg("#cf-msg", e.message); }
 };
 function settingsForm() {
@@ -1283,6 +1532,7 @@ function settingsForm() {
   s.improver_channel = $("#s-channel").value; s.solver_steps = +$("#s-ssteps").value || 60; s.improver_steps = +$("#s-isteps").value || 80;
   s.solver_timeout = +$("#s-stime").value || 1800; s.improver_timeout = +$("#s-itime").value || 1800; s.effort = $("#s-effort").value;
   s.allow_shell = $("#s-shell").value === "true"; s.allow_subagents = $("#s-subs").value === "true"; s.parallelism = +$("#s-par").value; s.max_usd_per_run = +($("#s-maxusd").value || 0);
+  s.improver_brief = $("#s-brief").value === "true"; s.judge_repeats = +$("#s-jrep").value; s.web_access = $("#s-web").value === "true";
   return s;
 }
 $("#r-save").onclick = async () => {
@@ -1304,34 +1554,139 @@ $("#r-test").onclick = async () => {
 };
 
 // ---------- history ----------
+// One-line plain title from a goal prompt that may be Markdown.
+function plainTitle(s) {
+  const clean = (x) => x.replace(/\*\*|__|`/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\s+/g, " ").trim();
+  const lines = String(s || "").replace(/\r/g, "").split("\n").filter(l => l.trim());
+  // A leading Markdown heading is the title, unless it is a generic section name.
+  const m = lines.length && lines[0].match(/^\s*#{1,6}\s+(.*)/);
+  if (m && !/^(objective|goal|task|overview|summary|brief|request|context)\s*:?$/i.test(clean(m[1]))) return clean(m[1]);
+  return clean(lines.map(l => l.replace(/^\s*#{1,6}\s+(objective|goal|task|overview|summary|brief|request|context)\s*:?\s*$/i, "").replace(/^\s*#{1,6}\s+/, "").replace(/^\s*[-*]\s+/, "").replace(/^\s*\*\*(objective|goal|task)\*\*\s*:\s*/i, "")).join(" "));
+}
+// Small, escape-first Markdown renderer for deliverables (headings, lists, tables, emphasis, code).
+function mdRender(src) {
+  const inline = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>");
+  const lines = String(src).replace(/\r/g, "").split("\n"); let h = "", i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) { let b = []; i++; while (i < lines.length && !/^```/.test(lines[i])) b.push(lines[i++]); i++; h += `<pre>${esc(b.join("\n"))}</pre>`; continue; }
+    const hm = l.match(/^(#{1,6})\s+(.*)/); if (hm) { const n = Math.min(hm[1].length, 4); h += `<h${n}>${inline(hm[2])}</h${n}>`; i++; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { h += "<hr>"; i++; continue; }
+    if (/^\s*\|/.test(l)) { const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+      const body = rows.filter(r => !/^\s*\|[\s:|-]+\|?\s*$/.test(r));
+      h += `<table>${body.map((r, j) => `<tr>${cells(r).map(c => j === 0 ? `<th>${inline(c)}</th>` : `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</table>`; continue; }
+    if (/^\s*([-*+]|\d+[.)])\s+/.test(l)) { const ol = /^\s*\d/.test(l); let items = [];
+      while (i < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*+]|\d+[.)])\s+/, ""));
+      h += `<${ol ? "ol" : "ul"}>${items.map(x => `<li>${inline(x)}</li>`).join("")}</${ol ? "ol" : "ul"}>`; continue; }
+    if (!l.trim()) { i++; continue; }
+    let p = []; while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*\||\s*([-*+]|\d+[.)])\s)/.test(lines[i])) p.push(lines[i++]);
+    if (!p.length) p.push(lines[i++]);
+    h += `<p>${inline(p.join(" "))}</p>`;
+  }
+  return h;
+}
+let mdSource = {};
 function stateChip(st) {
   if (st.running) return '<span class="chip warn">running</span>';
+  const lr = st.last_run;
+  if (lr && lr.status === "review") return `<span class="chip warn" title="${esc(lr.error || "")}">needs review</span> <span class="muted">k=${st.summary ? st.summary.k : "?"}</span>`;
+  if (lr && lr.status === "cancelled") return '<span class="chip">cancelled</span>';
   if (!st.summary) return '<span class="chip">not run</span>';
   const s = st.summary.status;
   return `<span class="chip ${s === "ok" || s === "skipped" ? "ok" : "bad"}">${esc(s)}</span> <span class="muted">k=${st.summary.k} ${esc((st.summary.modes || []).map(m => m === "agg" ? "parallel" : "sequential").join("+"))}</span>`;
 }
+// Status bucket for filtering: running, review, done, failed, cancelled, notrun.
+function goalBucket(st) {
+  if (st.running) return "running";
+  const lr = st.last_run;
+  if (lr && lr.status === "review") return "review";
+  if (lr && lr.status === "cancelled") return "cancelled";
+  if (lr && (lr.status === "failed" || lr.status === "partial" || lr.status === "capped")) return "failed";
+  if (st.summary) return st.summary.status === "ok" || st.summary.status === "skipped" ? "done" : "failed";
+  return "notrun";
+}
+function ago(iso) {
+  const t = Date.parse(iso || ""); if (!t) return "";
+  const s = (Date.now() - t) / 1000;
+  return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago";
+}
+function dayLabel(iso) {
+  const d = new Date(iso || 0), now = new Date(), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  return diff <= 0 ? "Today" : diff === 1 ? "Yesterday" : diff < 7 ? "This week" : d.toLocaleDateString([], {month: "short", year: "numeric"});
+}
+const scorePill = (v) => v == null ? "" : `<span class="scorepill ${v >= .7 ? "hi" : v < .4 ? "lo" : ""}" title="rubric score of the adopted output">${Math.round(v * 100)}%</span>`;
+let glVisible = [];
+function renderGoalList() {
+  const g = projectData.goals || [], q = ($("#gl-q").value || "").toLowerCase().trim(), st = $("#gl-st").value, dom = $("#gl-dom").value;
+  const doms = [...new Set(g.map(x => x.domain))].sort();
+  const cur = $("#gl-dom").value;
+  $("#gl-dom").innerHTML = '<option value="">All domains</option>' + doms.map(d => `<option ${d === cur ? "selected" : ""}>${esc(d)}</option>`).join("");
+  glVisible = g.filter(x => (!q || x.prompt.toLowerCase().includes(q) || x.domain.toLowerCase().includes(q)) && (!st || goalBucket(x.state) === st) && (!dom || x.domain === dom));
+  $("#gl-count").textContent = glVisible.length === g.length ? `· ${g.length}` : `· ${glVisible.length} of ${g.length}`;
+  let h = "", lastDay = "";
+  for (const x of glVisible) {
+    const day = dayLabel(x.created_at); if (day !== lastDay) { h += `<div class="glday">${esc(day)}</div>`; lastDay = day; }
+    const lr = x.state.last_run, title = plainTitle(x.prompt);
+    h += `<div class="goal-item ${detail && detail.task.id === x.id ? "on" : ""}" data-id="${esc(x.id)}" onclick="openGoal('${esc(x.id)}')">
+      <div class="gtitle">${esc(title.slice(0, 200))}</div>
+      <div class="hint">${stateChip(x.state)} ${scorePill(x.state.score)} · ${lr && lr.seconds != null ? fmtT(lr.seconds * 1000) + " · " : ""}${esc(ago(lr ? lr.finished || lr.started : x.created_at))} · ${esc(x.domain)}${x.state.runs > 1 ? ` · ${x.state.runs} runs` : ""}</div></div>`;
+  }
+  $("#goal-list").innerHTML = g.length ? (h || '<p class="muted">No goals match.</p>') : '<p class="muted">No goals yet. Start one from “Run a goal”.</p>';
+}
 async function loadHistory() {
   await refreshProject();
-  const g = projectData.goals;
-  $("#goal-list").innerHTML = g.length ? g.map(x => `<div class="goal-item" onclick="openGoal('${esc(x.id)}')">
-    <div class="gtitle">${esc(x.prompt.slice(0, 140))}${x.prompt.length > 140 ? "…" : ""}</div>
-    <div class="hint">${stateChip(x.state)} · ${esc(x.domain)} · ${esc((x.created_at || "").slice(0, 16).replace("T", " "))}</div></div>`).join("")
-    : '<p class="muted">No goals yet. Start one from “Run a goal”.</p>';
+  renderGoalList();
+  const m = location.hash.match(/^#goal=(.+)$/);
+  if (m && (!detail || detail.task.id !== decodeURIComponent(m[1]))) openGoal(decodeURIComponent(m[1]));
 }
+// Links to a goal (#goal=<id>), including back/forward and pasting a link into an open tab.
+window.addEventListener("hashchange", () => {
+  const m = location.hash.match(/^#goal=(.+)$/); if (!m) return;
+  if ($("#v-history").classList.contains("hidden")) show("history"); else if (!detail || detail.task.id !== decodeURIComponent(m[1])) openGoal(decodeURIComponent(m[1]));
+});
+$("#gl-q").oninput = renderGoalList; $("#gl-st").onchange = renderGoalList; $("#gl-dom").onchange = renderGoalList;
+document.addEventListener("keydown", (e) => {
+  if ($("#v-history").classList.contains("hidden") || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || !(e.key === "ArrowDown" || e.key === "ArrowUp") || !glVisible.length) return;
+  e.preventDefault();
+  const i = detail ? glVisible.findIndex(x => x.id === detail.task.id) : -1;
+  const next = glVisible[Math.max(0, Math.min(glVisible.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+  if (next) { openGoal(next.id); const el = document.querySelector(`.goal-item[data-id="${CSS.escape(next.id)}"]`); if (el) el.scrollIntoView({block: "nearest"}); }
+});
 let detail = null, detailTab = {};
 window.openGoal = async (id) => {
+  try { history.replaceState(null, "", "#goal=" + encodeURIComponent(id)); } catch (e) {}
+  document.querySelectorAll(".goal-item").forEach(el => el.classList.toggle("on", el.dataset.id === id));
   $("#goal-detail").innerHTML = '<p class="muted">Loading…</p>';
   try { detail = await api(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(id)}`); renderGoal(); }
   catch (e) { $("#goal-detail").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 };
 function renderGoal() {
   const d = detail, t = d.task;
-  let h = `<h2>${esc(t.prompt.slice(0, 200))}</h2><div class="hint">${stateChip(d.state)} · domain ${esc(t.domain)}</div>
+  const full = plainTitle(t.prompt), lr = d.state.last_run, st = d.state;
+  const firstUsage = Object.values((d.namespaces[0] || {}).results || {})[0];
+  const toks = firstUsage && firstUsage.usage ? (firstUsage.usage.input_tokens || 0) + (firstUsage.usage.output_tokens || 0) : null;
+  let h = `<h2>${esc(full.length > 160 ? full.slice(0, 160).replace(/\s+\S*$/, "") + "…" : full)}</h2><div class="hint">${stateChip(st)} · domain ${esc(t.domain)} · created ${esc(ago(t.created_at))}</div>
+    ${t.prompt.length > 160 ? `<details class="goalfull"><summary>Show the full goal${t.rubric ? " and grading criteria" : ""}</summary><pre>${esc(t.prompt)}</pre>${t.rubric ? `<div class="hint"><b>Grading criteria</b></div><pre>${esc(t.rubric)}</pre>` : ""}</details>` : t.rubric ? `<details class="goalfull"><summary>Show grading criteria</summary><pre>${esc(t.rubric)}</pre></details>` : ""}
+    <div class="gsum">
+      <div class="kpi"><div class="kl">Last run</div><div class="kv">${esc(st.running ? "running" : lr ? (lr.status === "review" ? "needs review" : lr.status) : "—")}</div><div class="ks">${lr ? esc(ago(lr.finished || lr.started)) : "&nbsp;"}</div></div>
+      <div class="kpi"><div class="kl">Score</div><div class="kv">${st.score != null ? Math.round(st.score * 100) + "%" : "—"}</div><div class="ks">${st.base_score != null ? "base " + Math.round(st.base_score * 100) + "%" : t.rubric ? "not graded yet" : "no criteria"}</div></div>
+      <div class="kpi"><div class="kl">Time</div><div class="kv">${lr && lr.seconds != null ? fmtT(lr.seconds * 1000) : "—"}</div><div class="ks">last run</div></div>
+      <div class="kpi"><div class="kl">Runs</div><div class="kv">${st.runs || 0}</div><div class="ks">${toks ? fmtK(toks) + " tok in adopted" : "&nbsp;"}</div></div>
+    </div>
+    ${lr && lr.status === "review" && lr.error ? `<div class="slowhint">⚠ Needs review: ${esc(lr.error)}</div>` : ""}
     <div class="actions"><button class="btn small" onclick="rerun()">Run again</button>
-    ${t.rubric ? '<button class="btn small" onclick="judgeIt()">Judge with rubric</button>' : ""}
+    ${t.rubric ? '<button class="btn small" onclick="judgeIt()">Judge with rubric</button><button class="btn small" onclick="startAB()" title="Run the base and the adopted harness 3 times each and grade every output">A/B test (3× each)</button>' : ""}
+    <button class="btn small" onclick="shootoutForm()" title="Run this goal on several solver models and compare them">Model shootout</button>
+    <a class="btn small" href="/api/projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(t.id)}/report" title="Download a Markdown report of this goal">Report (.md)</a>
+    <button class="btn small danger-ghost" onclick="trashGoal()" title="Move this goal to the project's trash folder">Delete</button>
     ${d.state.running ? `<button class="btn small" onclick="show('run');watch('${d.state.running}')">Watch live</button>` : ""}<span id="gd-msg"></span></div>`;
+  if (d.runs && d.runs.length > 1) h += `<details class="goalfull"><summary>All ${d.runs.length} runs of this goal</summary><table class="restab"><tr><th>Run</th><th>Status</th><th>Started</th><th class="n">Took</th><th>Note</th></tr>${d.runs.map(r => {
+      const secs = r.finished ? (Date.parse(r.finished) - Date.parse(r.started)) : null;
+      return `<tr><td class="mono" style="font-size:11.5px">${esc(r.id.replace(/^run-/, ""))}</td><td><span class="chip ${r.status === "done" ? "ok" : r.status === "running" ? "warn" : r.status === "review" ? "warn" : r.status === "cancelled" || r.status === "resumed" ? "" : "bad"}">${esc(r.status === "review" ? "needs review" : r.status)}</span></td><td class="hint">${esc((r.started || "").slice(0, 16).replace("T", " "))}</td><td class="n">${secs ? fmtT(secs) : "—"}</td><td class="hint">${esc((r.error || "").slice(0, 100))}</td></tr>`; }).join("")}</table></details>`;
   if (d.runs && d.runs.length) h += `<h3>Journey <span class="muted" style="font-weight:400">— how the last run (${esc(d.runs[0].status)}) moved through the pipeline</span></h3><div id="journey"><p class="muted">Loading…</p></div>`;
-  if (d.judged) h += `<h3>Judge</h3>` + d.judged.map(r => `<div>${esc(r.mode === "agg" ? "parallel" : "sequential")}: ${r.graded ? `<b>${r.n_passed}/${r.n_criteria}</b>` : `<span class="muted">ungraded (${esc(r.error)})</span>`}</div>`).join("");
+  if (d.judged) h += `<h3>Judge</h3>` + d.judged.map(r => `<div>${r.is_base_attempt ? "base attempt" : `adopted (${r.mode === "agg" ? "parallel" : "sequential"})`} <code>${esc(r.label || "")}</code>: ${r.graded ? `<b>${r.n_passed}/${r.n_criteria}</b>` : `<span class="muted">ungraded (${esc(r.error)})</span>`}${r.same_as_adopted ? ' <span class="muted">— same output as adopted, graded once</span>' : ""}</div>`).join("");
   for (const ns of d.namespaces) {
     for (const [mode, r] of Object.entries(ns.results)) {
       const key = ns.namespace + mode, tab = detailTab[key] || "output";
@@ -1340,7 +1695,8 @@ function renderGoal() {
       h += `<div class="tabs2">${["output", "files", "compare", "why", "harness", "stages", "trajectory"].map(x => `<button class="${x === tab ? "on" : ""}" onclick="detailTab['${key}']='${x}';renderGoal()">${x}</button>`).join("")}</div>`;
       if (tab === "output") {
         const files = Object.entries(r.files || {});
-        h += files.length ? files.map(([n, b]) => `<div class="hint"><b>${esc(n)}</b></div><pre>${esc(b)}</pre>`).join("") : '<p class="muted">No output files.</p>';
+        h += files.length ? files.map(([n, b]) => { const isMd = /\.(md|markdown)$/i.test(n), sk = key + "/" + n, src = mdSource[sk];
+          return `<div class="hint"><b>${esc(n)}</b>${isMd ? `<button class="btn small srcbtn" onclick="mdSource['${esc(sk)}']=!mdSource['${esc(sk)}'];renderGoal()">${src ? "rendered" : "source"}</button>` : ""}</div>${isMd && !src ? `<div class="md">${mdRender(b)}</div>` : `<pre>${esc(b)}</pre>`}`; }).join("") : '<p class="muted">No output files.</p>';
         if (r.run_dir) h += `<div class="hint" style="margin-top:10px">Files on disk:</div><div class="path">${esc(r.run_dir)}/workspace/output</div><div class="btnrow"><button class="btn small" onclick="openOS(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Open folder</button><button class="btn small" onclick="copyPath(${esc(JSON.stringify(r.run_dir + "/workspace/output"))})">Copy path</button><button class="btn small" onclick="detailTab['${key}']='files';renderGoal()">All files</button></div>`;
         const dl = (what) => `projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(d.task.id)}/download?mode=${mode}&what=${what}`;
         h += `<div class="actions"><a class="btn small" href="/api/${dl("output")}">Download output (.tar.gz)</a><a class="btn small" href="/api/${dl("harness")}">Download adopted harness</a></div>`;
@@ -1351,8 +1707,11 @@ function renderGoal() {
         setTimeout(() => { const el = document.getElementById("files-" + key); if (el) renderFiles(d.task.id, el); }, 0);
       } else if (tab === "compare") {
         const names = [...new Set([...Object.keys(r.base_files || {}), ...Object.keys(r.files || {})])];
-        h += `<p class="hint">The first base attempt (unmodified harness) beside the adopted output.</p>`;
-        h += names.length ? names.map(n => `<div class="hint"><b>${esc(n)}</b></div><div class="cmp"><div><div class="hint">base1</div><pre>${esc((r.base_files || {})[n] ?? "(not produced)")}</pre></div><div><div class="hint">${esc(r.label)} ★</div><pre>${esc((r.files || {})[n] ?? "(not produced)")}</pre></div></div>`).join("") : '<p class="muted">Nothing to compare.</p>';
+        const both = names.filter(n => (r.base_files || {})[n] != null && (r.files || {})[n] != null);
+        if (both.length) h += both.map(n => `<div class="hint"><b>${esc(n)}</b> — changed lines highlighted</div><div class="cmp">${lineDiff(r.base_files[n], r.files[n], "base1", esc(r.label) + " ★")}</div>`).join("");
+        const rest = names.filter(n => !both.includes(n));
+        if (!both.length) h += `<p class="hint">The first base attempt (unmodified harness) beside the adopted output.</p>`;
+        h += !rest.length && both.length ? "" : rest.length ? rest.map(n => `<div class="hint"><b>${esc(n)}</b></div><div class="cmp"><div><div class="hint">base1</div><pre>${esc((r.base_files || {})[n] ?? "(not produced)")}</pre></div><div><div class="hint">${esc(r.label)} ★</div><pre>${esc((r.files || {})[n] ?? "(not produced)")}</pre></div></div>`).join("") : '<p class="muted">Nothing to compare.</p>';
       } else if (tab === "why") {
         h += `<div class="kv"><div>Selection</div><div>${esc(r.why || "—")}</div>`;
         const e = r.experience || {};
@@ -1378,12 +1737,90 @@ function renderGoal() {
   }
   if (!d.namespaces.length) h += '<p class="muted">No results yet.</p>';
   $("#goal-detail").innerHTML = h;
+  loadAB();
   if (d.runs && d.runs.length) api(`runs/${d.runs[0].id}/events`).then(ev => { const j = $("#journey"); if (j) renderPipeline(j, reduceEvents(ev.events)); }).catch(() => {});
 }
 window.rerun = async () => {
   try { const r = await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/rerun`, {k: +$("#g-k").value, mode: $("#g-mode").value}); show("run"); watch(r.run_id); }
   catch (e) { msg("#gd-msg", e.message); }
 };
+// ---------- experiments: A/B test and model shootout ----------
+let expTimer = null;
+window.startAB = async () => {
+  msg("#gd-msg", "Starting A/B test…", true);
+  try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/ab`, {n: 3}); msg("#gd-msg", "A/B test running: 3 base and 3 adopted attempts, each graded.", true); loadAB(); }
+  catch (e) { msg("#gd-msg", e.message); }
+};
+window.shootoutForm = () => {
+  let box = $("#so-form"); if (box) { box.remove(); return; }
+  const s = projectData.settings || {}, solver = (s.solver_model || "").split(",")[0].trim();
+  const picks = [solver, "nvidia/mistralai/mistral-large-4-1t-a52b"].filter((x, i, a) => x && a.indexOf(x) === i);
+  box = document.createElement("div"); box.id = "so-form"; box.className = "abbox";
+  box.innerHTML = `<b>Model shootout</b> <span class="muted">· the base harness on each solver model; graded when the goal has criteria and a judge is set</span>
+    <label style="margin-top:8px">Solver models, one per line</label><textarea id="so-models" rows="3" class="mono">${esc(picks.join("\n"))}</textarea>
+    <div class="actions"><label style="margin:0">Attempts per model</label><select id="so-n" style="width:auto"><option>1</option><option selected>2</option><option>3</option></select>
+    <button class="btn small primary" onclick="startShootout()">Start shootout</button><span id="so-msg"></span></div>`;
+  $("#goal-detail .actions").after(box);
+};
+window.startShootout = async () => {
+  const models = $("#so-models").value.split("\n").map(x => x.trim()).filter(Boolean);
+  try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/shootout`, {models, n: +$("#so-n").value}); $("#so-form").remove(); loadAB(); }
+  catch (e) { msg("#so-msg", e.message); }
+};
+window.cancelExp = async (kind) => {
+  try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/experiment/cancel`, {kind}); loadAB(); } catch (e) { msg("#gd-msg", e.message); }
+};
+window.trashGoal = async () => {
+  if (!confirm("Move this goal to the project's trash folder? Its run files stay on disk.")) return;
+  try { await api(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}`, {method: "DELETE"}); detail = null; $("#goal-detail").innerHTML = '<p class="muted">Moved to trash.</p>'; loadHistory(); }
+  catch (e) { msg("#gd-msg", e.message); }
+};
+const pctS = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+function expHead(title, r, kind) {
+  const done = Object.values(r.groups || {}).reduce((n, g) => n + g.length, 0), total = (r.n || 1) * Object.keys(r.groups || {}).length;
+  const st = r.status === "running" ? `running ${done}/${total}… <button class="btn small" onclick="cancelExp('${kind}')">Stop</button>` : r.status === "done" ? esc((r.finished || "").slice(0, 16).replace("T", " ")) : `<span class="warn-txt">${esc(r.status)}</span>`;
+  return `<b>${title}</b> <span class="muted">· ${st}</span>`;
+}
+function expTail(r) {
+  const errs = Object.values(r.groups || {}).flat().filter(x => x.error).map(x => x.error);
+  return (errs.length ? `<div class="hint err">${esc(errs.slice(0, 2).join(" · "))}</div>` : "")
+    + (r.status === "running" && r.log_tail && r.log_tail.length ? `<pre class="hint" style="max-height:110px;margin-top:6px">${esc(r.log_tail.join("\n"))}</pre>` : "");
+}
+function renderAB(r) {
+  const g = r.groups || {base: r.base || [], adopted: r.adopted || []}, sb = r.summary || {};
+  const side = (name) => {
+    const rows = g[name] || [], sm = sb[name] || {}, m = sm.mean != null ? sm.mean : null;
+    const dots = rows.map(x => x.frac != null ? `<b style="left:${x.frac * 100}%" title="run ${x.i}: ${pctS(x.frac)}"></b>` : "").join("");
+    return `<span>${name}</span><div class="abbar"><i style="width:${(m || 0) * 100}%;background:var(--${name === "base" ? "line2" : "accent"})"></i>${dots}</div><span class="mono">${pctS(m)}${sm.sd != null ? " ±" + Math.round(sm.sd * 100) : ""}</span>`;
+  };
+  return expHead(`A/B test <span class="muted">· adopted <code>${esc(r.adopted_label || "")}</code> vs base</span>`, r, "ab")
+    + `<div class="abbars">${side("base")}${side("adopted")}</div>`
+    + (sb.verdict ? `<div><b>${esc(sb.verdict)}</b> <span class="muted">— bars are the mean score, ticks single runs, ± the run-to-run spread</span></div>` : "") + expTail(r);
+}
+function renderShootout(r) {
+  const sm = r.summary || {}, models = r.models || Object.keys(r.groups || {});
+  const rows = models.map(m => { const g = (r.groups || {})[m] || [], x = sm[m] || {};
+    const live = g.length && !sm[m] ? {delivered: g.filter(y => y.delivered).length, runs: g.length, mean: g.some(y => y.frac != null) ? g.filter(y => y.frac != null).reduce((a, y) => a + y.frac, 0) / g.filter(y => y.frac != null).length : null} : x;
+    return `<tr${r.best === m ? ' class="best"' : ""}><td class="mono">${esc(m)}${r.best === m ? " ★" : ""}</td><td class="n">${r.graded ? pctS(live.mean) + (x.sd != null ? " ±" + Math.round(x.sd * 100) : "") : "—"}</td><td class="n">${live.delivered ?? 0}/${live.runs ?? g.length}</td><td class="n">${x.avg_issues ?? "—"}</td><td class="n">${x.avg_seconds != null ? fmtT(x.avg_seconds * 1000) : "—"}</td><td class="n">${x.avg_tokens != null ? fmtK(x.avg_tokens) : "—"}</td></tr>`; }).join("");
+  return expHead("Model shootout", r, "shootout")
+    + `<table class="restab" style="margin-top:6px"><tr><th>Solver model</th><th class="n">${r.graded ? "Score" : "Score (no rubric)"}</th><th class="n">Delivered</th><th class="n">Problems</th><th class="n">Time</th><th class="n">Tokens</th></tr>${rows}</table>`
+    + (r.best && r.status === "done" ? `<div class="hint">Best here: <b>${esc(r.best)}</b>${r.graded ? " by mean rubric score" : " by delivered outputs and fewest review problems"}. To use it, set it as the solver in Models → Roles.</div>` : "") + expTail(r);
+}
+async function loadAB() {
+  clearTimeout(expTimer);
+  if (!detail) return;
+  const id = detail.task.id, base = `projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(id)}`;
+  let ab, so; try { [ab, so] = await Promise.all([api(base + "/ab"), api(base + "/shootout")]); } catch (e) { return; }
+  if (!detail || detail.task.id !== id) return;
+  let box = $("#exp-box");
+  const parts = [];
+  if (ab.status !== "none") parts.push(`<div class="abbox">${renderAB(ab)}</div>`);
+  if (so.status !== "none") parts.push(`<div class="abbox">${renderShootout(so)}</div>`);
+  if (!parts.length) { if (box) box.remove(); return; }
+  if (!box) { box = document.createElement("div"); box.id = "exp-box"; const j = $("#goal-detail h3"); if (j) j.before(box); else $("#goal-detail").append(box); }
+  box.innerHTML = parts.join("");
+  if (ab.status === "running" || so.status === "running") expTimer = setTimeout(loadAB, 5000);
+}
 window.judgeIt = async () => {
   msg("#gd-msg", "Judging…", true);
   try { await jpost(`projects/${encodeURIComponent(project)}/goals/${encodeURIComponent(detail.task.id)}/judge`, {}); openGoal(detail.task.id); }
@@ -1400,7 +1837,9 @@ let hSel = null;
 const BUILTIN_TOOLS = [
   ["list_files", "list a workspace directory"], ["read_file", "read a file, paged by lines"], ["write_file", "create or overwrite a file"],
   ["edit_file", "replace an exact substring"], ["delete_file", "delete a file"], ["bash", "run a shell command (when shell is allowed)"],
+  ["append_file", "add to the end of a file"], ["export_pdf", "turn a .md/.html file into a real PDF"],
   ["skill", "load a harness skill's instructions"], ["task", "delegate to a sub-agent in its own context"], ["finish", "end the session with an answer"],
+  ["web_fetch", "read a web page (when web access is on)"], ["web_search", "search the web (web access + a search key)"],
 ];
 function wiredFrom(tree) {
   return Object.keys(tree || {}).filter(p => /^tools\/[a-z0-9][a-z0-9_-]*\.json$/.test(p)).sort().map(p => {
@@ -1822,7 +2261,7 @@ async function loadResults() {
     + k("Spend", "$" + usd.toFixed(usd < 1 ? 3 : 2), "last run of each goal") + k("Avg time", mins == null ? "—" : fmtT(mins * 60000), "per run");
   // chart: paired bars, base (grey) vs adopted (accent), per judged goal
   if (judged.length) {
-    const W = 900, H = 200, pad = 34, n = judged.length, bw = Math.min(26, (W - pad * 2) / n / 2.6);
+    const n = judged.length, W = Math.min(900, 140 + n * 110), H = 200, pad = 34, bw = Math.min(26, (W - pad * 2) / n / 2.6);
     let o = `<svg viewBox="0 0 ${W} ${H + 40}" style="width:100%;max-width:${W}px;height:auto" role="img" aria-label="Base vs adopted scores">`;
     [0, .5, 1].forEach(t => { const y = H - t * (H - 20); o += `<line class="axis" x1="${pad}" x2="${W - 10}" y1="${y}" y2="${y}"/><text class="lbl" x="${pad - 6}" y="${y + 3}" text-anchor="end">${t * 100}%</text>`; });
     judged.forEach((x, i) => {
@@ -1836,9 +2275,9 @@ async function loadResults() {
   } else $("#res-chart").innerHTML = '<p class="hint">No graded goals yet. Give a goal grading criteria (Run a goal → Optional grading criteria) and set a judge model; scores appear here after the run.</p>';
   const pct = (v) => v == null ? "—" : Math.round(v * 100) + "%";
   $("#res-table").innerHTML = g.length ? `<table class="restab"><tr><th>#</th><th>Goal</th><th>Adopted</th><th class="n">Base</th><th class="n">Adopted</th><th>Verdict</th><th class="n">Cost</th><th class="n">Time</th><th class="n">Heals</th><th class="n">Gate</th></tr>${g.map((x, i) => `<tr>
-      <td class="n">${judged.indexOf(x) >= 0 ? judged.indexOf(x) + 1 : ""}</td><td><a href="#" onclick="show('history');openGoal('${esc(x.id)}');return false">${esc(x.prompt)}</a><div class="hint mono">${esc(x.created_at.slice(0, 16).replace("T", " "))} · ${esc(x.domain)}${x.has_rubric ? " · rubric" : ""}</div></td>
-      <td class="mono" style="font-size:12px">${x.chosen.map(esc).join(", ") || "—"}${x.chosen_is_base ? ' <span class="st warn">base kept</span>' : ""}</td>
-      <td class="n">${pct(x.base_score)}</td><td class="n">${pct(x.adopted_score)}</td><td><span class="st ${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "info"}">${x.verdict || "—"}</span></td>
+      <td class="n">${judged.indexOf(x) >= 0 ? judged.indexOf(x) + 1 : ""}</td><td><a href="#" onclick="show('history');openGoal('${esc(x.id)}');return false">${esc(plainTitle(x.prompt))}</a><div class="hint mono">${esc(x.created_at.slice(0, 16).replace("T", " "))} · ${esc(x.domain)}${x.has_rubric ? " · rubric" : ""}</div></td>
+      <td class="mono" style="font-size:12px">${x.chosen.filter(c => !/:$/.test(c)).map(c => esc(c.replace(/^agg:/, "parallel: ").replace(/^seq:/, "sequential: "))).join(", ") || (x.run_status ? esc(x.run_status) : "—")}${x.chosen_is_base ? ' <span class="st warn">base kept</span>' : ""}</td>
+      <td class="n">${pct(x.base_score)}</td><td class="n">${pct(x.adopted_score)}</td><td><span class="st ${x.verdict === "win" ? "ok" : x.verdict === "loss" ? "bad" : "info"}">${x.verdict === "kept" ? "base kept" : x.verdict || "—"}</span>${x.run_status === "review" ? ' <span class="st warn">needs review</span>' : ""}</td>
       <td class="n">${x.usd ? "$" + x.usd.toFixed(3) : "—"}</td><td class="n">${x.minutes != null ? fmtT(x.minutes * 60000) : "—"}</td><td class="n">${x.heals || ""}</td><td class="n">${x.gates || ""}</td></tr>`).join("")}</table>` : '<p class="muted">No goals in this project yet.</p>';
 }
 
@@ -1890,13 +2329,35 @@ $("#m-save").onclick = async () => {
 
 async function loadLibrary() {
   const r = await api(`projects/${encodeURIComponent(project)}/library`);
-  $("#lib").innerHTML = r.entries.length ? r.entries.map(e => `<h3><code>${esc(e.path)}</code></h3><pre>${esc(e.body)}</pre>`).join("") : '<p class="muted">Empty. The selector adds an entry when a goal yields a lesson that the evidence supports.</p>';
+  const ents = [...r.entries].sort((a, b) => (b.pinned - a.pinned) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  $("#lib").innerHTML = ents.length ? ents.map((e, i) => `<div class="libcard ${e.pinned ? "pinned" : ""}">
+      <div class="live-head"><span class="chip">${esc(e.domain)}</span>${e.pinned ? '<span class="chip warn">📌 pinned</span>' : ""}<div class="spacer"></div>
+        <button class="btn small" onclick="libAct(${i}, '${e.pinned ? "unpin" : "pin"}')">${e.pinned ? "Unpin" : "Pin"}</button><button class="btn small" onclick="libAct(${i}, 'retire')">Retire</button></div>
+      ${e.cue ? `<div class="cue" style="margin-top:6px">When: ${esc(e.cue)}</div><div>${esc(e.lesson)}</div>` : '<div class="muted" style="margin-top:6px">No transferable lesson recorded; the adopted harness is kept for reference.</div>'}
+      ${e.evidence ? `<div class="hint">Evidence: ${esc(e.evidence)}</div>` : ""}
+      <div class="meta">${e.goal ? "from: " + esc(plainTitle(e.goal).slice(0, 90)) + " · " : ""}${e.confidence ? "confidence: " + esc(e.confidence) + " · " : ""}${e.verdicts.length ? "edits: " + esc(Object.entries(e.verdicts.reduce((m, v) => (m[v] = (m[v] || 0) + 1, m), {})).map(([v, c]) => (c > 1 ? c + "× " : "") + v).join(", ")) + " · " : ""}available to ${e.later_goals} later goal(s) in this domain</div>
+      <details><summary class="hint">Full entry</summary><pre>${esc(e.body)}</pre></details></div>`).join("")
+    : '<p class="muted">Empty. The selector adds an entry when a goal yields a lesson that the evidence supports.</p>';
+  window.__lib = ents;
 }
 
+// Tell the person when a run ends: a browser notification (if allowed) and a ✓ in the tab title.
+function notifyDone(status, error) {
+  if (window.__notified === liveRun) return; window.__notified = liveRun;
+  const txt = {done: "Run finished", review: "Run finished — needs review", failed: "Run failed", cancelled: "Run stopped", capped: "Run stopped at the spending cap"}[status] || "Run ended";
+  if (document.hidden) { document.title = (status === "done" ? "✓ " : "⚠ ") + "Harnessmith"; window.addEventListener("focus", () => { document.title = "Harnessmith"; }, {once: true}); }
+  try { if (window.Notification && Notification.permission === "granted" && document.hidden) new Notification("Harnessmith: " + txt, {body: (error || "").slice(0, 140)}); } catch (e) {}
+}
+$("#g-text").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); $("#g-go").click(); } });
+$("#g-go").addEventListener("click", () => { try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) {} });
+window.libAct = async (i, action) => {
+  const e = (window.__lib || [])[i]; if (!e) return;
+  try { await jpost(`projects/${encodeURIComponent(project)}/library`, {path: e.path, action}); loadLibrary(); } catch (err) { alert(err.message); }
+};
 (async () => {
   try {
     await loadProjects(); await refreshProject(); stopHealthTable(); refreshHealth(); loadStatus();
-    show(load("h2.view") || "overview");
+    show(/^#goal=/.test(location.hash) ? "history" : (load("h2.view") || "overview"));
     const runs = await api("runs");
     const live = runs.runs.find(r => (r.status === "running" || r.status === "queued") && r.project === project);
     if (live) watch(live.id);

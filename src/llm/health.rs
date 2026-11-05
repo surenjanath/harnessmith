@@ -83,6 +83,14 @@ pub fn record_cached(conn: &str, cached: u64) {
 }
 
 pub fn record_ok(conn: &str, took: Duration, in_tok: u64, out_tok: u64) {
+    let was_open = STATS.lock().unwrap().get(conn).map(|s| s.open_until.is_some()).unwrap_or(false);
+    record_ok_inner(conn, took, in_tok, out_tok);
+    if was_open {
+        save();
+    }
+}
+
+fn record_ok_inner(conn: &str, took: Duration, in_tok: u64, out_tok: u64) {
     let mut g = STATS.lock().unwrap();
     let s = g.entry(conn.to_string()).or_default();
     s.ok += 1;
@@ -109,6 +117,8 @@ pub fn record_fail(conn: &str, err: &str) -> bool {
         s.trips += 1;
         let cool = (BASE_COOLDOWN * 2u32.saturating_pow(s.trips.saturating_sub(1).min(5))).min(MAX_COOLDOWN);
         s.open_until = Some(Instant::now() + cool);
+        drop(g);
+        save();
         return true;
     }
     false
@@ -135,7 +145,15 @@ pub fn reset(conn: &str) {
     if let Some(s) = STATS.lock().unwrap().get_mut(conn) {
         s.consecutive_fail = 0;
         s.open_until = None;
+        s.last_error.clear();
+        // A reset starts the record over, so old failures stop counting against it.
+        s.ok = 0;
+        s.fail = 0;
+        s.trips = 0;
+        s.last_fail = None;
     }
+    // Persist at once, so a restart does not bring back a breaker someone just reset.
+    save();
 }
 
 pub fn get(conn: &str) -> Stat {
@@ -150,6 +168,42 @@ pub fn state(s: &Stat) -> &'static str {
         None if s.consecutive_fail > 0 => "degraded",
         None if s.ok > 0 => "healthy",
         None => "unknown",
+    }
+}
+
+/// Save what matters across a restart: success/failure counts, speed, and open breakers
+/// (as seconds left), so a server restart neither forgets a dead endpoint nor its measured speed.
+pub fn save() {
+    let g = STATS.lock().unwrap();
+    let now = Instant::now();
+    let m: serde_json::Map<String, Value> = g
+        .iter()
+        .map(|(k, s)| {
+            (k.clone(), json!({"ok": s.ok, "fail": s.fail, "consecutive_fail": s.consecutive_fail, "trips": s.trips, "latency_ms": s.latency_ms, "out_tok_s": s.out_tok_s,
+                "last_error": s.last_error, "open_for_s": s.open_until.map(|t| t.saturating_duration_since(now).as_secs()).unwrap_or(0)}))
+        })
+        .collect();
+    drop(g);
+    let _ = std::fs::write(crate::config::get().runs.join("health.json"), Value::Object(m).to_string());
+}
+
+/// Restore what `save` wrote (missing or broken file: start fresh).
+pub fn load() {
+    let Ok(text) = std::fs::read_to_string(crate::config::get().runs.join("health.json")) else { return };
+    let Ok(Value::Object(m)) = serde_json::from_str::<Value>(&text) else { return };
+    let mut g = STATS.lock().unwrap();
+    for (k, v) in m {
+        let s = g.entry(k).or_default();
+        let u = |f: &str| v[f].as_u64().unwrap_or(0);
+        s.ok = u("ok");
+        s.fail = u("fail");
+        s.consecutive_fail = u("consecutive_fail") as u32;
+        s.trips = u("trips") as u32;
+        s.latency_ms = v["latency_ms"].as_f64().unwrap_or(0.0);
+        s.out_tok_s = v["out_tok_s"].as_f64().unwrap_or(0.0);
+        s.last_error = v["last_error"].as_str().unwrap_or("").into();
+        let open = u("open_for_s");
+        s.open_until = (open > 0).then(|| Instant::now() + Duration::from_secs(open));
     }
 }
 

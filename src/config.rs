@@ -17,6 +17,41 @@ impl std::fmt::Display for ConfigError {
 }
 impl std::error::Error for ConfigError {}
 
+/// Set `key=value` in the project's `.env` (replacing an existing line, or appending), keep the
+/// file private (0600), and set it in this process so it works at once.
+pub fn set_dotenv(key: &str, value: &str) -> std::io::Result<PathBuf> {
+    let path = get().root.join(".env");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let quoted = if value.contains(char::is_whitespace) || value.contains('#') || value.contains('"') { format!("'{}'", value.replace('\'', "")) } else { value.to_string() };
+    let mut found = false;
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let bare = l.trim_start().strip_prefix("export ").unwrap_or(l.trim_start());
+            if bare.split_once('=').map(|(k, _)| k.trim() == key).unwrap_or(false) {
+                found = true;
+                format!("{key}={quoted}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if !found {
+        if lines.is_empty() {
+            lines.push("# Local secrets for harnessmith (git-ignored). Read at startup and again when a key is missing.".into());
+        }
+        lines.push(format!("{key}={quoted}"));
+    }
+    std::fs::write(&path, lines.join("\n") + "\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    std::env::set_var(key, value);
+    Ok(path)
+}
+
 /// Load KEY=VALUE lines from `path` into the environment without overriding (the shell wins).
 pub fn load_dotenv(path: &Path) {
     let Ok(text) = std::fs::read_to_string(path) else { return };

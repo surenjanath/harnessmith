@@ -1,0 +1,25 @@
+[
+ {
+  "name": "09_results",
+  "url": "/",
+  "js": "show('results')",
+  "jsWait": 5000,
+  "wait": 4500
+ },
+ {
+  "name": "10_library",
+  "url": "/",
+  "js": "show('library')",
+  "jsWait": 4500,
+  "wait": 4500
+ },
+ {
+  "name": "11_tools",
+  "url": "/",
+  "js": "show('harness')",
+  "jsWait": 4000,
+  "sel": "#tools-list",
+  "pad": 150,
+  "wait": 4500
+ }
+]

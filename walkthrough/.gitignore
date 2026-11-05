@@ -1,0 +1,4 @@
+.venv/
+video/node_modules/
+video/out/
+*.pyc

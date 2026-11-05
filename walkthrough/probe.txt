@@ -1,0 +1,160 @@
+01_overview {"h":2675,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Harnessmith  [0.07,0.17,0.85,0.09]  Harnessmith ONE GATE · ONE QUEUE · A RECURSION
+text=Introduction.  [0.10,0.34,0.82,0.12]  INTRODUCTION. Harnessmith adapts an agent's ha
+text=Introduction.^  [0.07,0.34,0.85,0.12]  1 INTRODUCTION. Harnessmith adapts an agent's 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#livebar  [0.07,0.28,0.85,0.04]  LIVE 1 running · 0 queued 2 stage(s) working m
+#ov-slot-0  [0.47,0.60,0.42,0.09]  
+#ov-wt  [0.27,0.72,0.24,0.22]  
+#ov-wm  [0.44,0.72,0.13,0.26]  
+svg  [0.07,0.48,0.85,0.52]   
+
+02_run {"h":2144,"y":348,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=What should the agent do?  [0.06,0.08,0.87,0.04]  What should the agent do? ✨ Improve with AI
+text=Running…  [0.06,0.79,0.87,0.03]  Running… Stop Open result
+text=Running…^  [0.05,0.77,0.89,0.23]  Running… Stop Open result Elapsed 10m 27s Solv
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#g-text  [0.06,0.19,0.87,0.15]  
+#g-rubric  [0.06,0.47,0.87,0.10]  
+#g-budget  [0.06,0.57,0.87,0.05]  4 solver runs and 4 improver/selector sessions
+#g-models  [0.06,0.63,0.87,0.05]  Solver: nvidia/mistralai/mistral-large-4-1t-a5
+#live-graph  [0.06,0.84,0.87,0.16]  Elapsed 10m 27s Solver runs 1/4 Improver sessi 
+
+c_template clip: 3 frames over 7.0 s
+c_template {"h":2144,"y":348,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=What should the agent do?  [0.06,0.08,0.87,0.04]  What should the agent do? ✨ Improve with AI
+text=Running…  [0.06,0.79,0.87,0.03]  Running… Stop Open result
+text=Running…^  [0.05,0.77,0.89,0.23]  Running… Stop Open result Elapsed 10m 33s Solv
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#g-text  [0.06,0.19,0.87,0.15]  
+#g-rubric  [0.06,0.47,0.87,0.10]  
+#g-budget  [0.06,0.57,0.87,0.05]  4 solver runs and 4 improver/selector sessions
+#g-models  [0.06,0.63,0.87,0.05]  Solver: nvidia/mistralai/mistral-large-4-1t-a5
+#live-graph  [0.06,0.84,0.87,0.16]  Elapsed 10m 33s Solver runs 1/4 Improver sessi 
+
+03_models {"h":2352,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+ul.muted  [0.06,0.53,0.87,0.05]  Solver ollama/qwen3.8:27b-mlx: the strongest l 
+
+04_connections {"h":2355,"y":1272,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Connections  [0.05,0.34,0.44,0.59]  Connections A model id is connection/model. Bu
+text=Connections^  [0.05,0.34,0.89,0.61]  Connections A model id is connection/model. Bu
+text=Edit “nvidia”  [0.52,0.36,0.42,0.03]  Edit “nvidia” + New connection
+text=Edit “nvidia”^  [0.50,0.34,0.44,0.59]  Edit “nvidia” + New connection Quick fill: NVI
+text=Roles for this project  [0.05,0.95,0.89,0.05]  Roles for this project Pick a model id for eac
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#advisor  [0.05,0.00,0.89,0.32]  MODEL ADVISOR · WHAT RUNS BEST ON THIS MACHINE
+#adv-body  [0.06,0.00,0.87,0.31]  THIS MACHINE Apple Silicon, 64 GB unified memo
+#builtins  [0.06,0.42,0.38,0.04]  openai/… anthropic/… gemini/… ollama/… openrou
+#conn-rows  [0.06,0.50,0.42,0.09]  nvidia mistralai/mistral-large-4-1t-a52b opena
+#health-table  [0.06,0.64,0.42,0.12]  CONNECTION STATE AVG CALL TOKENS OUT OK / FAIL
+#cf-base  [0.52,0.56,0.42,0.05]  
+#cf-keyrow  [0.52,0.62,0.42,0.10]  API KEY Show ✓ NVIDIA_API_KEY is set · paste a
+#cf-keyin  [0.52,0.65,0.38,0.04]  
+table.advtab  [0.06,0.00,0.87,0.28]  MODEL WHERE FIT PARAMS SIZE QUANT EST. TOK/S M
+table  [0.06,0.47,0.42,0.13]  NAME PROVIDER ENDPOINT KEY nvidia mistralai/mi
+table  [0.06,0.64,0.42,0.12]  CONNECTION STATE AVG CALL TOKENS OUT OK / FAIL 
+
+05_history {"h":1972,"y":0,"hash":"#goal=20261105-010339-dog-life-cycle-report-objective-produce"}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Goals · 5^  [0.05,0.14,0.28,0.70]  Goals · 5 All statuses Running Needs review Do
+text=Dog Life Cycle Report  [0.34,0.14,0.61,0.86]  Dog Life Cycle Report ok k=1 parallel · domain
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#goal-list  [0.06,0.30,0.25,0.49]  TODAY Produce a PDF document on dogs for pet o
+#journey  [0.35,0.45,0.58,0.55]  Elapsed 37m 7s Solver runs 4/4 Improver sessio
+#lane-agg  [0.35,0.72,0.58,0.28]  PARALLEL RECURSION BASE RUNS base1 ★ adopted s
+#pg-agg-base1  [0.36,0.90,0.13,0.10]  base1 ★ adopted solver · base harness run deli
+#pg-agg-inv1  [0.53,0.79,0.13,0.16]  inv1 INV improver · how it works edit kept har
+#pg-agg-agg1  [0.70,0.86,0.13,0.14]  agg1 AGG improver · compose edit kept harness 
+svg  [0.35,0.72,0.65,0.28]   
+
+c_history_search clip: 479 frames over 8.0 s
+c_history_search {"h":1972,"y":0,"hash":"#goal=20261105-010339-dog-life-cycle-report-objective-produce"}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Goals · 5^  [0.05,0.14,0.28,0.70]  Goals · 5 All statuses Running Needs review Do
+text=Dog Life Cycle Report  [0.34,0.14,0.61,0.86]  Dog Life Cycle Report ok k=1 parallel · domain
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#goal-list  [0.06,0.30,0.25,0.49]  TODAY Produce a PDF document on dogs for pet o
+#journey  [0.35,0.45,0.58,0.55]  Elapsed 37m 7s Solver runs 4/4 Improver sessio
+#lane-agg  [0.35,0.72,0.58,0.28]  PARALLEL RECURSION BASE RUNS base1 ★ adopted s
+#pg-agg-base1  [0.36,0.90,0.13,0.10]  base1 ★ adopted solver · base harness run deli
+#pg-agg-inv1  [0.53,0.79,0.13,0.16]  inv1 INV improver · how it works edit kept har
+#pg-agg-agg1  [0.70,0.86,0.13,0.14]  agg1 AGG improver · compose edit kept harness 
+svg  [0.35,0.72,0.65,0.28]   
+
+06_map {"h":1972,"y":294,"hash":"#goal=20261105-010339-dog-life-cycle-report-objective-produce"}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Goals · 5^  [0.05,0.01,0.28,0.70]  Goals · 5 All statuses Running Needs review Do
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#goal-list  [0.06,0.17,0.25,0.49]  TODAY Produce a PDF document on dogs for pet o
+#journey  [0.35,0.09,0.58,0.69]  Elapsed 37m 7s Solver runs 4/4 Improver sessio
+#lane-agg  [0.35,0.35,0.58,0.42]  PARALLEL RECURSION BASE RUNS base1 ★ adopted s
+#pg-agg-base1  [0.36,0.53,0.13,0.11]  base1 ★ adopted solver · base harness run deli
+#pg-agg-inv1  [0.53,0.42,0.13,0.16]  inv1 INV improver · how it works edit kept har
+#pg-agg-dom1  [0.53,0.60,0.13,0.16]  dom1 DOM improver · what it knows edit kept ha
+#pg-agg-agg1  [0.70,0.50,0.13,0.18]  agg1 AGG improver · compose edit kept harness 
+svg  [0.35,0.36,0.65,0.42]   
+
+07_output {"h":1972,"y":936,"hash":"#goal=20261105-010339-dog-life-cycle-report-objective-produce"}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Goals · 5^  [0.05,0.01,0.28,0.70]  Goals · 5 All statuses Running Needs review Do
+text=Dog Life Cycle Report  [0.35,0.22,0.58,0.77]  Dog Life Cycle Report Author: [Your Name] Date
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#goal-list  [0.06,0.17,0.25,0.49]  TODAY Produce a PDF document on dogs for pet o 
+
+08_compare {"h":1743,"y":933,"hash":"#goal=20261105-010339-dog-life-cycle-report-objective-produce"}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Goals · 5^  [0.05,0.01,0.28,0.70]  Goals · 5 All statuses Running Needs review Do
+text=Dog Life Cycle Report  [0.34,0.00,0.61,0.91]  Dog Life Cycle Report ok k=1 parallel · domain
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#goal-list  [0.06,0.17,0.25,0.49]  TODAY Produce a PDF document on dogs for pet o 
+
+09_results {"h":810,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Harnessmith v0.1.0^  [0.00,0.00,1.00,0.36]  Harnessmith v0.1.0 Overview Run a goal Models 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#v-results  [0.05,0.14,0.89,0.14]  RESULTS · DEFAULT · DOES ADAPTING THE HARNESS  
+
+10_library {"h":810,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Harnessmith v0.1.0^  [0.00,0.00,1.00,0.32]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Experience library  [0.05,0.14,0.89,0.10]  Experience library Lessons the selector wrote 
+text=Experience library^  [0.05,0.14,0.89,0.10]  Experience library Lessons the selector wrote 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas 
+
+11_tools {"h":1490,"y":248,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Base harness  [0.05,0.69,0.89,0.31]  Base harness Where every goal in this project 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#tools-list  [0.06,0.19,0.87,0.38]  list_files list a workspace directory Built-in
+#h-files  [0.06,0.80,0.87,0.03]  LongTermMEMORY.md guardrails.md systemprompt.m
+#h-path  [0.06,0.89,0.87,0.05]   
+
+12_doctor {"h":1127,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Doctor  [0.06,0.15,0.87,0.03]  Doctor checked 11:32 PM Run checks Apply safe 
+text=Doctor^  [0.05,0.14,0.89,0.63]  Doctor checked 11:32 PM Run checks Apply safe 
+text=Model health right now^  [0.05,0.78,0.89,0.19]  Model health right now calls this server has m
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#doc-sum  [0.06,0.23,0.87,0.08]  1 warning FAILING 0 WARNINGS 1 OK 14 INFO 2
+#doc-list  [0.06,0.32,0.87,0.42]  NEEDS ATTENTION Runs in the last 24 h 1 of 5 n
+#doc-health  [0.06,0.84,0.87,0.11]  CONNECTION STATE OK FAILED AVG CALL LAST ERROR
+table.restab  [0.06,0.84,0.87,0.11]  CONNECTION STATE OK FAILED AVG CALL LAST ERROR 
+
+c_doctor clip: 3 frames over 9.0 s
+c_doctor {"h":1127,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Doctor  [0.06,0.15,0.87,0.03]  Doctor checked 11:32 PM Run checks Apply safe 
+text=Doctor^  [0.05,0.14,0.89,0.63]  Doctor checked 11:32 PM Run checks Apply safe 
+text=Model health right now^  [0.05,0.78,0.89,0.19]  Model health right now calls this server has m
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#doc-sum  [0.06,0.23,0.87,0.08]  1 warning FAILING 0 WARNINGS 1 OK 14 INFO 2
+#doc-list  [0.06,0.32,0.87,0.42]  NEEDS ATTENTION Runs in the last 24 h 1 of 5 n
+#doc-health  [0.06,0.84,0.87,0.11]  CONNECTION STATE OK FAILED AVG CALL LAST ERROR
+table.restab  [0.06,0.84,0.87,0.11]  CONNECTION STATE OK FAILED AVG CALL LAST ERROR 
+

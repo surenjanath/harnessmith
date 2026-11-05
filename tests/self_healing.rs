@@ -59,6 +59,9 @@ fn setup(conns: Value) -> tempfile::TempDir {
     let p = d.path().join("connections.json");
     std::fs::write(&p, conns.to_string()).unwrap();
     std::env::set_var("HARNESS2_CONNECTIONS", &p);
+    // Keep spend.json and other run state out of the real runs/ folder (and out of later test runs).
+    static RUNS: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    std::env::set_var("HARNESS2_RUNS_DIR", RUNS.get_or_init(|| tempfile::tempdir().unwrap().keep()));
     harness2::log::set_quiet(true);
     d
 }
@@ -202,7 +205,7 @@ fn self_healing_scenarios() {
     //    its command with the call's arguments on stdin.
     let ws4 = d.path().join("ws4");
     let h4 = ws4.join(".harness");
-    for (rel, body) in harness2::substrate::native::default_base_tree() {
+    for (rel, body) in harness2::substrate::native::default_base_tree().into_iter().chain(harness2::substrate::native::starter_tools_tree()) {
         let dst = h4.join(&rel);
         std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
         std::fs::write(&dst, &body).unwrap();

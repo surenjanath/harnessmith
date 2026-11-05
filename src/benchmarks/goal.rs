@@ -100,6 +100,18 @@ pub struct GoalSettings {
     /// Also recall notes shared from other projects.
     #[serde(default)]
     pub memory_shared: bool,
+    /// Give improvers a code-computed digest of the rollouts (context/brief.md).
+    #[serde(default = "yes")]
+    pub improver_brief: bool,
+    /// Grade this many times and take each criterion's majority vote (judge noise is large).
+    #[serde(default = "three")]
+    pub judge_repeats: usize,
+    /// Let the solver fetch web pages (and search, when a search API key is set).
+    #[serde(default)]
+    pub web_access: bool,
+}
+fn three() -> usize {
+    3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -187,6 +199,9 @@ impl Default for GoalSettings {
             auto_judge: true,
             memory_embed_model: String::new(),
             memory_shared: false,
+            improver_brief: true,
+            judge_repeats: 3,
+            web_access: false,
         }
     }
 }
@@ -253,6 +268,7 @@ impl GoalAdapter {
         let mut spec = BenchSpec::new("goal", root.join("runs"), "native", goal_prompts().checked()?, channel_map(ch(&settings.improver_model)?, ch(&settings.selector_model)?));
         spec.domain_word = "project".into();
         spec.allow_subagents = settings.allow_subagents;
+        spec.improver_brief = settings.improver_brief;
         let a = GoalAdapter { root: root.to_path_buf(), settings, spec: spec.checked()? };
         let base = a.root.join("base");
         if !tree::is_tree(&native::native_surface(), &base) {
@@ -393,6 +409,7 @@ impl BenchmarkAdapter for GoalAdapter {
                 sandbox: self.settings.sandbox.clone(),
                 sandbox_network: self.settings.sandbox_network,
                 mcp_servers: self.settings.mcp_servers.clone(),
+                web_access: self.settings.web_access,
             },
         )
     }
@@ -447,18 +464,49 @@ impl BenchmarkAdapter for GoalAdapter {
             t.prompt, t.rubric, deliverable
         );
         let msgs = vec![client::Msg::User(msg)];
-        let r = client::chat(&conn, &model, &client::ChatReq { system: "You are a strict, fair grader. Output JSON only.", messages: &msgs, tools: &[], max_tokens: 4096 }, Duration::from_secs(300))?;
-        let txt = r.text.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim().to_string();
-        let v: Value = match serde_json::from_str(&txt) {
-            Ok(v) => v,
-            Err(_) => return Ok(None),
-        };
-        let crit = v["criteria"].as_array().cloned().unwrap_or_default();
-        if crit.is_empty() {
-            return Ok(None);
+        // Grade several times and take each criterion's majority vote: one grading of the same
+        // output can swing by a criterion or two, which is larger than most real differences.
+        let n_criteria = t.rubric.lines().filter(|l| !l.trim().is_empty()).count();
+        let repeats = self.settings.judge_repeats.clamp(1, 7);
+        let mut votes: Vec<Vec<Value>> = vec![];
+        let mut last_err = None;
+        for _ in 0..repeats {
+            match client::chat(&conn, &model, &client::ChatReq { system: "You are a strict, fair grader. Output JSON only.", messages: &msgs, tools: &[], max_tokens: 4096 }, Duration::from_secs(300)) {
+                Ok(r) => {
+                    let txt = r.text.trim();
+                    let body = match (txt.find('{'), txt.rfind('}')) {
+                        (Some(a), Some(b)) if b > a => &txt[a..=b],
+                        _ => continue,
+                    };
+                    if let Ok(v) = serde_json::from_str::<Value>(body) {
+                        let crit = v["criteria"].as_array().cloned().unwrap_or_default();
+                        if !crit.is_empty() && (n_criteria == 0 || crit.len() == n_criteria) {
+                            votes.push(crit);
+                        }
+                    }
+                }
+                Err(e) => last_err = Some(e),
+            }
         }
+        if votes.is_empty() {
+            return match last_err {
+                Some(e) => Err(e),
+                None => Ok(None),
+            };
+        }
+        let n = votes.iter().map(|v| v.len()).min().unwrap_or(0);
+        let crit: Vec<Value> = (0..n)
+            .map(|i| {
+                let yes = votes.iter().filter(|v| v[i]["pass"].as_bool().unwrap_or(false)).count();
+                let pass = yes * 2 > votes.len();
+                let why = votes.iter().find(|v| v[i]["pass"].as_bool().unwrap_or(false) == pass).map(|v| v[i]["why"].clone()).unwrap_or(Value::Null);
+                json!({"criterion": votes[0][i]["criterion"], "pass": pass, "why": why, "votes": format!("{yes}/{}", votes.len())})
+            })
+            .collect();
         let passed = crit.iter().filter(|c| c["pass"].as_bool().unwrap_or(false)).count();
-        Ok(Some(json!({"n_passed": passed, "n_criteria": crit.len(), "all_pass": passed == crit.len(), "criteria": crit, "metric": "criteria"})))
+        let per_run: Vec<usize> = votes.iter().map(|v| v.iter().take(n).filter(|c| c["pass"].as_bool().unwrap_or(false)).count()).collect();
+        Ok(Some(json!({"n_passed": passed, "n_criteria": n, "all_pass": passed == n, "criteria": crit, "metric": "criteria",
+            "gradings": votes.len(), "spread": [per_run.iter().min(), per_run.iter().max()]})))
     }
 }
 

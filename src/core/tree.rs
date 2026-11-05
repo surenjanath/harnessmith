@@ -106,7 +106,7 @@ pub fn is_allowed(surface: &SurfaceSpec, rel: &str) -> bool {
 }
 
 /// Built-in tool names a wired tool may not shadow.
-pub const BUILTIN_TOOLS: &[&str] = &["list_files", "read_file", "write_file", "append_file", "edit_file", "delete_file", "finish", "bash", "skill", "task", "remember", "recall"];
+pub const BUILTIN_TOOLS: &[&str] = &["list_files", "read_file", "write_file", "append_file", "edit_file", "delete_file", "finish", "bash", "skill", "task", "remember", "recall", "export_pdf", "web_fetch", "web_search"];
 
 /// Check every `tools/<name>.json`: valid JSON, `name` matching the file, a description, a command,
 /// an object schema, and any `scripts/x.py` it runs present in the harness.

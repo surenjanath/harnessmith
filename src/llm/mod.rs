@@ -5,6 +5,7 @@
 pub mod agent;
 pub mod client;
 pub mod connections;
+pub mod export;
 pub mod approval;
 pub mod gate;
 pub mod mcp;
@@ -13,3 +14,4 @@ pub mod memory;
 pub mod review;
 pub mod sandbox;
 pub mod session;
+pub mod web;

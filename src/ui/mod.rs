@@ -25,12 +25,14 @@
 //!   POST   runs/{id}/cancel               stop after the current model call
 //! ```
 
+pub mod ab;
 pub mod advisor;
 pub mod assist;
 pub mod auth;
 pub mod files;
 pub mod doctor;
 pub mod inbound;
+pub mod report;
 
 use crate::benchmarks::goal::{self, GoalAdapter, GoalSettings};
 use crate::core::spec::BenchmarkAdapter;
@@ -179,6 +181,12 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
         println!("doctor: {}", healed.join("; "));
     }
     load_runs();
+    // Model health survives restarts: restore it now, save it every 30 s.
+    crate::llm::health::load();
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        crate::llm::health::save();
+    });
     inbound::start_scheduler();
     // Background healer: every 10 minutes, apply the safe fixes.
     std::thread::spawn(|| loop {
@@ -196,7 +204,9 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/connections", get(list_connections).post(save_connection))
             .route("/api/connections/test", post(test_connection))
             .route("/api/connections/:name", delete(delete_connection))
+            .route("/api/connections/:name/move_key", post(move_key))
             .route("/api/connections/:name/models", get(list_models))
+            .route("/api/connections/:name/probe", post(probe_models))
             .route("/api/roles", put(save_roles))
             .route("/api/discover", get(discover))
             .route("/api/health", get(health_snapshot))
@@ -208,10 +218,14 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/projects/:p/settings", put(save_settings))
             .route("/api/projects/:p/base", put(save_base))
             .route("/api/projects/:p/goals", post(new_goal))
-            .route("/api/projects/:p/goals/:id", get(get_goal))
+            .route("/api/projects/:p/goals/:id", get(get_goal).delete(report::trash))
+            .route("/api/projects/:p/goals/:id/report", get(report::download))
             .route("/api/projects/:p/goals/:id/rerun", post(rerun_goal))
             .route("/api/projects/:p/goals/:id/judge", post(judge_goal))
-            .route("/api/projects/:p/library", get(get_library))
+            .route("/api/projects/:p/goals/:id/ab", get(ab::get).post(ab::start))
+            .route("/api/projects/:p/goals/:id/shootout", get(ab::get_shootout).post(ab::start_shootout))
+            .route("/api/projects/:p/goals/:id/experiment/cancel", post(ab::cancel))
+            .route("/api/projects/:p/library", get(get_library).post(library_action))
             .route("/api/projects/:p/estimate", get(estimate))
             .route("/api/projects/:p/gate", get(gate_summary))
             .route("/api/projects/:p/results", get(results))
@@ -282,22 +296,80 @@ async fn list_connections() -> ApiResult {
     Ok(Json(json!({
         "connections": reg.connections.iter().map(|c| c.redacted()).collect::<Vec<_>>(),
         "roles": reg.roles,
-        "builtins": ["openai", "anthropic", "gemini", "ollama", "openrouter", "groq", "deepseek", "together", "mistral", "mock"],
+        "builtins": ["openai", "anthropic", "gemini", "ollama", "openrouter", "groq", "deepseek", "together", "mistral", "nvidia", "mock"],
     })))
 }
 
-async fn save_connection(Json(mut c): Json<connections::Connection>) -> ApiResult {
+#[derive(Deserialize)]
+struct SaveConn {
+    #[serde(flatten)]
+    c: connections::Connection,
+    /// The single "API key" field: `VAR=key`, a bare key, or a variable name.
+    #[serde(default)]
+    key_input: String,
+}
+
+/// Apply the API key field: a key goes into .env (never connections.json); a name points at a variable.
+fn apply_key_input(c: &mut connections::Connection, input: &str) -> Result<Option<String>> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let var_re = regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
+    if let Some((var, val)) = input.split_once('=').filter(|(k, v)| var_re.is_match(k.trim()) && !v.trim().is_empty()) {
+        let (var, val) = (var.trim(), val.trim().trim_matches(|ch| ch == '"' || ch == '\''));
+        config_set(var, val)?;
+        c.api_key_env = var.into();
+        c.api_key.clear();
+        return Ok(Some(format!("saved the key to .env as {var}")));
+    }
+    // An all-caps name like NVIDIA_API_KEY points at an existing variable.
+    if regex::Regex::new(r"^[A-Z][A-Z0-9_]*_[A-Z0-9_]+$").unwrap().is_match(input) {
+        c.api_key_env = input.into();
+        c.api_key.clear();
+        return Ok(Some(format!("uses the variable {input}")));
+    }
+    let var = c.default_key_env();
+    config_set(&var, input)?;
+    c.api_key_env = var.clone();
+    c.api_key.clear();
+    Ok(Some(format!("saved the key to .env as {var}")))
+}
+
+fn config_set(var: &str, val: &str) -> Result<()> {
+    crate::config::set_dotenv(var, val).map_err(|e| anyhow::anyhow!("could not write .env: {e}"))?;
+    Ok(())
+}
+
+async fn save_connection(Json(SaveConn { mut c, key_input }): Json<SaveConn>) -> ApiResult {
     let mut reg = connections::load();
     if c.api_key == "••••••" {
         c.api_key = reg.connections.iter().find(|x| x.name == c.name).map(|x| x.api_key.clone()).unwrap_or_default();
     }
     connections::validate(&c)?;
+    let key_note = apply_key_input(&mut c, &key_input)?;
+    let status = c.redacted();
     reg.connections.retain(|x| x.name != c.name);
     reg.connections.push(c);
     reg.connections.sort_by(|a, b| a.name.cmp(&b.name));
     connections::save(&reg)?;
     restrict_perms(&connections::path());
-    Ok(Json(json!({"ok": true})))
+    Ok(Json(json!({"ok": true, "key_note": key_note, "connection": status})))
+}
+
+/// Move a key stored in connections.json into .env, leaving only the variable name in the file.
+async fn move_key(AxPath(name): AxPath<String>) -> ApiResult {
+    let mut reg = connections::load();
+    let c = reg.connections.iter_mut().find(|x| x.name == name).ok_or_else(|| anyhow::anyhow!("no connection named {name:?}"))?;
+    if c.api_key.is_empty() {
+        return Err(anyhow::anyhow!("this connection has no key stored in connections.json").into());
+    }
+    let var = c.default_key_env();
+    config_set(&var, &c.api_key.clone())?;
+    c.api_key_env = var.clone();
+    c.api_key.clear();
+    connections::save(&reg)?;
+    Ok(Json(json!({"ok": true, "env": var})))
 }
 
 fn restrict_perms(p: &Path) {
@@ -338,12 +410,27 @@ async fn list_models(AxPath(name): AxPath<String>) -> ApiResult {
     .await
 }
 
+/// Which models of a hosted catalog answer with this key, and which can call tools.
+async fn probe_models(AxPath(name): AxPath<String>) -> ApiResult {
+    blocking(move || {
+        let (c, _) = connections::resolve(&format!("{name}/_")).map_err(|e| anyhow::anyhow!("{e}"))?;
+        if let Some(why) = c.missing_key() {
+            anyhow::bail!("{why}");
+        }
+        let all = client::list_models(&c)?;
+        let cands: Vec<String> = client::chat_candidates(&all).into_iter().take(16).collect();
+        let rows = util::par_map(cands, 6, |m| client::probe(&c, &m));
+        Ok(json!({"connection": name, "listed": all.len(), "tried": rows.len(), "results": rows}))
+    })
+    .await
+}
+
 async fn health_snapshot() -> ApiResult {
     Ok(Json(json!({"connections": crate::llm::health::snapshot()})))
 }
 
 async fn doctor_checks() -> ApiResult {
-    blocking(|| Ok(json!({"checks": doctor::checks()}))).await
+    blocking(|| Ok(json!({"checks": doctor::checks(), "checked_at": util::now_iso()}))).await
 }
 
 #[derive(Deserialize)]
@@ -405,7 +492,24 @@ fn goal_status(a: &GoalAdapter, id: &str) -> Value {
             }
         }
     }
-    json!({"running": running, "summary": best})
+    // The last finished run's status and why (e.g. "review" with what the output misses).
+    let (last, n_runs) = {
+        let runs = RUNS.lock().unwrap();
+        let mine: Vec<&RunInfo> = runs.values().filter(|r| r.goal_id == id).collect();
+        let last = mine.iter().filter(|r| !r.finished.is_empty()).max_by(|x, y| x.started.cmp(&y.started)).map(|r| {
+            let secs = match (chrono::DateTime::parse_from_rfc3339(&r.started), chrono::DateTime::parse_from_rfc3339(&r.finished)) {
+                (Ok(s), Ok(f)) => Some((f - s).num_seconds()),
+                _ => None,
+            };
+            json!({"id": r.id, "status": r.status, "error": r.error, "started": r.started, "finished": r.finished, "seconds": secs})
+        });
+        (last, mine.len())
+    };
+    // Rubric scores, for the list: the adopted output's and the base attempt's.
+    let judged: Vec<Value> = std::fs::read_to_string(a.task_dir(id).join("judged.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let score = judged.iter().filter(|r| r["is_base_attempt"] != true && r["graded"] == true).filter_map(|r| r["frac"].as_f64()).reduce(f64::max);
+    let base_score = judged.iter().find(|r| r["is_base_attempt"] == true && r["graded"] == true).and_then(|r| r["frac"].as_f64());
+    json!({"running": running, "summary": best, "last_run": last, "runs": n_runs, "score": score, "base_score": base_score})
 }
 
 async fn get_project(AxPath(p): AxPath<String>) -> ApiResult {
@@ -421,11 +525,8 @@ async fn get_project(AxPath(p): AxPath<String>) -> ApiResult {
             })
             .collect();
         let base = tree::read_tree(&a.surface(), &a.base_harness()?, None);
-        // Starter wired tools from the default harness, so older projects can add them.
-        let starter: std::collections::BTreeMap<String, String> = crate::substrate::native::default_base_tree()
-            .into_iter()
-            .filter(|(k, _)| k.starts_with("tools/") || k == "scripts/csv_profile.py")
-            .collect();
+        // Optional starter wired tools a project can add from the Base harness tab.
+        let starter: std::collections::BTreeMap<String, String> = crate::substrate::native::starter_tools_tree().into_iter().collect();
         Ok(json!({"name": p, "settings": a.settings, "goals": goals, "base": base, "surface": a.surface().always_on, "starter_tools": starter}))
     })
     .await
@@ -560,12 +661,26 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
             }
             if !cancelled && status != "failed" && a.settings.auto_judge && !a.settings.judge_model.trim().is_empty() && a.load_task(&gid).map(|t| !t.rubric.trim().is_empty()).unwrap_or(false) {
                 match judge_goal_sync(&a, &gid) {
-                    Ok(rows) => crate::say!("judged against the rubric: {}", rows.iter().map(|r| format!("{} {}", r["label"].as_str().unwrap_or(""), r["frac"].as_f64().map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_else(|| "—".into()))).collect::<Vec<_>>().join(" · ")),
+                    Ok(rows) => crate::say!("judged against the rubric: {}", rows.iter().map(|r| format!("{} {}", if r["is_base_attempt"] == true { "base attempt".to_string() } else { format!("adopted {}", r["label"].as_str().unwrap_or("")) }, r["frac"].as_f64().map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_else(|| "—".into()))).collect::<Vec<_>>().join(" · ")),
                     Err(e) => crate::say!("! auto-judge failed: {e}"),
+                }
+            }
+            // An "ok" run whose adopted output misses what the goal asked for needs review.
+            let mut status = status;
+            if !cancelled && status == "done" {
+                let warns = run_warnings(&a, &gid, res.as_ref().ok());
+                if !warns.is_empty() {
+                    crate::say!("! needs review: {}", warns.join("; "));
+                    status = "review".into();
+                    set_status(&rid, |r| {
+                        r.status = "review".into();
+                        r.error = warns.join("; ");
+                    });
                 }
             }
             deliver_result(&rid, &status, &errs, res.as_ref().ok());
             match res {
+                Ok(_) if status == "review" => crate::say!("Finished: needs review"),
                 Ok(v) => crate::say!("Finished: {}", v["status"]),
                 Err(e) => crate::say!("FAILED: {e}"),
             }
@@ -573,6 +688,32 @@ pub(crate) fn start_run_with(project: &str, goal_id: &str, k: usize, modes: Vec<
         }
     });
     Ok(id)
+}
+
+/// Why a finished run's adopted output should not count as done: the deliverable review's
+/// open problems (missing file types, empty or cut-off files) and a low rubric score.
+fn run_warnings(a: &GoalAdapter, gid: &str, v: Option<&Value>) -> Vec<String> {
+    let mut out = vec![];
+    let prompt = a.load_task(gid).map(|t| t.prompt).unwrap_or_default();
+    if let Some(m) = v.and_then(|v| v["deliverables"].as_object()) {
+        for d in m.values() {
+            if let Some(rd) = d["run_dir"].as_str() {
+                let dir = PathBuf::from(rd).join("workspace/output");
+                if dir.is_dir() {
+                    out.extend(crate::llm::review::review(&prompt, &dir));
+                }
+            }
+        }
+    }
+    let judged: Vec<Value> = std::fs::read_to_string(a.task_dir(gid).join("judged.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if let Some(f) = judged.iter().filter(|r| r["is_base_attempt"] != true && r["graded"] == true).filter_map(|r| r["frac"].as_f64()).reduce(f64::max) {
+        if f < 0.5 {
+            out.push(format!("the judge scored the adopted output {:.0}% against the rubric", f * 100.0));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Send the result where the run's reply points, and to HARNESS2_NOTIFY_URL.
@@ -1003,7 +1144,7 @@ async fn get_goal(AxPath((p, id)): AxPath<(String, String)>) -> ApiResult {
         if let Ok(s) = std::fs::read_to_string(a.task_dir(&id).join("judged.json")) {
             judged = serde_json::from_str(&s).unwrap_or(json!(null));
         }
-        let runs: Vec<Value> = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id).rev().map(|r| json!({"id": r.id, "status": r.status, "started": r.started, "k": r.k, "modes": r.modes})).collect();
+        let runs: Vec<Value> = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id).rev().map(|r| json!({"id": r.id, "status": r.status, "started": r.started, "finished": r.finished, "error": r.error, "k": r.k, "modes": r.modes, "attempts": r.attempts, "source": r.source})).collect();
         Ok(json!({"task": t, "base": base, "namespaces": namespaces, "state": goal_status(&a, &id), "judged": judged, "runs": runs}))
     })
     .await
@@ -1037,7 +1178,17 @@ pub(crate) fn judge_goal_sync(a: &GoalAdapter, id: &str) -> Result<Vec<Value>> {
     }
     let mut rows: Vec<Value> = judge::judge_selections(a, &sels, 4).iter().map(|r| r.to_json()).collect();
     if let Some((label, run_id, dir)) = base.filter(|b| b.2.is_dir()) {
-        let mut r = judge::judge_one(a, id, "base", 1, &label, &run_id, &dir, true, "").to_json();
+        // When the adopted output IS the base attempt, reuse its grade: grading the same
+        // output twice only measures judge noise and shows a fake win or loss.
+        let same = rows.iter().find(|r| r["run_id"].as_str() == Some(run_id.as_str()) && r["graded"] == true).cloned();
+        let mut r = match same {
+            Some(mut r) => {
+                r["mode"] = json!("base");
+                r["same_as_adopted"] = json!(true);
+                r
+            }
+            None => judge::judge_one(a, id, "base", 1, &label, &run_id, &dir, true, "").to_json(),
+        };
         r["is_base_attempt"] = json!(true);
         rows.push(r);
     }
@@ -1085,7 +1236,10 @@ async fn results(AxPath(p): AxPath<String>) -> ApiResult {
                     minutes = Some((f - s).num_seconds() as f64 / 60.0);
                 }
             }
+            // The adopted output is the base attempt: one output, so no win or loss.
+            let adopted_frac = if chosen_is_base && base_frac.is_some() { base_frac } else { adopted_frac };
             let verdict = match (base_frac, adopted_frac) {
+                (Some(_), Some(_)) if chosen_is_base => "kept",
                 (Some(b), Some(x)) if x > b + 1e-9 => "win",
                 (Some(b), Some(x)) if x < b - 1e-9 => "loss",
                 (Some(_), Some(_)) => "tie",
@@ -1114,9 +1268,9 @@ async fn estimate(AxPath(p): AxPath<String>, Query(q): Query<EstQ>) -> ApiResult
         let k = q.k.unwrap_or(1).max(1);
         let modes = if q.mode.as_deref() == Some("both") { 2 } else { 1 };
         let n_runs = k + modes * 3 * k;
-        let n_sessions = modes * (3 * k + if k > 1 { 1 } else { 0 } + 1);
+        let n_sessions = modes * (3 * k + if k > 1 || a.settings.select_guard { 1 } else { 0 } + 1);
         let (mut roll, mut sess, mut roll_tok, mut sess_tok, mut runs_seen) = (vec![], vec![], vec![], vec![], 0);
-        let ids: Vec<String> = RUNS.lock().unwrap().values().filter(|r| r.project == p && r.status == "done").map(|r| r.id.clone()).collect();
+        let ids: Vec<String> = RUNS.lock().unwrap().values().filter(|r| r.project == p && matches!(r.status.as_str(), "done" | "review")).map(|r| r.id.clone()).collect();
         for id in ids {
             runs_seen += 1;
             let evs = hlog::named(&id).events_from(0);
@@ -1175,8 +1329,16 @@ async fn estimate(AxPath(p): AxPath<String>, Query(q): Query<EstQ>) -> ApiResult
         let rt = mean(&roll_tok, 20_000.0);
         let st = mean(&sess_tok, 30_000.0);
         // ~92% of tokens are prompt tokens in these sessions.
-        let usd = n_runs as f64 * rt * (0.92 * si + 0.08 * so) / 1e6 + n_sessions as f64 * st * (0.92 * ii + 0.08 * io) / 1e6;
-        Ok(json!({"runs": n_runs, "sessions": n_sessions, "minutes": (minutes * 10.0).round() / 10.0, "usd": (usd * 1000.0).round() / 1000.0, "basis": basis, "tokens": (n_runs as f64 * rt + n_sessions as f64 * st).round()}))
+        let solver_usd = n_runs as f64 * rt * (0.92 * si + 0.08 * so) / 1e6;
+        let improver_usd = n_sessions as f64 * st * (0.92 * ii + 0.08 * io) / 1e6;
+        let usd = solver_usd + improver_usd;
+        let r3 = |x: f64| (x * 1000.0).round() / 1000.0;
+        // Per role: what it runs, its share of time and money (selector sessions are priced as improver ones).
+        let roles = json!([
+            {"role": "solver", "model": a.settings.solver_model, "calls": n_runs, "minutes": r3((k as f64 * roll_s + (n_runs - k) as f64 * roll_s / width.min(2.0)) / 60.0), "tokens": (n_runs as f64 * rt).round(), "usd": r3(solver_usd)},
+            {"role": "improver + selector", "model": a.settings.improver_model, "calls": n_sessions, "minutes": r3(n_sessions as f64 * sess_s / width.min(2.0) / 60.0), "tokens": (n_sessions as f64 * st).round(), "usd": r3(improver_usd)},
+        ]);
+        Ok(json!({"runs": n_runs, "sessions": n_sessions, "minutes": (minutes * 10.0).round() / 10.0, "usd": r3(usd), "basis": basis, "tokens": (n_runs as f64 * rt + n_sessions as f64 * st).round(), "roles": roles}))
     })
     .await
 }
@@ -1227,12 +1389,69 @@ async fn get_library(AxPath(p): AxPath<String>) -> ApiResult {
         let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
         let root = a.root.join("runs/library");
         let mut entries = vec![];
+        let tasks = a.all_tasks();
+        let field = |body: &str, name: &str| -> String {
+            body.lines().find_map(|l| l.trim().strip_prefix(&format!("- **{name}**:")).map(|v| v.trim().to_string())).unwrap_or_default()
+        };
         for f in util::files_sorted(&root) {
-            if f.file_name().map(|n| n == "EXPERIENCE.md").unwrap_or(false) {
-                entries.push(json!({"path": util::rel(&root, &f), "body": util::read_lossy(&f).unwrap_or_default()}));
+            let rel = util::rel(&root, &f);
+            if !f.file_name().map(|n| n == "EXPERIENCE.md").unwrap_or(false) || rel.contains("/retired/") {
+                continue;
             }
+            let body = util::read_lossy(&f).unwrap_or_default();
+            let parts: Vec<&str> = rel.split('/').collect();
+            let hi = parts.iter().position(|p| *p == "harnesses").unwrap_or(0);
+            let domain = if hi > 0 { parts[hi - 1].to_string() } else { String::new() };
+            let slug = parts.get(hi + 1).map(|s| s.to_string()).unwrap_or_default();
+            let task = tasks.iter().find(|t| crate::core::library::slug(&t.id) == slug);
+            // Later goals in the same domain had this lesson in their improvers' evidence.
+            let later = task.map(|t| tasks.iter().filter(|o| o.created_at > t.created_at && crate::core::library::domain_dir(&o.domain) == domain).count()).unwrap_or(0);
+            let verdicts: Vec<String> = body.lines().filter_map(|l| l.trim().strip_prefix("verdict:").map(|v| v.trim().to_string())).collect();
+            entries.push(json!({"path": rel, "body": body, "domain": domain, "goal": task.map(|t| util::take_chars(&t.prompt, 140)), "created_at": task.map(|t| t.created_at.clone()),
+                "cue": field(&body, "cue"), "lesson": field(&body, "lesson"), "evidence": field(&body, "evidence"), "confidence": field(&body, "confidence"),
+                "verdicts": verdicts, "pinned": f.parent().map(|d| d.join("PINNED").is_file()).unwrap_or(false), "later_goals": later}));
         }
         Ok(json!({"entries": entries}))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct LibAction {
+    path: String,
+    action: String,
+}
+
+/// Pin, unpin or retire one library lesson (retired entries move aside; the index is rebuilt).
+async fn library_action(AxPath(p): AxPath<String>, Json(b): Json<LibAction>) -> ApiResult {
+    blocking(move || {
+        let a = GoalAdapter::open(&goal::project_dir(&p)?)?;
+        let root = a.root.join("runs/library");
+        if b.path.contains("..") || !b.path.ends_with("/EXPERIENCE.md") {
+            anyhow::bail!("bad library path");
+        }
+        let entry = root.join(&b.path).parent().map(Path::to_path_buf).ok_or_else(|| anyhow::anyhow!("bad library path"))?;
+        let harnesses = entry.parent().ok_or_else(|| anyhow::anyhow!("bad library path"))?.to_path_buf();
+        let domain_dir = harnesses.parent().ok_or_else(|| anyhow::anyhow!("bad library path"))?.to_path_buf();
+        if !entry.is_dir() || harnesses.file_name().map(|n| n != "harnesses").unwrap_or(true) {
+            anyhow::bail!("no such library entry");
+        }
+        match b.action.as_str() {
+            "pin" => util::write(&entry.join("PINNED"), "pinned from the UI\n")?,
+            "unpin" => {
+                let _ = std::fs::remove_file(entry.join("PINNED"));
+            }
+            "retire" => {
+                let dest = domain_dir.join("retired").join(entry.file_name().unwrap());
+                std::fs::create_dir_all(dest.parent().unwrap())?;
+                util::rmtree(&dest);
+                std::fs::rename(&entry, &dest)?;
+            }
+            other => anyhow::bail!("unknown action {other:?}"),
+        }
+        let domain = domain_dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        crate::core::library::Library::new(domain_dir.parent().unwrap().to_path_buf(), &domain, a.surface()).rebuild_index()?;
+        Ok(json!({"ok": true}))
     })
     .await
 }

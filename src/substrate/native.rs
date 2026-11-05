@@ -65,14 +65,49 @@ pub fn default_base_tree() -> tree::Tree {
     );
     t.insert("LongTermMEMORY.md".into(), String::new());
     t.insert(
+        "tool_descriptions/tool_guidance.md".into(),
+        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace, e.g. `python3 scripts/<name>.py`.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n- Wired tools (listed under WIRED TOOLS) are called directly; prefer them over hand-rolled shell steps.\n".into(),
+    );
+    t
+}
+
+/// What the machine can run, probed once per process, so the solver does not spend its steps
+/// discovering that pandoc or reportlab is missing.
+pub fn environment_note() -> String {
+    static NOTE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NOTE.get_or_init(|| {
+        let bins = ["python3", "node", "pandoc", "pdflatex", "xelatex", "wkhtmltopdf", "soffice", "chromium", "google-chrome"];
+        let have = |b: &str| std::process::Command::new("bash").arg("-c").arg(format!("command -v {b}")).output().map(|o| o.status.success()).unwrap_or(false);
+        let found: Vec<&str> = bins.iter().copied().filter(|b| have(b)).collect();
+        let missing: Vec<&str> = bins.iter().copied().filter(|b| !found.contains(b)).collect();
+        let mods = ["reportlab", "fpdf", "weasyprint", "markdown", "docx", "openpyxl", "pandas", "numpy", "matplotlib"];
+        let py = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(format!("import importlib.util as u;print(' '.join(m for m in {mods:?} if u.find_spec(m)))"))
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        format!(
+            "\n\n---\n\n# ENVIRONMENT\nCommands available: {}. Not installed: {}.\nPython packages available: {}. Do not try to install packages: assume only what is listed here.\nTo make a PDF, write the content as Markdown or HTML, then call export_pdf on it. If the goal asks for another format nothing here can produce, write the content in the closest format you can produce properly (HTML or Markdown) and say so plainly in output/answer.md. Never write a binary format such as .pdf or .docx as plain text.",
+            if found.is_empty() { "(none)".into() } else { found.join(", ") },
+            if missing.is_empty() { "(nothing checked is missing)".into() } else { missing.join(", ") },
+            if py.is_empty() { "standard library only".into() } else { py },
+        )
+    })
+    .clone()
+}
+
+/// Optional starter wired tools, offered in the UI. Not in the default base: a data-only
+/// tool in every harness pulls small models toward CSV work on unrelated goals.
+pub fn starter_tools_tree() -> tree::Tree {
+    let mut t = tree::Tree::new();
+    t.insert(
         "tools/csv_profile.json".into(),
         "{\n  \"name\": \"csv_profile\",\n  \"description\": \"Profile a CSV file before analysing it: column names, inferred types, row count, nulls, and min/max/mean/sum for numeric columns. Call it first on any CSV input instead of reading the raw rows.\",\n  \"parameters\": {\n    \"type\": \"object\",\n    \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"CSV path relative to the workspace\"}},\n    \"required\": [\"path\"]\n  },\n  \"command\": \"python3 scripts/csv_profile.py\",\n  \"timeout_s\": 60\n}\n".into(),
     );
     t.insert("scripts/csv_profile.py".into(), CSV_PROFILE.into());
-    t.insert(
-        "tool_descriptions/tool_guidance.md".into(),
-        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace, e.g. `python3 scripts/<name>.py`.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n- Wired tools (listed under WIRED TOOLS) are called directly; prefer them over hand-rolled shell steps.\n".into(),
-    );
     t
 }
 
@@ -160,6 +195,7 @@ pub struct SolveOpts {
     pub sandbox_network: bool,
     /// MCP servers whose tools the solver may call.
     pub mcp_servers: Vec<crate::llm::mcp::ServerCfg>,
+    pub web_access: bool,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -202,6 +238,13 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
             cfg.system.push_str("\n\n---\n\n# NETWORK\nThis workspace has NO internet access. Do not try to download or install anything (wget, curl, pip install, git clone): it cannot work. Use the input files and your own knowledge, and say which facts a reader should verify.");
         }
         cfg.sandbox = Some(sb);
+    }
+    if cfg.allow_shell {
+        cfg.system.push_str(&environment_note());
+    }
+    cfg.web = o.web_access;
+    if o.web_access {
+        cfg.system.push_str(&format!("\n\nWEB: you can read pages with web_fetch{}. Cite every outside fact with the URL you read it at; never cite a source you did not open.", if crate::llm::web::search_backend().is_some() { " and search with web_search" } else { "" }));
     }
     cfg.gate = Some(gate);
     if o.mcp_servers.iter().any(|s| s.enabled) {
@@ -286,8 +329,10 @@ mod wired_tool_tests {
     use super::*;
 
     #[test]
-    fn default_base_validates_with_its_wired_tool() {
-        let t = default_base_tree();
+    fn starter_tool_validates_and_is_not_in_the_default_base() {
+        let mut t = default_base_tree();
+        assert!(!t.contains_key("tools/csv_profile.json"), "the default base ships no task-specific tools");
+        t.extend(starter_tools_tree());
         let census = tree::validate(&native_surface(), &t, true, None, &tree::reserved_default()).unwrap();
         assert_eq!(census["tools"], 1);
         assert!(tree::is_allowed(&native_surface(), "tools/csv_profile.json"));
@@ -297,6 +342,7 @@ mod wired_tool_tests {
     #[test]
     fn bad_wired_tools_are_rejected_with_reasons() {
         let mut t = default_base_tree();
+        t.extend(starter_tools_tree());
         t.insert("tools/bash.json".into(), r#"{"name":"bash","description":"x","command":"true"}"#.into());
         t.insert("tools/nodesc.json".into(), r#"{"name":"other","command":"python3 scripts/missing.py"}"#.into());
         t.insert("tools/broken.json".into(), "{not json".into());

@@ -34,12 +34,17 @@ pub struct ContextTree {
     pub deliverables_mode: String,
     pub source_files: usize,
     pub decisions: usize,
+    pub brief: bool,
 }
 
 impl ContextTree {
     /// The evidence-layout listing that goes in the mission; only mentions what exists.
     pub fn layout(&self) -> String {
-        let mut lines = vec!["context/task.md                  the task as the agent received it".to_string()];
+        let mut lines = vec![];
+        if self.brief {
+            lines.push("context/brief.md                READ FIRST: a mechanical digest of every rollout (failures, repeats, missing files)".to_string());
+        }
+        lines.push("context/task.md                  the task as the agent received it".to_string());
         if self.source_files > 0 {
             lines.push("context/source/                 task source materials".into());
         }
@@ -128,6 +133,18 @@ pub fn build(
         n_h = copy_component_tree(h, &dest.join("harness"))?;
     }
     let got_p = write_pool(dest, pool, adapter, trunc, names_only)?;
+    let mut brief = false;
+    if adapter.spec().improver_brief {
+        let mut all: Vec<RunView> = rollouts.to_vec();
+        all.extend(pool.iter().filter_map(|(l, _, r)| r.clone().map(|mut r| {
+            r.label = format!("{l} (candidate)");
+            r
+        })));
+        if !all.is_empty() {
+            util::write(&dest.join("brief.md"), super::brief::build(&adapter.task_prompt(task_id)?, &all))?;
+            brief = true;
+        }
+    }
     let mut lib = false;
     if let Some(l) = library_dir {
         if l.is_dir() && std::fs::read_dir(l).map(|mut d| d.next().is_some()).unwrap_or(false) {
@@ -156,6 +173,7 @@ pub fn build(
         deliverables_mode: if names_only { "names" } else { "contents" }.into(),
         source_files,
         decisions: decisions.map(|d| d.len()).unwrap_or(0),
+        brief,
     })
 }
 

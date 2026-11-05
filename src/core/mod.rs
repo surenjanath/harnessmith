@@ -3,6 +3,7 @@
 //! Per-task harness adaptation over a c1..c8 component tree, two recursion modes at an
 //! identical budget, blind answer-free selection, and a per-domain experience library.
 
+pub mod brief;
 pub mod context;
 pub mod judge;
 pub mod ledger;

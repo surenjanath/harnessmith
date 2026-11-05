@@ -161,7 +161,10 @@ impl Library {
             "Each entry is an earlier task in THIS domain whose harness was chosen, stored with its FULL component tree and why it was picked. Browse this index, then open the entries that look relevant to the matter in front of you.".into(),
             String::new(),
         ];
-        let names = self.entries();
+        let mut names = self.entries();
+        // Lessons the operator pinned as reliable come first.
+        let pinned = |n: &String| self.dir().join("harnesses").join(n).join("PINNED").is_file();
+        names.sort_by_key(|n| !pinned(n));
         if names.is_empty() {
             rows.push("_(empty — this is the first task in this domain)_".into());
         }
@@ -170,6 +173,9 @@ impl Library {
             let cue = field(&ed.join("EXPERIENCE.md"), "cue");
             let t = tree::read_tree(&self.surface, &ed.join("harness"), None);
             rows.push(format!("## `harnesses/{name}/`"));
+            if ed.join("PINNED").is_file() {
+                rows.push("- pinned:  the operator marked this lesson as reliable".into());
+            }
             rows.push(format!("- harness: `harnesses/{name}/harness/` — {}", inventory(&self.surface, &t)));
             rows.push(format!("- why:     `harnesses/{name}/EXPERIENCE.md`"));
             if !cue.is_empty() {

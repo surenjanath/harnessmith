@@ -1,0 +1,567 @@
+{
+  "appName": "Harnessmith",
+  "tagline": "Give an agent a goal. Watch it improve its own harness.",
+  "platform": "web",
+  "brand": {
+    "primary": "#2563eb",
+    "primaryLight": "#4f8ff0",
+    "primaryDark": "#1d4ed8",
+    "gold": "#b26a00",
+    "silver": "#8a929d",
+    "platinum": "#5b6470",
+    "bg": "#f5f6f8",
+    "surface": "#ffffff",
+    "textPrimary": "#16191d",
+    "textSecondary": "#5b6470",
+    "success": "#188a55"
+  },
+  "video": {
+    "captions": true,
+    "motion": true,
+    "transition": "slide",
+    "logo": "pill"
+  },
+  "scenes": [
+    {
+      "id": "intro",
+      "image": null,
+      "eyebrow": "HARNESSMITH",
+      "title": "Agents that improve their own harness",
+      "narration": "This is Harnessmith. You give it a goal, it runs an agent on it, and then it improves the agent's harness for that goal: the instructions, rules and tools around the model. Here is a quick tour.",
+      "seconds": 13
+    },
+    {
+      "id": "overview",
+      "image": "01_overview.png",
+      "eyebrow": "OVERVIEW",
+      "title": "The whole system on one page",
+      "url": "127.0.0.1:8765 · Overview",
+      "narration": "The Overview shows the whole system on one page. Every goal passes a gate, waits in a queue, and gets its own run slot. Inside the slot, the solver attempts the goal, an improver proposes and composes edits, a blind selector picks the best output, and a lesson is saved for next time.",
+      "seconds": 18,
+      "focus": [
+        {
+          "rect": [
+            0.21,
+            0.67,
+            0.11,
+            0.12
+          ],
+          "label": "The gate checks every goal",
+          "cue": "passes a gate"
+        },
+        {
+          "rect": [
+            0.33,
+            0.67,
+            0.11,
+            0.12
+          ],
+          "label": "Waits in the queue",
+          "cue": "waits in a queue"
+        },
+        {
+          "rect": [
+            0.46,
+            0.59,
+            0.44,
+            0.11
+          ],
+          "label": "One run slot per goal",
+          "cue": "its own run slot"
+        },
+        {
+          "rect": [
+            0.47,
+            0.62,
+            0.43,
+            0.06
+          ],
+          "label": "Solve, propose, compose, select, learn",
+          "cue": "the solver attempts the goal"
+        }
+      ]
+    },
+    {
+      "id": "run-goal",
+      "image": "02_run.png",
+      "eyebrow": "RUN A GOAL",
+      "title": "Describe what you want",
+      "url": "127.0.0.1:8765 · Run a goal",
+      "narration": "To start, describe what you want. Templates give you a goal, grading criteria and a domain to begin from. Below, the estimate shows how many solver runs and improver sessions the goal will use, with time and tokens for each role. Press Start, and the run is queued.",
+      "seconds": 17,
+      "focus": [
+        {
+          "rect": [
+            0.06,
+            0.1,
+            0.3,
+            0.05
+          ],
+          "label": "Start from a template",
+          "cue": "Templates give you",
+          "cursor": true
+        },
+        {
+          "rect": [
+            0.06,
+            0.19,
+            0.87,
+            0.15
+          ],
+          "label": "Goal, criteria and domain filled",
+          "cue": "grading criteria and a domain"
+        },
+        {
+          "rect": [
+            0.06,
+            0.57,
+            0.87,
+            0.06
+          ],
+          "label": "Runs, time and tokens per role",
+          "cue": "the estimate shows"
+        },
+        {
+          "rect": [
+            0.06,
+            0.7,
+            0.07,
+            0.05
+          ],
+          "label": "Start queues the run",
+          "cue": "Press Start",
+          "cursor": true
+        }
+      ],
+      "clip": "c_template.mp4",
+      "clipCue": "Templates give you"
+    },
+    {
+      "id": "models",
+      "image": "03_models.png",
+      "eyebrow": "MODELS",
+      "title": "What runs best on this machine",
+      "url": "127.0.0.1:8765 · Models",
+      "narration": "The Models tab starts with an advisor. It reads your hardware, recommends a model for each role, and offers one-click setups: all local, a local solver with a hosted improver, or all NVIDIA.",
+      "seconds": 13,
+      "focus": [
+        {
+          "rect": [
+            0.07,
+            0.19,
+            0.87,
+            0.12
+          ],
+          "label": "Your hardware, read automatically",
+          "cue": "It reads your hardware"
+        },
+        {
+          "rect": [
+            0.06,
+            0.36,
+            0.5,
+            0.16
+          ],
+          "label": "A model for each role",
+          "cue": "recommends a model for each role"
+        },
+        {
+          "rect": [
+            0.06,
+            0.6,
+            0.78,
+            0.4
+          ],
+          "label": "One-click setups",
+          "cue": "one-click setups",
+          "zoom": 1.15
+        }
+      ]
+    },
+    {
+      "id": "connections",
+      "image": "04_connections.png",
+      "eyebrow": "MODELS",
+      "title": "Connections and keys",
+      "url": "127.0.0.1:8765 · Models",
+      "narration": "Connections are where models come from. Paste a key as a name, an equals sign, and the key, and it is saved to a private dot env file. The form never shows it again; it only says whether the key is set. Save and test checks that the model really answers.",
+      "seconds": 17,
+      "focus": [
+        {
+          "rect": [
+            0.06,
+            0.5,
+            0.42,
+            0.09
+          ],
+          "label": "Your saved connections",
+          "cue": "Connections are where models come from"
+        },
+        {
+          "rect": [
+            0.52,
+            0.62,
+            0.42,
+            0.1
+          ],
+          "label": "NAME=key goes to .env",
+          "cue": "Paste a key"
+        },
+        {
+          "rect": [
+            0.52,
+            0.67,
+            0.42,
+            0.04
+          ],
+          "label": "Only says whether it is set",
+          "cue": "it only says whether the key is set"
+        },
+        {
+          "rect": [
+            0.515,
+            0.875,
+            0.08,
+            0.045
+          ],
+          "label": "Save and test in one click",
+          "cue": "Save and test checks",
+          "cursor": true
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "image": "05_history.png",
+      "eyebrow": "HISTORY",
+      "title": "Every goal, searchable",
+      "url": "127.0.0.1:8765 · History",
+      "narration": "History lists every goal by day. Search and filters narrow the list, and each goal shows its status, score and run time. Open one, and a summary shows the last run, the score against the base attempt, and how long it took.",
+      "seconds": 15,
+      "focus": [
+        {
+          "rect": [
+            0.06,
+            0.3,
+            0.25,
+            0.49
+          ],
+          "label": "Goals grouped by day",
+          "cue": "History lists every goal by day"
+        },
+        {
+          "rect": [
+            0.06,
+            0.19,
+            0.25,
+            0.1
+          ],
+          "label": "Search and filter",
+          "cue": "Search and filters",
+          "cursor": true
+        },
+        {
+          "rect": [
+            0.35,
+            0.26,
+            0.585,
+            0.1
+          ],
+          "label": "Last run, score, time",
+          "cue": "a summary shows the last run"
+        }
+      ],
+      "clip": "c_history_search.mp4",
+      "clipCue": "Search and filters"
+    },
+    {
+      "id": "journey",
+      "image": "06_map.png",
+      "eyebrow": "HISTORY",
+      "title": "How the run moved",
+      "url": "127.0.0.1:8765 · History",
+      "narration": "The journey map shows how the run moved through the pipeline: the base run, two proposals, the composed harness, and the selection. Each box shows its model, steps and time, and self-heals are marked.",
+      "seconds": 14,
+      "focus": [
+        {
+          "rect": [
+            0.35,
+            0.35,
+            0.58,
+            0.42
+          ],
+          "label": "The run, stage by stage",
+          "cue": "how the run moved through the pipeline"
+        },
+        {
+          "rect": [
+            0.53,
+            0.42,
+            0.13,
+            0.34
+          ],
+          "label": "Two proposals: how and what",
+          "cue": "two proposals"
+        },
+        {
+          "rect": [
+            0.7,
+            0.5,
+            0.13,
+            0.18
+          ],
+          "label": "The composed harness",
+          "cue": "the composed harness"
+        },
+        {
+          "rect": [
+            0.35,
+            0.24,
+            0.585,
+            0.08
+          ],
+          "label": "Self-heals are marked",
+          "cue": "self-heals are marked"
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "image": "07_output.png",
+      "eyebrow": "HISTORY",
+      "title": "The deliverable, rendered",
+      "url": "127.0.0.1:8765 · History",
+      "narration": "The output tab renders the deliverable. This report still has placeholders like Your Name, which the review now catches, so a run like this ends as needs review instead of done.",
+      "seconds": 13,
+      "focus": [
+        {
+          "rect": [
+            0.35,
+            0.22,
+            0.585,
+            0.7
+          ],
+          "label": "The report, rendered",
+          "cue": "renders the deliverable",
+          "zoom": 1.05
+        },
+        {
+          "rect": [
+            0.36,
+            0.3,
+            0.22,
+            0.08
+          ],
+          "label": "Placeholders left in",
+          "cue": "placeholders like Your Name"
+        }
+      ]
+    },
+    {
+      "id": "compare",
+      "image": "08_compare.png",
+      "eyebrow": "HISTORY",
+      "title": "Base beside adopted",
+      "url": "127.0.0.1:8765 · History",
+      "narration": "Compare puts the first base attempt beside the adopted output, with changed lines highlighted. From a goal you can also run an A/B test, a model shootout, or download a report.",
+      "seconds": 13,
+      "focus": [
+        {
+          "rect": [
+            0.35,
+            0.22,
+            0.295,
+            0.66
+          ],
+          "label": "First base attempt",
+          "cue": "the first base attempt"
+        },
+        {
+          "rect": [
+            0.645,
+            0.22,
+            0.295,
+            0.66
+          ],
+          "label": "Adopted output",
+          "cue": "the adopted output"
+        },
+        {
+          "rect": [
+            0.35,
+            0.13,
+            0.4,
+            0.04
+          ],
+          "label": "Output, files, compare, why…",
+          "cue": "From a goal"
+        }
+      ]
+    },
+    {
+      "id": "results",
+      "image": "09_results.png",
+      "eyebrow": "RESULTS",
+      "title": "Is adaptation helping?",
+      "url": "127.0.0.1:8765 · Results",
+      "narration": "Results answers one question: is adapting the harness helping? It shows wins, the average lift in points, how often the base attempt was kept, and the spend and time for each goal.",
+      "seconds": 13,
+      "focus": [
+        {
+          "rect": [
+            0.065,
+            0.18,
+            0.87,
+            0.12
+          ],
+          "label": "Wins, lift, base kept, spend, time",
+          "cue": "It shows wins"
+        },
+        {
+          "rect": [
+            0.06,
+            0.32,
+            0.26,
+            0.3
+          ],
+          "label": "Base vs adopted per goal",
+          "cue": "the average lift in points"
+        },
+        {
+          "rect": [
+            0.065,
+            0.65,
+            0.87,
+            0.35
+          ],
+          "label": "Every goal, scored",
+          "cue": "the spend and time for each goal"
+        }
+      ]
+    },
+    {
+      "id": "library",
+      "image": "10_library.png",
+      "eyebrow": "LIBRARY",
+      "title": "Lessons for later goals",
+      "url": "127.0.0.1:8765 · Library",
+      "narration": "Each adopted harness leaves a lesson in the library. Later goals in the same domain read these lessons first. Pin a lesson you trust, or retire one that no longer helps.",
+      "seconds": 12,
+      "focus": [
+        {
+          "rect": [
+            0.066,
+            0.22,
+            0.87,
+            0.23
+          ],
+          "label": "A lesson from a past goal",
+          "cue": "leaves a lesson in the library"
+        },
+        {
+          "rect": [
+            0.84,
+            0.23,
+            0.09,
+            0.04
+          ],
+          "label": "Pin or retire",
+          "cue": "Pin a lesson you trust",
+          "cursor": true
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "image": "11_tools.png",
+      "eyebrow": "TOOLS",
+      "title": "What the agent can call",
+      "url": "127.0.0.1:8765 · Base harness",
+      "narration": "The base harness tab lists the tools the agent can call, including export PDF, which turns Markdown into a real PDF, and optional web tools for reading and searching pages.",
+      "seconds": 12,
+      "focus": [
+        {
+          "rect": [
+            0.06,
+            0.19,
+            0.87,
+            0.38
+          ],
+          "label": "Built-in tools",
+          "cue": "the tools the agent can call"
+        },
+        {
+          "rect": [
+            0.06,
+            0.385,
+            0.87,
+            0.032
+          ],
+          "label": "export_pdf: a real PDF",
+          "cue": "including export PDF"
+        },
+        {
+          "rect": [
+            0.06,
+            0.51,
+            0.87,
+            0.06
+          ],
+          "label": "Optional web tools",
+          "cue": "optional web tools"
+        }
+      ]
+    },
+    {
+      "id": "doctor",
+      "image": "12_doctor.png",
+      "eyebrow": "DOCTOR",
+      "title": "Checks and safe fixes",
+      "url": "127.0.0.1:8765 · Doctor",
+      "narration": "The Doctor checks everything around a run: models and their keys, recent runs, projects, storage and tools. It leads with what needs attention, each with a next step, and fixes what it safely can on its own.",
+      "seconds": 14,
+      "focus": [
+        {
+          "rect": [
+            0.06,
+            0.23,
+            0.87,
+            0.08
+          ],
+          "label": "Status at a glance",
+          "cue": "The Doctor checks everything"
+        },
+        {
+          "rect": [
+            0.06,
+            0.32,
+            0.87,
+            0.12
+          ],
+          "label": "What needs attention, and why",
+          "cue": "It leads with what needs attention"
+        },
+        {
+          "rect": [
+            0.06,
+            0.44,
+            0.87,
+            0.3
+          ],
+          "label": "Grouped checks",
+          "cue": "fixes what it safely can"
+        }
+      ],
+      "clip": "c_doctor.mp4",
+      "clipCue": "The Doctor checks everything"
+    },
+    {
+      "id": "outro",
+      "image": null,
+      "eyebrow": "HARNESSMITH",
+      "title": "Give it a goal",
+      "narration": "That is Harnessmith. Give it a goal, connect a model, and let it improve its own harness. It runs on your machine, and your keys stay in your own dot env file.",
+      "seconds": 11
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+09_results {"h":1000,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#res-kpis  [0.06,0.19,0.87,0.11]  GOALS 5 4 finished JUDGED 2 base and adopted g
+#res-chart  [0.06,0.31,0.87,0.32]  0% 50% 100% 1 kept 2 kept base attempt adopted
+#res-table  [0.06,0.65,0.87,0.35]  # GOAL ADOPTED BASE ADOPTED VERDICT COST TIME 
+svg  [0.06,0.31,0.25,0.30]  
+table.restab  [0.06,0.65,0.87,0.35]  # GOAL ADOPTED BASE ADOPTED VERDICT COST TIME  
+
+10_library {"h":810,"y":0,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Harnessmith v0.1.0^  [0.00,0.00,1.00,0.56]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Experience library  [0.05,0.14,0.89,0.34]  Experience library Lessons the selector wrote 
+text=Experience library^  [0.05,0.14,0.89,0.34]  Experience library Lessons the selector wrote 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#lib  [0.06,0.23,0.87,0.21]  veterinary Pin Retire When: a harness adds new 
+
+11_tools {"h":1490,"y":248,"hash":""}
+text=Harnessmith v0.1.0  [0.00,0.00,1.00,0.11]  Harnessmith v0.1.0 Overview Run a goal Models 
+text=Base harness  [0.05,0.69,0.89,0.31]  Base harness Where every goal in this project 
+#nav  [0.01,0.07,0.98,0.05]  Overview Run a goal Models History Results Bas
+#tools-list  [0.06,0.19,0.87,0.38]  list_files list a workspace directory Built-in
+#h-files  [0.06,0.80,0.87,0.03]  LongTermMEMORY.md guardrails.md systemprompt.m
+#h-path  [0.06,0.89,0.87,0.05]   
+

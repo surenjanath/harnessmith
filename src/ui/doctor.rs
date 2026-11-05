@@ -73,8 +73,14 @@ fn role_models() -> Vec<(String, String)> {
         let s = &a.settings;
         for (role, m) in [("solver", &s.solver_model), ("improver", &s.improver_model), ("selector", &s.selector_model), ("judge", &s.judge_model)] {
             for id in m.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
-                if !v.iter().any(|(x, _)| x == id) {
-                    v.push((id.to_string(), format!("{name}:{role}")));
+                let who = format!("{name}:{role}");
+                match v.iter_mut().find(|(x, _)| x == id) {
+                    Some((_, users)) => {
+                        if !users.split(", ").any(|u| u == who) {
+                            users.push_str(&format!(", {who}"));
+                        }
+                    }
+                    None => v.push((id.to_string(), who)),
                 }
             }
         }
@@ -107,11 +113,14 @@ pub fn checks() -> Vec<Value> {
     out.push(check(
         "sandbox",
         "Sandbox for solver commands",
-        if bw || us { "ok" } else { "warn" },
+        // On macOS there is no backend to install, so it is information, not a warning.
+        if bw || us { "ok" } else if cfg!(target_os = "macos") { "info" } else { "warn" },
         if bw {
             "bubblewrap: read-only system, hidden home, read-only inputs, no network".into()
         } else if us {
             "unshare namespaces: read-only inputs, no network (install bubblewrap for a read-only system and hidden home)".into()
+        } else if cfg!(target_os = "macos") {
+            "none on macOS (bubblewrap and namespaces are Linux-only) — solver commands run unsandboxed as your user; for isolation run harnessmith in Docker".into()
         } else {
             "none available — commands run unsandboxed; install bubblewrap (apt install bubblewrap) or allow unprivileged user namespaces".into()
         },
@@ -140,7 +149,9 @@ pub fn checks() -> Vec<Value> {
             Ok((c, m)) => {
                 let h = health::get(&c.name);
                 let st = health::state(&h);
-                if st == "open" {
+                if let Some(why) = c.missing_key() {
+                    ("fail".into(), format!("no API key: {why}"), None)
+                } else if st == "open" {
                     ("warn".into(), format!("circuit breaker OPEN after {} failures (last: {}); calls are failing over, retry in {}s", h.consecutive_fail, h.last_error, health::reopens_in(&c.name).as_secs()), Some(format!("reset_breaker:{}", c.name)))
                 } else {
                     match client::list_models(&c) {
@@ -233,8 +244,59 @@ pub fn checks() -> Vec<Value> {
         });
     }
 
-    // 9. Local servers worth knowing about.
-    let found = client::discover_local();
+    // 9. API keys of saved hosted connections (a missing key shows up as HTTP 401 mid-run).
+    for c in connections::load().connections {
+        if let Some(why) = c.missing_key() {
+            out.push(check(&format!("key:{}", c.name), &format!("API key · {}", c.name), "fail", why, None));
+        } else if !c.api_key_env.is_empty() || !c.api_key.is_empty() {
+            out.push(check(&format!("key:{}", c.name), &format!("API key · {}", c.name), "ok", if c.api_key_env.is_empty() { "stored in connections.json".into() } else { format!("{} is set", c.api_key_env) }, None));
+        }
+    }
+    // 10. The .env file holds secrets: it should be private.
+    let env = cfg.root.join(".env");
+    #[cfg(unix)]
+    if env.is_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&env).map(|m| m.permissions().mode() & 0o777).unwrap_or(0);
+        out.push(check("env_perms", ".env file", if mode & 0o077 != 0 { "warn" } else { "ok" }, format!("{} (mode {:o}) · read at startup and whenever a key is missing", env.display(), mode), (mode & 0o077 != 0).then_some(("chmod_env", "Make private (0600)"))));
+    }
+    // 11. Recent runs that did not end cleanly.
+    let day_ago = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+    let recent: Vec<&super::RunInfo> = runs_now.iter().filter(|r| r.started > day_ago && !r.finished.is_empty()).collect();
+    let bad: Vec<&&super::RunInfo> = recent.iter().filter(|r| matches!(r.status.as_str(), "failed" | "partial" | "review" | "capped")).collect();
+    out.push(check(
+        "recent_runs",
+        "Runs in the last 24 h",
+        if bad.is_empty() { "ok" } else { "warn" },
+        if recent.is_empty() {
+            "no finished runs".into()
+        } else if bad.is_empty() {
+            format!("{} finished cleanly", recent.len())
+        } else {
+            format!("{} of {} need a look: {}", bad.len(), recent.len(), bad.iter().take(3).map(|r| format!("{} ({})", util::take_chars(&r.goal.replace(['\r', '\n'], " "), 40), if r.status == "review" { "needs review" } else { r.status.as_str() })).collect::<Vec<_>>().join("; "))
+        },
+        None,
+    ));
+    // 12. Tools the solver may need.
+    out.push(check(
+        "pdf",
+        "PDF export",
+        "ok",
+        match crate::llm::export::chrome() {
+            Some(b) => format!("export_pdf renders with {}", Path::new(&b).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or(b)),
+            None => "export_pdf uses the built-in writer (plain styling); install Chrome or Chromium for full rendering".into(),
+        },
+        None,
+    ));
+    let web_on: Vec<String> = projects().into_iter().filter_map(|(n, r)| GoalAdapter::open(&r).ok().filter(|a| a.settings.web_access).map(|_| n)).collect();
+    if !web_on.is_empty() {
+        let search = crate::llm::web::search_backend();
+        out.push(check("web", "Web access", if search.is_some() { "ok" } else { "info" }, format!("on for {} · {}", web_on.join(", "), match search { Some(b) => format!("search via {b}"), None => "fetch only (set BRAVE_API_KEY or TAVILY_API_KEY in .env for search)".into() }), None));
+    }
+
+    // 13. Local servers worth knowing about.
+    // A port that answers but lists no models is usually something else (on macOS, :5000 is AirPlay).
+    let found: Vec<_> = client::discover_local().into_iter().filter(|f| f["models"].as_array().map(|m| !m.is_empty()).unwrap_or(false)).collect();
     let known: Vec<String> = connections::load().connections.iter().map(|c| c.base()).collect();
     let new: Vec<String> = found.iter().filter(|f| !known.iter().any(|k| k == f["base_url"].as_str().unwrap_or(""))).map(|f| format!("{} ({})", f["base_url"].as_str().unwrap_or(""), f["models"].as_array().map(|m| m.len()).unwrap_or(0))).collect();
     out.push(check(
@@ -244,6 +306,22 @@ pub fn checks() -> Vec<Value> {
         if found.is_empty() { "none running on the usual ports".into() } else if new.is_empty() { format!("{} found, all connected", found.len()) } else { format!("not connected yet: {} — add them on the Models tab", new.join(", ")) },
         None,
     ));
+    // Group each check for the page.
+    for c in out.iter_mut() {
+        let id = c["id"].as_str().unwrap_or("").to_string();
+        let g = if id.starts_with("model") || id.starts_with("key:") || id == "local" || id == "conn_perms" || id == "env_perms" {
+            "Models & keys"
+        } else if id == "interrupted" || id == "dead_rollouts" || id == "recent_runs" || id.starts_with("stuck:") {
+            "Runs"
+        } else if id.starts_with("base:") {
+            "Projects"
+        } else if id == "storage" || id == "temp" {
+            "Storage"
+        } else {
+            "Tools & environment"
+        };
+        c["group"] = json!(g);
+    }
     out
 }
 
@@ -284,6 +362,14 @@ pub fn fix(id: &str) -> Result<String> {
                 }
             }
             Ok(format!("cleared {} rollout(s); they will be re-run", d.len()))
+        }
+        "chmod_env" => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(crate::config::get().root.join(".env"), std::fs::Permissions::from_mode(0o600))?;
+            }
+            Ok(".env is now private".into())
         }
         "chmod_conns" => {
             #[cfg(unix)]

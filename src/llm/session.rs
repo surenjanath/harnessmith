@@ -23,6 +23,7 @@ pub fn run_improver_session(spec: &ChannelSpec, cwd: &Path, mission: &str, syste
     util::write(&cwd.join("MISSION.md"), format!("{}{mission}", if system.is_empty() { String::new() } else { format!("{system}\n\n---\n\n") }))?;
     std::fs::create_dir_all(cwd.join("output"))?;
     let mut cfg = AgentConfig::new(&spec.model, IMPROVER_SYSTEM, cwd);
+    cfg.improver = true;
     cfg.max_steps = spec.steps.max(1);
     cfg.wall = Duration::from_secs(wall.max(60));
     cfg.max_tokens = match spec.effort.as_str() {

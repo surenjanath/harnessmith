@@ -223,6 +223,18 @@ fn recommend(hw: &Value, models: &[Value]) -> Value {
             presets.push(json!({"id": "hybrid", "label": "Local solver + API improver", "about": "cheap rollouts, strong harness edits", "solver": s, "improver": format!("{a}, {}", id(&improver).unwrap_or_default()), "selector": format!("{a}, {}", id(&improver).unwrap_or_default())}));
         }
     }
+    // NVIDIA's hosted models: offered when a key is set or an `nvidia` connection is saved.
+    let nv_saved = connections::load().connections.iter().find(|c| c.base().contains("integrate.api.nvidia.com")).map(|c| c.name.clone());
+    if nv_saved.is_some() || std::env::var("NVIDIA_API_KEY").map(|v| !v.is_empty()).unwrap_or(false) {
+        let p = nv_saved.unwrap_or_else(|| "nvidia".into());
+        let (strong, fast) = (format!("{p}/mistralai/mistral-large-4-1t-a52b"), format!("{p}/mistralai/mistral-large-4-1t-a52b"));
+        let local = id(&improver);
+        let with_local = |m: &str| match &local { Some(l) => format!("{m}, {l}"), None => m.to_string() };
+        if solver.is_some() {
+            presets.push(json!({"id": "nvidia_hybrid", "label": "Local solver + NVIDIA improver", "about": "free local rollouts; a strong hosted model edits the harness (local model as fallback)", "solver": chain(&solver, None), "improver": with_local(&strong), "selector": with_local(&strong)}));
+        }
+        presets.push(json!({"id": "nvidia_all", "label": "All NVIDIA", "about": "fastest; hosted free tier is rate-limited, so local models stay as fallback", "solver": with_local(&fast), "improver": with_local(&strong), "selector": with_local(&strong)}));
+    }
     if let Some(a) = &api_best {
         let fb = id(&solver).map(|s| format!(", {s}")).unwrap_or_default();
         presets.push(json!({"id": "all_api", "label": "All API", "about": "fastest and strongest; costs per token (set a spending cap)", "solver": format!("{a}{fb}"), "improver": format!("{a}{fb}"), "selector": format!("{a}{fb}")}));

@@ -171,6 +171,9 @@ pub struct BenchSpec {
     pub proposer_deliverables: String,
     pub state_deliverable: bool,
     pub obs_trunc: usize,
+    /// Write `context/brief.md`, a code-computed digest of the rollouts, for the improver.
+    /// Off for the paper benchmarks (it departs from the reference method).
+    pub improver_brief: bool,
 }
 
 impl BenchSpec {
@@ -194,6 +197,7 @@ impl BenchSpec {
             proposer_deliverables: "contents".into(),
             state_deliverable: false,
             obs_trunc: 50_000,
+            improver_brief: false,
         }
     }
 

@@ -307,7 +307,7 @@ fn models(a: ModelsArgs) -> Result<()> {
             for (r, m) in &reg.roles {
                 println!("  role {r:<9} -> {m}");
             }
-            println!("  built-in prefixes: openai anthropic gemini google ollama openrouter groq deepseek together mistral mock");
+            println!("  built-in prefixes: openai anthropic gemini google ollama openrouter groq deepseek together mistral nvidia mock");
         }
         ModelsCmd::Add { name, provider, base_url, api_key_env, default_model } => {
             reg.connections.retain(|c| c.name != name);

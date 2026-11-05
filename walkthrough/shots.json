@@ -1,0 +1,144 @@
+[
+ {
+  "name": "01_overview",
+  "url": "/",
+  "wait": 4500
+ },
+ {
+  "name": "02_run",
+  "url": "/",
+  "js": "show('run'); setTimeout(()=>{ const s=document.querySelector('#g-tpl'); s.value='report'; s.onchange(); }, 1200)",
+  "jsWait": 3000,
+  "sel": "#g-text",
+  "pad": 150
+ },
+ {
+  "name": "c_template",
+  "url": "/",
+  "js": "show('run')",
+  "jsWait": 2000,
+  "sel": "#g-text",
+  "pad": 150,
+  "record": {
+   "seconds": 7,
+   "actions": [
+    {
+     "at": 1.0,
+     "js": "(()=>{const s=document.querySelector('#g-tpl'); s.value='page'; s.onchange();})()"
+    },
+    {
+     "at": 4.0,
+     "js": "(()=>{const s=document.querySelector('#g-tpl'); s.value='report'; s.onchange();})()"
+    }
+   ]
+  }
+ },
+ {
+  "name": "03_models",
+  "url": "/",
+  "js": "show('models')",
+  "jsWait": 6000
+ },
+ {
+  "name": "04_connections",
+  "url": "/",
+  "js": "show('models'); setTimeout(()=>editConn('nvidia'), 3000)",
+  "jsWait": 5000,
+  "sel": ".quickfill",
+  "pad": 330
+ },
+ {
+  "name": "05_history",
+  "url": "/#goal=20261105-010339-dog-life-cycle-report-objective-produce",
+  "wait": 5000
+ },
+ {
+  "name": "c_history_search",
+  "url": "/#goal=20261105-010339-dog-life-cycle-report-objective-produce",
+  "wait": 5000,
+  "record": {
+   "seconds": 8,
+   "actions": [
+    {
+     "at": 1.0,
+     "js": "(()=>{const q=document.querySelector('#gl-q'); q.value='hello'; q.oninput();})()"
+    },
+    {
+     "at": 3.5,
+     "js": "(()=>{const q=document.querySelector('#gl-q'); q.value=''; q.oninput(); const s=document.querySelector('#gl-st'); s.value='cancelled'; s.onchange();})()"
+    },
+    {
+     "at": 6.0,
+     "js": "(()=>{const s=document.querySelector('#gl-st'); s.value=''; s.onchange();})()"
+    }
+   ]
+  }
+ },
+ {
+  "name": "06_map",
+  "url": "/#goal=20261105-010339-dog-life-cycle-report-objective-produce",
+  "wait": 5000,
+  "sel": "#journey",
+  "pad": 70
+ },
+ {
+  "name": "07_output",
+  "url": "/#goal=20261105-010339-dog-life-cycle-report-objective-produce",
+  "wait": 5000,
+  "sel": ".tabs2",
+  "pad": 110
+ },
+ {
+  "name": "08_compare",
+  "url": "/#goal=20261105-010339-dog-life-cycle-report-objective-produce",
+  "wait": 5000,
+  "js": "[...document.querySelectorAll('.tabs2 button')].find(b=>b.textContent==='compare').click()",
+  "jsWait": 1500,
+  "sel": ".tabs2",
+  "pad": 110
+ },
+ {
+  "name": "09_results",
+  "url": "/",
+  "js": "show('results')",
+  "jsWait": 5000,
+  "wait": 4500
+ },
+ {
+  "name": "10_library",
+  "url": "/",
+  "js": "show('library')",
+  "jsWait": 4500,
+  "wait": 4500
+ },
+ {
+  "name": "11_tools",
+  "url": "/",
+  "js": "show('harness')",
+  "jsWait": 4000,
+  "sel": "#tools-list",
+  "pad": 150,
+  "wait": 4500
+ },
+ {
+  "name": "12_doctor",
+  "url": "/",
+  "js": "show('doctor')",
+  "jsWait": 8000
+ },
+ {
+  "name": "c_doctor",
+  "url": "/",
+  "js": "show('doctor')",
+  "jsWait": 8000,
+  "record": {
+   "seconds": 9,
+   "actions": [
+    {
+     "at": 1.0,
+     "js": "document.querySelector('#doc-run').click()"
+    }
+   ]
+  }
+ }
+]

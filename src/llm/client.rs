@@ -275,7 +275,45 @@ fn limiter(conn: &Connection) -> std::sync::Arc<crate::core::proposer::Semaphore
 }
 
 /// One model call (queued behind the connection's concurrency limit).
+/// Chat models worth trying on a hosted catalog (embedding, safety, reward, parsing, vision-only
+/// and translation models filtered out), recommended agent models first.
+pub fn chat_candidates(ids: &[String]) -> Vec<String> {
+    let skip = regex::Regex::new(r"(?i)embed|safety|guard|reward|parse|clip|detector|calibration|retriever|deplot|kosmos|vila|neva|fuyu|translate|topic-control|riva|cosmos|starcoder|codegemma|codellama|diffusion|vision|vlm|chatqa|-vl-|omni|recurrentgemma|gemma-2b|llama2|minitron|synthetic").unwrap();
+    let prefer = ["kimi", "nemotron-3-super", "nemotron-3-ultra", "deepseek-v4", "glm-5", "mistral-large-4", "minimax", "gpt-oss", "nemotron-3.5-lightning", "llama-3.1-nemotron-ultra", "gemma-4", "step-5", "qwen"];
+    let mut v: Vec<String> = ids.iter().filter(|m| !skip.is_match(m)).cloned().collect();
+    v.sort_by_key(|m| prefer.iter().position(|p| m.contains(p)).unwrap_or(prefer.len()));
+    v
+}
+
+/// A reply saying this one model does not exist or is not enabled, not that the endpoint is down.
+pub fn model_unavailable(err: &str) -> bool {
+    let e = err.to_lowercase();
+    (e.contains("http 404") || e.contains("http 400") || e.contains("http 403"))
+        && (e.contains("not found for account") || e.contains("model_not_found") || e.contains("model not found") || e.contains("does not exist") || e.contains("no such model") || e.contains("unknown model") || e.contains("not available"))
+}
+
+/// Try one model with a tiny tool-calling request, without touching the connection's health
+/// record (a catalog probe should not trip the breaker for models that do work).
+pub fn probe(conn: &Connection, model: &str) -> Value {
+    let t0 = std::time::Instant::now();
+    let tools = [ToolDef { name: "ping".into(), description: "Reply by calling this tool.".into(), parameters: serde_json::json!({"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]}) }];
+    let msgs = [Msg::User("Call the ping tool with word=\"ok\". Do not reply with text.".into())];
+    let req = ChatReq { system: "You are a test harness. Use the tool.", messages: &msgs, tools: &tools, max_tokens: 200 };
+    let res = match conn.provider.as_str() {
+        "openai" => openai(conn, model, &req, Duration::from_secs(20)),
+        _ => chat(conn, model, &req, Duration::from_secs(20)),
+    };
+    match res {
+        Ok(r) => serde_json::json!({"model": model, "ok": true, "tools": !r.calls.is_empty(), "ms": t0.elapsed().as_millis() as u64}),
+        Err(e) => serde_json::json!({"model": model, "ok": false, "error": crate::util::take_chars(&format!("{e}"), 160), "ms": t0.elapsed().as_millis() as u64}),
+    }
+}
+
 pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> Result<ChatResp> {
+    // A hosted endpoint with no key would answer 401: say which setting is missing instead.
+    if let Some(why) = conn.missing_key() {
+        anyhow::bail!("{why}");
+    }
     let lim = limiter(conn);
     let _slot = lim.acquire();
     let t0 = std::time::Instant::now();
@@ -294,6 +332,12 @@ pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) ->
         }
         Err(e) if format!("{e}").contains(CANCELLED) => {
             return Err(e);
+        }
+        // The endpoint answered but this model is not available (to this account): the
+        // connection is fine, so do not count it against the breaker. The caller still fails
+        // over to the next model in its chain.
+        Err(e) if model_unavailable(&format!("{e}")) => {
+            return Err(anyhow!("{e}\n(model {model:?} is not available on connection {:?}; pick another, e.g. with “Find free models” on the Models tab)", conn.name));
         }
         Err(e) => {
             if super::health::record_fail(&conn.name, &format!("{e}")) {

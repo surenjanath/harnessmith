@@ -68,9 +68,29 @@ impl Connection {
             return self.api_key.clone();
         }
         if !self.api_key_env.is_empty() {
+            let v = std::env::var(&self.api_key_env).unwrap_or_default();
+            if !v.is_empty() {
+                return v;
+            }
+            // A key added to .env after the server started: read the file again.
+            crate::config::load_dotenv(&crate::config::get().root.join(".env"));
             return std::env::var(&self.api_key_env).unwrap_or_default();
         }
         String::new()
+    }
+
+    /// Why calls would be refused for lack of a key, if they would (hosted endpoints only).
+    pub fn missing_key(&self) -> Option<String> {
+        let base = self.base();
+        let local = base.is_empty() || base.contains("localhost") || base.contains("127.0.0.1") || base.contains("[::1]") || self.provider == "ollama" || self.provider == "mock";
+        if local || !self.key().is_empty() {
+            return None;
+        }
+        Some(if self.api_key_env.is_empty() {
+            format!("connection {:?} has no API key: set \"API key env var\" (e.g. NVIDIA_API_KEY) or paste a key", self.name)
+        } else {
+            format!("{} is not set. Add a line `{}=...` to the .env file in the harnessmith folder ({}), or export it in the shell that starts harness2", self.api_key_env, self.api_key_env, crate::config::get().root.join(".env").display())
+        })
     }
 
     /// USD for one reply: fresh input, cache writes (1.25x) and reads, and output.
@@ -98,8 +118,29 @@ impl Connection {
     pub fn redacted(&self) -> serde_json::Value {
         let mut v = serde_json::to_value(self).unwrap();
         v["api_key"] = serde_json::json!(if self.api_key.is_empty() { "" } else { "••••••" });
-        v["has_key"] = serde_json::json!(!self.key().is_empty());
+        let k = self.key();
+        v["has_key"] = serde_json::json!(!k.is_empty());
+        // Where the key comes from; no part of the key itself leaves the server.
+        let tail = String::new();
+        v["key_source"] = serde_json::json!(if !self.api_key.is_empty() { "file" } else if !self.api_key_env.is_empty() { if k.is_empty() { "env_missing" } else { "env" } } else { "none" });
+        v["key_tail"] = serde_json::json!(tail);
+        v["needs_key"] = serde_json::json!(self.missing_key().is_some() || (!k.is_empty()));
         v
+    }
+
+    /// The environment variable a key for this connection is stored under by default.
+    pub fn default_key_env(&self) -> String {
+        if !self.api_key_env.is_empty() {
+            return self.api_key_env.clone();
+        }
+        let b = self.base();
+        for (host, var) in [("nvidia.com", "NVIDIA_API_KEY"), ("openrouter.ai", "OPENROUTER_API_KEY"), ("groq.com", "GROQ_API_KEY"), ("deepseek.com", "DEEPSEEK_API_KEY"), ("together.xyz", "TOGETHER_API_KEY"), ("mistral.ai", "MISTRAL_API_KEY"), ("anthropic.com", "ANTHROPIC_API_KEY"), ("googleapis.com", "GEMINI_API_KEY"), ("api.openai.com", "OPENAI_API_KEY")] {
+            if b.contains(host) {
+                return var.into();
+            }
+        }
+        let n: String = self.name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
+        format!("{n}_API_KEY")
     }
 }
 
@@ -192,6 +233,8 @@ fn builtin(name: &str) -> Option<Connection> {
         "deepseek" => mk("openai", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"),
         "together" => mk("openai", "https://api.together.xyz/v1", "TOGETHER_API_KEY"),
         "mistral" => mk("openai", "https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
+        // NVIDIA's hosted models; their ids carry an org, e.g. nvidia/mistralai/mistral-large-4-1t-a52b.
+        "nvidia" => mk("openai", "https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY"),
         "mock" => mk("mock", "", ""),
         _ => return None,
     })
@@ -212,7 +255,7 @@ pub fn resolve(model_id: &str) -> Result<(Connection, String)> {
         .or_else(|| builtin(&prefix))
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no model connection named {prefix:?}; add one in the UI (Models tab) or in {}, or use a built-in prefix (openai, anthropic, gemini, ollama, openrouter, groq, deepseek, together, mistral)",
+                "no model connection named {prefix:?}; add one in the UI (Models tab) or in {}, or use a built-in prefix (openai, anthropic, gemini, ollama, openrouter, groq, deepseek, together, mistral, nvidia)",
                 path().display()
             )
         })?;

@@ -46,6 +46,11 @@ pub struct AgentConfig {
     pub sandbox: Option<super::sandbox::Sandbox>,
     /// Started MCP servers whose tools are offered next to the built-in ones.
     pub mcp: Option<std::sync::Arc<super::mcp::Hub>>,
+    /// Improver sessions: only `output/answer.md` may be written under `output/`, so an
+    /// improver edits the harness instead of producing the task's deliverable itself.
+    pub improver: bool,
+    /// Offer `web_fetch` (and `web_search` when a search API key is set).
+    pub web: bool,
 }
 
 /// `bash -c cmd` in the workspace, inside the sandbox when there is one.
@@ -81,6 +86,8 @@ impl AgentConfig {
             memory: None,
             sandbox: None,
             mcp: None,
+            improver: false,
+            web: false,
         }
     }
 }
@@ -193,6 +200,27 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
         // Wired tools run commands, so they follow the shell setting.
         if cfg.allow_shell {
             t.extend(wired_tools(cfg.harness.as_ref().unwrap()).into_iter().map(|w| w.def));
+        }
+    }
+    if !cfg.improver {
+        t.push(ToolDef {
+            name: "export_pdf".into(),
+            description: "Convert a Markdown, HTML or text file you wrote into a real PDF (works without pandoc or LaTeX). Write the content first, e.g. output/report.md, then export it to output/report.pdf.".into(),
+            parameters: obj(json!({"source": {"type": "string", "description": "the .md/.html/.txt file to convert"}, "path": {"type": "string", "description": "where to write the .pdf, e.g. output/report.pdf"}}), &["source", "path"]),
+        });
+    }
+    if cfg.web {
+        t.push(ToolDef {
+            name: "web_fetch".into(),
+            description: "Read a web page as plain text (first 20k characters). Use it to check facts and cite real sources with their URL.".into(),
+            parameters: obj(json!({"url": {"type": "string"}}), &["url"]),
+        });
+        if super::web::search_backend().is_some() {
+            t.push(ToolDef {
+                name: "web_search".into(),
+                description: "Search the web; returns titles, URLs and snippets. Then web_fetch the pages you rely on.".into(),
+                parameters: obj(json!({"query": {"type": "string"}, "n": {"type": "integer", "description": "results, 1-10 (default 5)"}}), &["query"]),
+            });
         }
     }
     if let Some(h) = &cfg.mcp {
@@ -380,6 +408,9 @@ fn required(tool: &str) -> &'static [&'static str] {
         "skill" => &["name"],
         "task" => &["agent", "prompt"],
         "remember" => &["note"],
+        "export_pdf" => &["source", "path"],
+        "web_fetch" => &["url"],
+        "web_search" => &["query"],
         _ => &[],
     }
 }
@@ -405,6 +436,16 @@ fn exec_tool(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
     let missing: Vec<&str> = required(&call.name).iter().filter(|k| call.args.get(**k).map(|v| v.is_null()).unwrap_or(true)).cloned().collect();
     if !missing.is_empty() {
         bail!("{} needs {} (missing: {}). Arguments must be a JSON object.", call.name, required(&call.name).iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", "), missing.join(", "));
+    }
+    // Small models sometimes send the tool's JSON schema back instead of values.
+    if call.args.get("type").and_then(|v| v.as_str()) == Some("object") && call.args.get("properties").is_some() {
+        bail!("you sent the tool's schema instead of its arguments. Pass the actual values as a JSON object, e.g. {{\"path\": \"output/report.md\"}}");
+    }
+    if cfg.improver && matches!(call.name.as_str(), "write_file" | "append_file" | "edit_file" | "delete_file") {
+        let p = call.args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim_start_matches("./");
+        if p.starts_with("output/") && p != "output/answer.md" {
+            bail!("you are the improver, not the solver: do not produce the task's deliverable. Edit the harness under context/harness/ (as MISSION.md describes) and put your final reply in output/answer.md");
+        }
     }
     match exec_tool_raw(cfg, call) {
         Ok(t) => Ok(t),
@@ -556,6 +597,20 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             Ok(if r.final_text.trim().is_empty() { format!("(sub-agent returned nothing{})", if r.error.is_empty() { String::new() } else { format!(": {}", r.error) }) } else { r.final_text })
         }
         "finish" => Ok(s("answer")),
+        "export_pdf" if !cfg.improver => {
+            let src = safe_path(ws, &s("source"))?;
+            let mut dest = safe_path(ws, &s("path"))?;
+            if dest.extension().map(|e| e != "pdf").unwrap_or(true) {
+                dest.set_extension("pdf");
+            }
+            if !src.is_file() {
+                bail!("No such file: {}", s("source"));
+            }
+            let how = super::export::export(&src, &dest)?;
+            Ok(format!("wrote {} ({} bytes): {how}", util::rel(ws, &dest), std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0)))
+        }
+        "web_fetch" if cfg.web => super::web::fetch(&s("url")),
+        "web_search" if cfg.web => super::web::search(&s("query"), a.get("n").and_then(|v| v.as_u64()).unwrap_or(5) as usize),
         "remember" if cfg.memory.is_some() => {
             let (store, src) = cfg.memory.as_ref().unwrap();
             let mut src = src.clone();
@@ -583,7 +638,10 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             }
             match find_wired(cfg, other) {
                 Some(t) => run_wired(cfg, &t, a),
-                None => bail!("unknown tool {other:?}"),
+                None => {
+                    let names: Vec<String> = tool_defs(cfg).into_iter().map(|t| t.name).collect();
+                    bail!("unknown tool {other:?}. The tools you can call are: {}", names.join(", "))
+                }
             }
         }
     }
@@ -664,6 +722,17 @@ pub fn resolve_chain(model_id: &str) -> Result<Vec<(connections::Connection, Str
     if chain.is_empty() {
         bail!("no usable model in {model_id:?}: {}", errs.join("; "));
     }
+    // Health-aware order: keep the configured order, but move a connection that has failed most
+    // of its recent calls (rate limits, a flaky endpoint) behind the ones that are working.
+    // Only recent trouble counts: lifetime totals would keep a connection demoted forever (it
+    // gets no calls, so it can never recover), e.g. after failures from before a key was added.
+    let unreliable = |c: &connections::Connection| {
+        let st = health::get(&c.name);
+        let calls = st.ok + st.fail;
+        let recent = st.last_fail.map(|t| t.elapsed() < Duration::from_secs(15 * 60)).unwrap_or(false);
+        recent && calls >= 4 && st.fail * 2 > calls && st.consecutive_fail > 0
+    };
+    chain.sort_by_key(|(c, _, _)| unreliable(c));
     Ok(chain)
 }
 
@@ -731,6 +800,12 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let mut avoid: Vec<Option<Instant>> = vec![None; chain.len()];
     let mut last_err = String::new();
     let mut seen: HashMap<String, (u32, String)> = HashMap::new();
+    // Identical calls whatever they returned (sub-agents answer differently every time).
+    let mut same_args: HashMap<String, u32> = HashMap::new();
+    let mut blocked_calls = 0u32;
+    // Improvers that only read: after a long streak without an edit, ask for a decision once.
+    let mut reads_since_write = 0u32;
+    let mut read_nudged = false;
     let mut warned: HashSet<String> = HashSet::new();
     let mut err_streak = 0u32;
     let mut rescued = false;
@@ -936,6 +1011,24 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                 results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: format!("Blocked by a PreToolUse hook: {reason}"), is_error: true });
                 continue;
             }
+            let sig = format!("{}:{}", call.name, call.args);
+            let n_same = {
+                let n = same_args.entry(sig.clone()).or_insert(0);
+                *n += 1;
+                *n
+            };
+            // Self-check 0: hard stop on a call repeated past the limit, before running it.
+            let limit = if call.name == "task" { 3 } else { 5 };
+            if n_same > limit && call.name != "finish" {
+                blocked_calls += 1;
+                let msg = format!("Blocked: you already made this exact call {} times. It will not run again. Do something different, or write the deliverable and finish.", n_same - 1);
+                if blocked_calls == 1 {
+                    heal(&mut out, &mut traj, "loop_block", json!({"call": util::take_chars(&sig, 160)}));
+                }
+                traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": "error", "output": msg}));
+                results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: msg, is_error: true });
+                continue;
+            }
             let (mut content, is_error) = match exec_tool(cfg, call) {
                 Ok(t) => (t, false),
                 Err(e) => (format!("ERROR: {e}"), true),
@@ -944,7 +1037,6 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                 content = format!("{content}\n\n[PostToolUse hook] {reason}");
             }
             // Self-check 1: the same call returning the same thing again and again.
-            let sig = format!("{}:{}", call.name, call.args);
             let key = obs_key(&content);
             let entry = seen.entry(sig.clone()).or_insert((0, key.clone()));
             if entry.1 == key {
@@ -952,9 +1044,22 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             } else {
                 *entry = (1, key);
             }
-            if entry.0 >= 3 && call.name != "finish" && warned.insert(sig.clone()) {
-                content.push_str("\n\n[self-check] You have now made this exact call 3 times and got the same result each time. Repeating it will not change the outcome. Change approach: look at what actually exists (list_files, read_file), fix the command or path, or write the deliverable directly.");
+            if (entry.0 >= 3 || n_same == limit) && call.name != "finish" && warned.insert(sig.clone()) {
+                content.push_str(&format!("\n\n[self-check] You have now made this exact call {} times{}. Repeating it will not change the outcome; it will be blocked after {limit} times.", n_same, if entry.0 >= 3 { " and got the same result each time" } else { "" }));
+                content.push_str(" Change approach: look at what actually exists (list_files, read_file), fix the command or path, or write the deliverable directly.");
                 heal(&mut out, &mut traj, "loop_break", json!({"call": util::take_chars(&sig, 160)}));
+            }
+            if cfg.improver {
+                if matches!(call.name.as_str(), "write_file" | "append_file" | "edit_file" | "delete_file" | "finish") {
+                    reads_since_write = 0;
+                } else {
+                    reads_since_write += 1;
+                }
+                if reads_since_write == 15 && !read_nudged {
+                    read_nudged = true;
+                    content.push_str("\n\n[self-check] You have made 15 calls without editing anything. You have enough evidence: start with context/brief.md if it exists, decide on ONE or TWO edits that address what went wrong, make them in context/harness/, then write your reply.");
+                    heal(&mut out, &mut traj, "read_streak", json!({"calls": reads_since_write}));
+                }
             }
             // Self-check 2: a streak of failing calls.
             err_streak = if is_error { err_streak + 1 } else { 0 };
@@ -1004,6 +1109,12 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             }
         }
         messages.push(Msg::Tools(results));
+        // A model that keeps sending blocked calls is stuck: end the session instead of burning the budget.
+        if blocked_calls >= 8 && finish.is_none() {
+            out.error = "stopped: the model kept repeating the same call".into();
+            traj.ev(json!({"type": "error", "message": out.error}));
+            break;
+        }
         if let Some(ans) = finish {
             if let Some(reason) = run_hooks(cfg, "Stop", "finish", &json!({}), None).filter(|_| stop_blocks < 3) {
                 stop_blocks += 1;

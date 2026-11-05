@@ -36,6 +36,17 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
             issues.push(format!("{} is empty", rel(p)));
             continue;
         }
+        // A binary format written as text is not the file the goal asked for.
+        let magic: &[u8] = match ext(p).as_str() {
+            "pdf" => b"%PDF",
+            "docx" | "xlsx" | "pptx" | "zip" => b"PK",
+            "png" => b"\x89PNG",
+            _ => b"",
+        };
+        if !magic.is_empty() && !std::fs::read(p).map(|b| b.starts_with(magic)).unwrap_or(false) {
+            issues.push(format!("{} is not a real .{} file (it is plain text with that extension). Produce it with a tool that writes the real format, or deliver HTML/Markdown instead and say so in output/answer.md", rel(p), ext(p)));
+            continue;
+        }
         let body = std::fs::read_to_string(p).unwrap_or_default();
         match ext(p).as_str() {
             "html" | "htm" => {
@@ -79,7 +90,29 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
             issues.push(format!("{} contains an error message instead of the deliverable", rel(p)));
         }
     }
-    // 2. Depth: a "research document" of a few sentences is not one.
+    // 2. Template placeholders and citation keys with nothing behind them.
+    let ph = crate::core::brief::placeholder_lines(out_dir);
+    if !ph.is_empty() {
+        issues.push(format!("placeholders are still in the deliverable ({}): replace each with real content, or remove the line", ph.join("; ")));
+    }
+    let key_re = Regex::new(r"\[@([A-Za-z0-9_:\-]+)\]").unwrap();
+    let mut keys: Vec<String> = vec![];
+    let mut bib = String::new();
+    for p in &files {
+        let body = std::fs::read_to_string(p).unwrap_or_default();
+        if ext(p) == "bib" {
+            bib.push_str(&body);
+        } else if matches!(ext(p).as_str(), "md" | "markdown" | "txt" | "html") {
+            keys.extend(key_re.captures_iter(&body).map(|c| c[1].to_string()));
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    let unresolved: Vec<&String> = keys.iter().filter(|k| !bib.contains(&format!("{{{k},"))).collect();
+    if !unresolved.is_empty() {
+        issues.push(format!("citation keys with no bibliography entry: {} -- add a references section listing each real source (author, title, year, URL), or drop the citation", unresolved.iter().take(6).map(|k| format!("[@{k}]")).collect::<Vec<_>>().join(", ")));
+    }
+    // 3. Depth: a "research document" of a few sentences is not one.
     let has_doc = files.iter().any(|p| matches!(ext(p).as_str(), "md" | "txt" | "markdown" | "html" | "docx" | "pdf"));
     let deep = ["research", "report", "whitepaper", "study", "analysis"].iter().any(|w| g.contains(w));
     let min_words = if deep { 600 } else { 350 };
@@ -127,6 +160,16 @@ mod tests {
         assert!(review(goal, d.path()).iter().any(|x| x.contains("must start with <!DOCTYPE html>")));
         std::fs::write(d.path().join("hello_world.html"), "<!DOCTYPE html><html><head><style>body{font-family:system-ui}</style></head><body><h1>Hello</h1></body></html>").unwrap();
         assert!(review(goal, d.path()).is_empty());
+    }
+
+    #[test]
+    fn fake_binary_files_are_caught() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("report.pdf"), "# Dog report\nnot a pdf").unwrap();
+        let issues = review("Produce a PDF report", d.path());
+        assert!(issues.iter().any(|i| i.contains("not a real .pdf")), "{issues:?}");
+        std::fs::write(d.path().join("report.pdf"), b"%PDF-1.4\n...").unwrap();
+        assert!(!review("Produce a PDF report", d.path()).iter().any(|i| i.contains("not a real")));
     }
 
     #[test]

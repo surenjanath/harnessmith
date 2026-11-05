@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Harnessmith — App Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #2563eb;
+    --primary-light: #4f8ff0;
+    --primary-dark: #1d4ed8;
+    --gold: #b26a00;
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --text: #16191d;
+    --text-secondary: #5b6470;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Manrope', sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    font-size: 12.5px;
+  }
+  h1, h2, h3 { font-family: 'Outfit', sans-serif; margin: 0; }
+  @page { size: A4; margin: 0; }
+
+  .page { width: 210mm; height: 297mm; position: relative; page-break-after: always; page-break-inside: avoid; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+
+  /* Cover */
+  .cover {
+    background: radial-gradient(circle at 50% 15%, var(--primary-light) 0%, var(--primary) 55%, var(--primary-dark) 100%);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40mm 20mm;
+  }
+  .mark {
+    background: #fff; border-radius: 999px;
+    padding: 7mm 14mm; margin-bottom: 14mm;
+    box-shadow: 0 6px 18px -6px rgba(0,0,0,0.35);
+    display: inline-flex;
+  }
+  .mark img { height: 12mm; display: block; }
+  .mark.small { padding: 5mm 10mm; margin-bottom: 8mm; }
+  .mark.small img { height: 8mm; }
+  .cover .eyebrow {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.8);
+    font-size: 12px;
+    margin-bottom: 8mm;
+  }
+  .cover h1 {
+    font-weight: 300;
+    font-size: 46px;
+    letter-spacing: -1px;
+    line-height: 1.15;
+    margin-bottom: 6mm;
+  }
+  .cover .tagline {
+    font-size: 16px;
+    color: rgba(255,255,255,0.85);
+    font-weight: 500;
+    margin-bottom: 26mm;
+  }
+  .cover .meta {
+    font-size: 11px;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 1px;
+  }
+  .cover .divider { width: 48px; height: 2px; background: rgba(255,255,255,.6); margin: 10mm 0; }
+
+  /* TOC */
+  .toc-page { padding: 26mm 22mm; background: var(--surface); }
+  .toc-page .kicker-top {
+    font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--primary); font-size: 11px; margin-bottom: 4mm;
+  }
+  .toc-page h1 { font-size: 30px; font-weight: 500; color: var(--text); margin-bottom: 14mm; }
+  .toc-row {
+    display: flex; align-items: baseline; gap: 6mm;
+    padding: 4.2mm 0; border-bottom: 1px solid #E5E7EB;
+  }
+  .toc-num { font-family: 'Outfit'; font-weight: 600; color: var(--gold); font-size: 13px; width: 10mm; }
+  .toc-title { font-family: 'Outfit'; font-weight: 500; font-size: 14px; flex: 1; color: var(--text); }
+  .toc-kicker { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Section pages */
+  .section-page { background: var(--surface); padding: 16mm 16mm; }
+  .scene {
+    display: flex;
+    align-items: center;
+    gap: 12mm;
+    height: 265mm;
+  }
+  .scene.reverse { flex-direction: row-reverse; }
+  .scene-media { flex: 0 0 68mm; display: flex; justify-content: center; }
+  .phone-frame {
+    width: 62mm;
+    border-radius: 7mm;
+    background: #0B0F0C;
+    padding: 2.2mm;
+    box-shadow: 0 10px 30px -8px rgba(18,32,24,0.4);
+  }
+  .phone-frame img { width: 100%; display: block; border-radius: 5.2mm; }
+  .phone-frame.placeholder { height: 130mm; }
+
+  /* Web platform: stacked layout, wide browser-chrome frame on top */
+  .scene.web { flex-direction: column; align-items: stretch; gap: 8mm; height: auto; }
+  .scene.web .scene-media { flex: none; width: 100%; }
+  .browser-frame {
+    width: 100%; max-height: 150mm; border-radius: 4mm; overflow: hidden;
+    background: #E2E4EA; box-shadow: 0 10px 30px -8px rgba(18,32,24,0.35);
+    display: flex; flex-direction: column;
+  }
+  /* object-fit: contain — a web screenshot's aspect ratio is unpredictable
+     (a 16:9 viewport capture vs. a tall full-page capture), so this always
+     letterboxes inside the capped height instead of blowing out the page. */
+  .browser-frame img { width: 100%; flex: 1; min-height: 0; object-fit: contain; background: #fff; display: block; }
+  .browser-frame.placeholder { height: 90mm; }
+  .browser-bar { display: flex; align-items: center; gap: 3mm; padding: 2.6mm 4mm; background: #EDEEF2; }
+  .browser-bar .dot { width: 2.6mm; height: 2.6mm; border-radius: 50%; display: inline-block; }
+  .browser-bar .dot.r { background: #FF5F57; }
+  .browser-bar .dot.y { background: #FEBC2E; }
+  .browser-bar .dot.g { background: #28C840; }
+  .browser-url {
+    margin-left: 2mm; background: #fff; border-radius: 999px; padding: 1.3mm 4mm;
+    font-size: 9px; color: var(--text-secondary); font-weight: 600;
+  }
+
+  .scene-copy { flex: 1; }
+  .scene-num {
+    font-family: 'Outfit'; font-weight: 600; color: var(--gold);
+    font-size: 11px; letter-spacing: 1px; margin-bottom: 3mm;
+  }
+  .kicker {
+    font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    color: var(--primary); font-size: 10.5px; margin-bottom: 3mm;
+  }
+  .scene-copy h2 { font-size: 24px; font-weight: 500; color: var(--text); margin-bottom: 5mm; line-height: 1.2; }
+  .scene-copy .lead { font-size: 12.5px; line-height: 1.65; color: var(--text); margin-bottom: 5mm; }
+  .scene-copy ul { margin: 0; padding-left: 4.5mm; }
+  .scene-copy li { font-size: 11.5px; line-height: 1.55; color: var(--text-secondary); margin-bottom: 2mm; }
+  .scene-copy li::marker { color: var(--gold); }
+
+  /* Closing */
+  .closing {
+    background: radial-gradient(circle at 50% 85%, var(--primary-light) 0%, var(--primary) 55%, var(--primary-dark) 100%);
+    color: #fff; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 40mm 24mm;
+  }
+  .closing h2 { font-size: 30px; font-weight: 300; margin-bottom: 6mm; }
+  .closing p { font-size: 13px; color: rgba(255,255,255,0.8); max-width: 130mm; line-height: 1.7; }
+  .closing .tag { color: rgba(255,255,255,.85); font-weight: 600; letter-spacing: 2px; text-transform: uppercase; font-size: 11px; margin-top: 10mm; }
+
+  .footer-strip {
+    position: absolute; bottom: 10mm; left: 16mm; right: 16mm;
+    display: flex; justify-content: space-between;
+    font-size: 9px; color: var(--text-secondary); letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+
+  <div class="page cover">
+    <div class="mark"><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/assets/logo.png" /></div>
+    <div class="eyebrow">Complete App Walkthrough</div>
+    <h1>Harnessmith</h1>
+    <div class="tagline">Give an agent a goal. Watch it improve its own harness.</div>
+    <div class="divider"></div>
+    <div class="meta">Feature Guide &amp; Screen-by-Screen Reference · November 4, 2026</div>
+  </div>
+
+  <div class="page toc-page">
+    <div class="kicker-top">Contents</div>
+    <h1>Everything in this guide</h1>
+    <div class="toc-row"><span class="toc-num">01</span><span class="toc-title">Agents that improve their own harness</span><span class="toc-kicker">HARNESSMITH</span></div>
+<div class="toc-row"><span class="toc-num">02</span><span class="toc-title">The whole system on one page</span><span class="toc-kicker">One gate, one queue, a recursion per goal</span></div>
+<div class="toc-row"><span class="toc-num">03</span><span class="toc-title">Describe what you want</span><span class="toc-kicker">From a sentence to a queued run</span></div>
+<div class="toc-row"><span class="toc-num">04</span><span class="toc-title">What runs best on this machine</span><span class="toc-kicker">Pick models that fit your machine</span></div>
+<div class="toc-row"><span class="toc-num">05</span><span class="toc-title">Connections and keys</span><span class="toc-kicker">Keys stay in your .env file</span></div>
+<div class="toc-row"><span class="toc-num">06</span><span class="toc-title">Every goal, searchable</span><span class="toc-kicker">Every goal, searchable</span></div>
+<div class="toc-row"><span class="toc-num">07</span><span class="toc-title">How the run moved</span><span class="toc-kicker">How a run moved through the pipeline</span></div>
+<div class="toc-row"><span class="toc-num">08</span><span class="toc-title">The deliverable, rendered</span><span class="toc-kicker">Honest results</span></div>
+<div class="toc-row"><span class="toc-num">09</span><span class="toc-title">Base beside adopted</span><span class="toc-kicker">What adaptation changed</span></div>
+<div class="toc-row"><span class="toc-num">10</span><span class="toc-title">Is adaptation helping?</span><span class="toc-kicker">Is adapting the harness helping?</span></div>
+<div class="toc-row"><span class="toc-num">11</span><span class="toc-title">Lessons for later goals</span><span class="toc-kicker">Lessons that carry over</span></div>
+<div class="toc-row"><span class="toc-num">12</span><span class="toc-title">What the agent can call</span><span class="toc-kicker">What the agent can call</span></div>
+<div class="toc-row"><span class="toc-num">13</span><span class="toc-title">Checks and safe fixes</span><span class="toc-kicker">Checks and safe fixes</span></div>
+<div class="toc-row"><span class="toc-num">14</span><span class="toc-title">Give it a goal</span><span class="toc-kicker">HARNESSMITH</span></div>
+    <div class="footer-strip"><span>Harnessmith</span><span>Page 2</span></div>
+  </div>
+
+  
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame placeholder"></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">01 / 14</div>
+        <div class="kicker">HARNESSMITH</div>
+        <h2>Agents that improve their own harness</h2>
+        <p class="lead">This is Harnessmith. You give it a goal, it runs an agent on it, and then it improves the agent's harness for that goal: the instructions, rules and tools around the model. Here is a quick tour.</p>
+        
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>01 / 14 — Agents that improve their own harness</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Overview</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/01_overview.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">02 / 14</div>
+        <div class="kicker">One gate, one queue, a recursion per goal</div>
+        <h2>The whole system on one page</h2>
+        <p class="lead">The Overview draws the whole system and updates live while goals run. Each goal is checked at a deterministic gate, waits in a queue, and gets its own run slot with its own workspace and copy of the harness.</p>
+        <ul><li>Solver attempts are probed; an improver proposes edits on two dimensions (how the agent works, what a practitioner knows) and composes them</li><li>A blind selector picks the best output without knowing which harness made it</li><li>A lesson is written to the library for later goals in the same domain</li><li>The live bar shows what is running, on which model, and any model that is down</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>02 / 14 — The whole system on one page</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Run a goal</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/02_run.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">03 / 14</div>
+        <div class="kicker">From a sentence to a queued run</div>
+        <h2>Describe what you want</h2>
+        <p class="lead">Describe the outcome you want, or start from a template. Grading criteria are optional but unlock scoring, A/B tests and the Results tab.</p>
+        <ul><li>Templates: research report, landing page, data brief, PDF document, small script</li><li>The estimate splits runs, time, tokens and cost by role before you start</li><li>A warning appears when the improver is a small local model, the usual weak spot</li><li>Cmd/Ctrl+Enter starts the run; a browser notification says when it finishes</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>03 / 14 — Describe what you want</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Models</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/03_models.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">04 / 14</div>
+        <div class="kicker">Pick models that fit your machine</div>
+        <h2>What runs best on this machine</h2>
+        <p class="lead">The advisor reads your CPU, memory and GPU, lists every local model that fits, and measures real speed with Benchmark.</p>
+        <ul><li>Recommended solver, improver, selector and embedding model</li><li>One-click setups: All local, Local solver + API improver, Local solver + NVIDIA improver, All NVIDIA</li><li>Each role can list fallbacks after a comma, so a failing model hands over automatically</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>04 / 14 — What runs best on this machine</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Models</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/04_connections.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">05 / 14</div>
+        <div class="kicker">Keys stay in your .env file</div>
+        <h2>Connections and keys</h2>
+        <p class="lead">A connection is a named endpoint such as nvidia, ollama or openrouter. Model ids are written connection/model.</p>
+        <ul><li>Type NAME=key (or just the key) in API key: it is written to the private, git-ignored .env file, never to connections.json</li><li>After saving, the form only says whether the key is set; no part of the key is shown</li><li>Save & test checks that the model really answers; Find free NVIDIA models shows which hosted models your account can use</li><li>A model your account cannot use is skipped for the next one in the chain without blocking the connection</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>05 / 14 — Connections and keys</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · History</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/05_history.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">06 / 14</div>
+        <div class="kicker">Every goal, searchable</div>
+        <h2>Every goal, searchable</h2>
+        <p class="lead">History groups goals by day. Each entry shows status, rubric score, run time and age; arrow keys move between goals and each goal has its own link.</p>
+        <ul><li>Search, status filter (running, needs review, done, failed, cancelled) and domain filter</li><li>A summary card: last run, score against the base attempt, time, number of runs</li><li>The full goal and its criteria fold away; every run of the goal is listed</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>06 / 14 — Every goal, searchable</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · History</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/06_map.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">07 / 14</div>
+        <div class="kicker">How a run moved through the pipeline</div>
+        <h2>How the run moved</h2>
+        <p class="lead">The journey map redraws the run: base runs, the INV and DOM proposals with their probes, the composed harness, and the blind selection.</p>
+        <ul><li>Each box shows its role, what it did, steps and time</li><li>The adopted path is drawn as a striped trunk</li><li>Self-heals (failovers, loop stops, rescues) are badged on the box where they happened</li><li>Click a box for its timeline, filtered to errors and self-heals if you like</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>07 / 14 — How the run moved</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · History</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/07_output.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">08 / 14</div>
+        <div class="kicker">Honest results</div>
+        <h2>The deliverable, rendered</h2>
+        <p class="lead">Markdown deliverables are rendered, with a source view. The deliverable review runs on every output.</p>
+        <ul><li>Missing file types, fake PDFs, placeholders such as [Your Name] and citations without references are flagged</li><li>A run whose output fails review, or scores under 50% against the rubric, ends as needs review instead of done</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>08 / 14 — The deliverable, rendered</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · History</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/08_compare.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">09 / 14</div>
+        <div class="kicker">What adaptation changed</div>
+        <h2>Base beside adopted</h2>
+        <p class="lead">Compare shows the first base attempt beside the adopted output with changed lines highlighted.</p>
+        <ul><li>A/B test: base harness vs adopted harness, three times each, graded, with mean, spread and a verdict</li><li>Model shootout: the same goal on several solver models, side by side</li><li>Report (.md) downloads a shareable summary; Delete moves a goal to the project's trash</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>09 / 14 — Base beside adopted</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Results</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/09_results.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">10 / 14</div>
+        <div class="kicker">Is adapting the harness helping?</div>
+        <h2>Is adaptation helping?</h2>
+        <p class="lead">For goals with criteria and a judge model, the adopted output and the unmodified base attempt are both graded after each run, three gradings each with a majority vote per criterion.</p>
+        <ul><li>Adapted wins, ties and losses, and the average lift in points</li><li>How often the regression guard kept the base attempt</li><li>Spend and time per goal</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>10 / 14 — Is adaptation helping?</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Library</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/10_library.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">11 / 14</div>
+        <div class="kicker">Lessons that carry over</div>
+        <h2>Lessons for later goals</h2>
+        <p class="lead">After each run a reflection writes a lesson: the cue, the lesson, the evidence and a confidence. Later goals in the same domain read the library before proposing edits.</p>
+        <ul><li>Pin a lesson you trust: it is listed first for later improvers</li><li>Retire one that no longer helps: it is moved aside, not deleted</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>11 / 14 — Lessons for later goals</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Base harness</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/11_tools.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">12 / 14</div>
+        <div class="kicker">What the agent can call</div>
+        <h2>What the agent can call</h2>
+        <p class="lead">The base harness is where every goal in a project starts: system prompt, guardrails, memory, tool guidance, skills, scripts and wired tools.</p>
+        <ul><li>export_pdf turns Markdown or HTML into a real PDF (headless Chrome when installed, a built-in writer otherwise)</li><li>web_fetch and web_search when web access is on for the project</li><li>Wired tools are JSON files under tools/ that run a command; the improver can add them too</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>12 / 14 — What the agent can call</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame"><div class="browser-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="browser-url">127.0.0.1:8765 · Doctor</span></div><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/screenshots/12_doctor.png" /></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">13 / 14</div>
+        <div class="kicker">Checks and safe fixes</div>
+        <h2>Checks and safe fixes</h2>
+        <p class="lead">The Doctor leads with a summary and lists only what needs attention, each with a next step. The rest is grouped and folded.</p>
+        <ul><li>Models & keys: every role's model reachable, the model exists, breaker state, API key present</li><li>Runs: failed or needs-review runs in the last 24 hours, stuck or interrupted runs</li><li>One-click fixes: reset a breaker, resume runs, restore a base harness, make .env private</li><li>Safe fixes also run at startup and every 10 minutes</li></ul>
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>13 / 14 — Checks and safe fixes</span></div>
+  </div>
+
+  <div class="page section-page">
+    <section class="scene web">
+      <div class="scene-media">
+        <div class="browser-frame placeholder"></div>
+      </div>
+      <div class="scene-copy">
+        <div class="scene-num">14 / 14</div>
+        <div class="kicker">HARNESSMITH</div>
+        <h2>Give it a goal</h2>
+        <p class="lead">That is Harnessmith. Give it a goal, connect a model, and let it improve its own harness. It runs on your machine, and your keys stay in your own dot env file.</p>
+        
+      </div>
+    </section>
+    <div class="footer-strip"><span>Harnessmith</span><span>14 / 14 — Give it a goal</span></div>
+  </div>
+
+  <div class="page closing">
+    <div class="mark small"><img src="file:///Users/surenjanath/Desktop/AI Projects/harnessmith/walkthrough/assets/logo.png" /></div>
+    <h2>Thank you</h2>
+    <p>This guide covered every major screen in Harnessmith, from describing a goal and connecting a model to reading the results, the lessons it learned, and the Doctor's checks. Keys stay in your own .env file; nothing in this guide shows one.</p>
+    <div class="tag">Give an agent a goal. Watch it improve its own harness.</div>
+  </div>
+
+</body>
+</html>
