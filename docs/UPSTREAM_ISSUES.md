@@ -51,3 +51,21 @@ Status:
 | [178](https://github.com/google-research/harness2/issues/178), [91](https://github.com/google-research/harness2/issues/91), [71](https://github.com/google-research/harness2/issues/71), [39](https://github.com/google-research/harness2/issues/39) | Skill conversion, LAB study, analysis write-up, citation request | ⚪ n/a | Discussion, not code. |
 | [73](https://github.com/google-research/harness2/issues/73), [152](https://github.com/google-research/harness2/issues/152), [155](https://github.com/google-research/harness2/issues/155) | Off-topic / spam | ⚪ n/a | |
 | [194](https://github.com/google-research/harness2/issues/194) | Our announcement | — | |
+
+## Upstream pull requests and the #193 audit
+
+Fixes proposed in upstream PRs (or found by the [#193](https://github.com/google-research/harness2/issues/193) audit) that apply to this port.
+
+| Upstream | Problem | Status | What harnessmith does |
+|---|---|---|---|
+| [#32](https://github.com/google-research/harness2/pull/32), audit 15, [#43](https://github.com/google-research/harness2/pull/43) | Symlinks let file tools or tree reads escape the workspace | ✅ fixed here | `safe_path` resolves the deepest existing part of a path and refuses it if a link leads outside the workspace (or is broken). Tree reads and fingerprints already skip links. Test: `symlinks_cannot_escape_the_workspace`. |
+| [#37](https://github.com/google-research/harness2/pull/37), [#40](https://github.com/google-research/harness2/pull/40) | Agent commands inherit API keys | ✅ fixed here | Credential-looking variables are removed from every agent shell command and hook (`HARNESS2_PASS_ENV` to keep one). Test: `secrets_are_not_passed_to_commands`. |
+| audit 16 | Proposer audits can contain secrets | ✅ fixed here | Mission, system prompt, response and error are redacted before they are written. Test: `keys_are_redacted`. |
+| audit 10 | `claude_cli` runs with `--dangerously-skip-permissions` | ✅ fixed here | Fenced by default: `acceptEdits` in its temporary folder plus a short allowlist of commands. Opt out with `HARNESS2_CLAUDE_CLI_UNFENCED=1`. Allowing `python3` still lets a determined session run code, so the improver is best treated as trusted. |
+| [#54](https://github.com/google-research/harness2/pull/54), audit 7 | Library writes race with parallel workers or concurrent runs | ✅ fixed here | Adding, forgetting and re-indexing take a per-domain file lock. |
+| audit 2 | A retry's transport error hides why the earlier attempt was rejected | ✅ fixed here | The fallback reason keeps both. |
+| [#164](https://github.com/google-research/harness2/pull/164), [#142](https://github.com/google-research/harness2/pull/142) | Non-string hook matchers or commands accepted | ✅ fixed here | Validation rejects a matcher that isn't a string or doesn't compile, and a command that isn't a string. At run time a bad matcher now skips only its own entry (it used to turn off every hook for the event). Test: `hook_matchers_and_commands_must_be_strings`. |
+| [#169](https://github.com/google-research/harness2/pull/169) | Hyphenated top-level script names rejected | ✅ fixed here | `scripts/check-totals.py` is allowed, as the error message already promised. |
+| [#69](https://github.com/google-research/harness2/pull/69), [#13](https://github.com/google-research/harness2/pull/13) | Incomplete or failed audit entries replayed from cache | ✅ fixed here | A cache hit needs a readable `meta.json` with `ok: true` and no error. |
+| audit 4 | Base roll reported ok when the run folder is missing | 🟢 not affected | Goal-mode bases are saved by the server, not rolled from a run folder. |
+| [#175](https://github.com/google-research/harness2/pull/175), [#70](https://github.com/google-research/harness2/pull/70), [#118](https://github.com/google-research/harness2/pull/118) | Answer keys / rubric leaking into model context | 🟢 not affected | The goal rubric stays in `task.json` and is only read by the judge; the library and context builders refuse grader verdicts (`assert_tree_has_no_grader_verdicts`). |

@@ -60,6 +60,7 @@ fn shell(cfg: &AgentConfig, cmd: &str) -> std::process::Command {
         None => {
             let mut c = std::process::Command::new("bash");
             c.arg("-c").arg(cmd).current_dir(&cfg.workspace);
+            super::sandbox::scrub_env(&mut c);
             c
         }
     }
@@ -325,7 +326,27 @@ pub fn safe_path(ws: &Path, p: &str) -> Result<PathBuf> {
     if rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         bail!("path {p:?} escapes the workspace");
     }
-    Ok(ws.join(rel))
+    let full = ws.join(&rel);
+    // File tools run outside the sandbox, so a symlink planted in the workspace (by a command
+    // or an input file) must not let them read or write outside it (upstream #32, audit #15).
+    // Resolve the deepest part of the path that exists and check it is still inside.
+    if let Ok(root) = ws.canonicalize() {
+        let mut probe = full.clone();
+        loop {
+            if std::fs::symlink_metadata(&probe).is_ok() {
+                match probe.canonicalize() {
+                    Ok(real) if real.starts_with(&root) => break,
+                    Ok(_) => bail!("path {p:?} goes through a link that points outside the workspace"),
+                    // A dangling link: refuse, since writing through it could create a file anywhere.
+                    Err(_) => bail!("path {p:?} goes through a broken link"),
+                }
+            }
+            if !probe.pop() || !probe.starts_with(ws) {
+                break;
+            }
+        }
+    }
+    Ok(full)
 }
 
 fn strip_frontmatter(body: &str) -> String {
@@ -355,7 +376,9 @@ fn run_hooks(cfg: &AgentConfig, event: &str, tool: &str, input: &Value, response
     for e in entries {
         let matcher = e.get("matcher").and_then(|m| m.as_str()).unwrap_or("");
         if !matcher.is_empty() && matcher != "*" {
-            let re = Regex::new(&format!("^(?:{matcher})$")).ok()?;
+            // A bad pattern skips only its own entry; it used to end the whole event, so one
+            // typo silently turned every other hook off (upstream #164).
+            let Ok(re) = Regex::new(&format!("^(?:{matcher})$")) else { continue };
             if !re.is_match(tool) {
                 continue;
             }
@@ -1151,6 +1174,24 @@ mod tests {
         assert!(safe_path(ws, "../x").is_err());
         assert!(safe_path(ws, "/etc/passwd").is_err());
         assert!(safe_path(ws, "/tmp/ws/ok.md").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_cannot_escape_the_workspace() {
+        let t = tempfile::tempdir().unwrap();
+        let ws = t.path().join("ws");
+        let outside = t.path().join("outside");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, ws.join("out")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), ws.join("leak.txt")).unwrap();
+        std::os::unix::fs::symlink(ws.join("sub"), ws.join("inner")).unwrap();
+        std::fs::create_dir_all(ws.join("sub")).unwrap();
+        assert!(safe_path(&ws, "out/x.txt").is_err());
+        assert!(safe_path(&ws, "leak.txt").is_err());
+        assert!(safe_path(&ws, "inner/ok.txt").is_ok());
+        assert!(safe_path(&ws, "new/dir/file.txt").is_ok());
     }
     #[test]
     fn compact_fits_window() {

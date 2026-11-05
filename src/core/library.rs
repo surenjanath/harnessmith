@@ -60,6 +60,18 @@ impl Library {
     pub fn entry_dir(&self, task_id: &str) -> PathBuf {
         self.dir().join("harnesses").join(slug(task_id))
     }
+    /// Hold this domain's lock while `f` runs. Workers and concurrent runs share a library, and
+    /// writing an entry then rebuilding INDEX.md from disk must not interleave (upstream #54).
+    fn locked<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        use fs2::FileExt;
+        std::fs::create_dir_all(&self.root)?;
+        let lf = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(self.root.join(format!(".{}.lock", domain_dir(&self.domain))))?;
+        lf.lock_exclusive()?;
+        let r = f();
+        let _ = FileExt::unlock(&lf);
+        r
+    }
+
     pub fn exists(&self) -> bool {
         self.index().is_file()
     }
@@ -90,6 +102,10 @@ impl Library {
 
     /// Drop the entries for these tasks and rebuild INDEX.md; unknown tasks are ignored.
     pub fn forget(&self, task_ids: &[String]) -> Result<()> {
+        self.locked(|| self.forget_unlocked(task_ids))
+    }
+
+    fn forget_unlocked(&self, task_ids: &[String]) -> Result<()> {
         let mut removed = false;
         for tid in task_ids {
             let d = self.entry_dir(tid);
@@ -99,7 +115,7 @@ impl Library {
             }
         }
         if removed {
-            self.rebuild_index()?;
+            self.rebuild_index_unlocked()?;
         }
         Ok(())
     }
@@ -107,8 +123,10 @@ impl Library {
     /// Keep only the entries preceding the current task in this stream.
     pub fn retain(&self, task_ids: &[String]) -> Result<()> {
         let keep: HashSet<String> = task_ids.iter().map(|t| slug(t)).collect();
-        let drop: Vec<String> = self.entries().into_iter().filter(|e| !keep.contains(e)).collect();
-        self.forget(&drop)
+        self.locked(|| {
+            let drop: Vec<String> = self.entries().into_iter().filter(|e| !keep.contains(e)).collect();
+            self.forget_unlocked(&drop)
+        })
     }
 
     /// Store one adopted harness plus why it was adopted, and rebuild INDEX.md from disk.
@@ -116,7 +134,10 @@ impl Library {
         if !has_experience(experience) {
             return Ok(None);
         }
-        let exp = experience.unwrap();
+        self.locked(|| self.add_unlocked(task_id, harness, why, label, run_id, experience.unwrap()))
+    }
+
+    fn add_unlocked(&self, task_id: &str, harness: &Tree, why: &str, label: &str, run_id: &str, exp: &Value) -> Result<Option<PathBuf>> {
         context::assert_tree_has_no_grader_verdicts(harness)?;
         let mut probe = BTreeMap::new();
         probe.insert("EXPERIENCE.md".to_string(), format!("{exp}{why}"));
@@ -149,12 +170,16 @@ impl Library {
             lines.push(String::new());
         }
         util::write(&d.join("EXPERIENCE.md"), lines.join("\n"))?;
-        self.rebuild_index()?;
+        self.rebuild_index_unlocked()?;
         Ok(Some(d))
     }
 
     /// Regenerate INDEX.md from what is on disk.
     pub fn rebuild_index(&self) -> Result<PathBuf> {
+        self.locked(|| self.rebuild_index_unlocked())
+    }
+
+    fn rebuild_index_unlocked(&self) -> Result<PathBuf> {
         let mut rows = vec![
             format!("# Library — {}", self.domain),
             String::new(),

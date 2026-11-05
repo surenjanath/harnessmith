@@ -77,6 +77,26 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// Does this environment variable look like a credential? Agent commands never see these.
+pub fn is_secret_var(name: &str) -> bool {
+    let n = name.to_ascii_uppercase();
+    const MARKS: [&str; 9] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH", "COOKIE", "SESSION"];
+    MARKS.iter().any(|m| n.contains(m)) || n.starts_with("HARNESS2_") || n.starts_with("AWS_") || n == "DATABASE_URL"
+}
+
+/// Remove credential-looking variables from a command the model controls (upstream #37/#40):
+/// a prompt-injected agent could otherwise print the server's API keys with `env`. Names listed
+/// in HARNESS2_PASS_ENV (comma-separated) are kept, for goals that really need one.
+pub fn scrub_env(c: &mut Command) {
+    let keep: Vec<String> = std::env::var("HARNESS2_PASS_ENV").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    for (k, _) in std::env::vars_os() {
+        let k = k.to_string_lossy().to_string();
+        if is_secret_var(&k) && !keep.contains(&k) {
+            c.env_remove(&k);
+        }
+    }
+}
+
 impl Sandbox {
     pub fn new(pref: &str, workspace: &Path, readonly_rel: &[String], network: bool) -> Sandbox {
         let ws = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
@@ -84,8 +104,14 @@ impl Sandbox {
         Sandbox { kind: resolve(pref), workspace: ws, readonly, network }
     }
 
-    /// A `bash -c cmd` command, wrapped by the backend, running in the workspace.
+    /// A `bash -c cmd` command, wrapped by the backend, running in the workspace, without secrets.
     pub fn command(&self, cmd: &str) -> Command {
+        let mut c = self.raw_command(cmd);
+        scrub_env(&mut c);
+        c
+    }
+
+    fn raw_command(&self, cmd: &str) -> Command {
         let ws = self.workspace.display().to_string();
         match self.kind {
             Kind::Off => {
@@ -145,6 +171,16 @@ mod tests {
         let mut c = sb.command(cmd);
         let out = c.output().unwrap();
         (out.status.success(), format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
+    }
+
+    #[test]
+    fn secrets_are_not_passed_to_commands() {
+        assert!(is_secret_var("OPENAI_API_KEY") && is_secret_var("HARNESS2_UI_PASSWORD") && is_secret_var("github_token"));
+        assert!(!is_secret_var("PATH") && !is_secret_var("HOME") && !is_secret_var("LANG"));
+        std::env::set_var("H2TEST_SECRET_TOKEN", "s3cr3t");
+        let sb = Sandbox { kind: Kind::Off, workspace: std::env::temp_dir(), readonly: vec![], network: false };
+        let (_, out) = run(&sb, "echo [$H2TEST_SECRET_TOKEN] [$PATH]");
+        assert!(out.starts_with("[] [/"), "{out}");
     }
 
     #[test]

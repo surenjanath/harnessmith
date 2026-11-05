@@ -247,3 +247,39 @@ pub fn sleep_cancellable(d: Duration) -> bool {
     }
     crate::log::cancelled()
 }
+
+/// Hide credentials before text is written to disk (audit trails, logs). Removes the values of
+/// secret-looking environment variables, then common key shapes (sk-…, ghp_…, AIza…, Bearer …).
+pub fn redact_secrets(text: &str) -> String {
+    let mut out = text.to_string();
+    for (k, v) in std::env::vars() {
+        if v.len() >= 8 && crate::llm::sandbox::is_secret_var(&k) && out.contains(&v) {
+            out = out.replace(&v, &format!("[{k} redacted]"));
+        }
+    }
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"(?x)
+            \b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_\-]{20,}
+            | gh[pousr]_[A-Za-z0-9]{30,}
+            | github_pat_[A-Za-z0-9_]{30,}
+            | AIza[0-9A-Za-z_\-]{30,}
+            | xox[abpr]-[A-Za-z0-9\-]{10,}
+            | AKIA[0-9A-Z]{16})
+            | (?i:bearer)\s+[A-Za-z0-9._\-]{20,}")
+        .unwrap()
+    });
+    re.replace_all(&out, "[redacted]").into_owned()
+}
+
+#[cfg(test)]
+mod redact_tests {
+    #[test]
+    fn keys_are_redacted() {
+        std::env::set_var("H2TEST_API_KEY", "verysecretvalue123");
+        let s = super::redact_secrets("key verysecretvalue123 and sk-ant-abcdefghijklmnopqrstuvwxyz and Bearer abcdefghijklmnopqrstuvwx ok");
+        assert!(!s.contains("verysecret") && !s.contains("sk-ant-abc") && !s.contains("Bearer abc"), "{s}");
+        assert!(s.ends_with(" ok"));
+        assert_eq!(super::redact_secrets("plain text, no keys"), "plain text, no keys");
+    }
+}

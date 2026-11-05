@@ -300,6 +300,11 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
   - Unpinned notes nobody recalls fade (30-day half-life in ranking) and are archived after 90 days.
   - **Share** copies a note to a store that other projects can recall when "recall shared notes" is on.
 - **Login.** Set `HARNESS2_UI_PASSWORD` (8+ characters). Every page and API call then needs the session cookie from `/login` or `Authorization: Bearer <password>`. Inbound hooks keep their own tokens. Use this whenever the UI is reachable beyond localhost.
+- **Secrets stay out of the agent's reach.**
+  - Shell commands and hooks the model runs get no credential-looking variables (`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `HARNESS2_*`, `AWS_*`…), so `env` can't leak your API keys. List names a goal needs in `HARNESS2_PASS_ENV` (comma-separated).
+  - File tools refuse paths that go through a link pointing outside the workspace.
+  - Improver audit files have keys and bearer tokens replaced with `[redacted]`.
+  - The `claude_cli` improver runs with edits accepted only in its own temporary folder and a short list of read and test commands, instead of `--dangerously-skip-permissions`. `HARNESS2_CLAUDE_CLI_UNFENCED=1` restores the old behavior.
 - **Stop is immediate.** Stop closes in-flight model calls at once. Local plain-HTTP servers see the connection drop and stop generating, and HTTPS calls are abandoned. It also kills running shell commands and ends retry waits. Cancelled calls do not count against a model's circuit breaker.
 
 ## Help writing goals, finding files, and picking models

@@ -16,6 +16,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub const SYSTEM_ARG_MAX: usize = 120_000;
+/// What a fenced Claude Code improver may use: file tools, plus commands that read or test.
+const CLAUDE_CLI_TOOLS: &str = "Read Edit MultiEdit Write Glob Grep LS Bash(ls:*) Bash(cat:*) Bash(head:*) Bash(wc:*) Bash(find:*) Bash(grep:*) Bash(python3:*) Bash(python:*) Bash(bash scripts/*) Bash(sh scripts/*) Bash(node:*) Bash(jq:*) Bash(diff:*)";
 
 /// A call did not produce a usable reply. Never swallowed into an empty string.
 #[derive(Debug, Clone)]
@@ -148,7 +150,15 @@ impl Proposer {
     fn claude_cli(&self, cwd: &Path, mission: &str, system: &str, wall: u64) -> anyhow::Result<(String, f64, String)> {
         let cli = util::which("claude").unwrap_or_else(|| PathBuf::from("claude"));
         let mut cmd = Command::new(cli);
-        cmd.args(["--dangerously-skip-permissions", "-p", "--output-format", "json", "--effort", &self.spec.effort]);
+        // Fence the session (audit #10): edits are accepted only inside its own temporary working
+        // folder, and the only commands it may run are reading and testing ones. Set
+        // HARNESS2_CLAUDE_CLI_UNFENCED=1 to go back to skipping every permission check.
+        if config::env("HARNESS2_CLAUDE_CLI_UNFENCED").map(|v| v == "1").unwrap_or(false) {
+            cmd.arg("--dangerously-skip-permissions");
+        } else {
+            cmd.args(["--permission-mode", "acceptEdits", "--allowedTools", CLAUDE_CLI_TOOLS]);
+        }
+        cmd.args(["-p", "--output-format", "json", "--effort", &self.spec.effort]);
         let mut stdin = mission.to_string();
         if !system.is_empty() {
             if system.len() > SYSTEM_ARG_MAX {
@@ -271,7 +281,14 @@ impl Proposer {
         if txt.trim().is_empty() {
             return None;
         }
-        let replayed_usd = std::fs::read_to_string(&p.meta).ok().and_then(|m| serde_json::from_str::<Value>(&m).ok()).and_then(|m| m["cost_usd"].as_f64()).unwrap_or(0.0);
+        // Replay only a complete, successful entry: meta.json is written last, so a missing or
+        // unreadable one means the session was cut off, and `ok: false` means it failed
+        // (upstream #69 / #13).
+        let meta: Value = serde_json::from_str(&std::fs::read_to_string(&p.meta).ok()?).ok()?;
+        if meta["ok"].as_bool() != Some(true) || !meta["error"].as_str().unwrap_or("").is_empty() {
+            return None;
+        }
+        let replayed_usd = meta["cost_usd"].as_f64().unwrap_or(0.0);
         Some(Reply {
             label: label.into(),
             text: txt,
@@ -287,15 +304,16 @@ impl Proposer {
 
     fn write_audit(&self, r: &mut Reply, mission: &str, system: &str, cache_key: &str) {
         let Some(p) = self.paths(&r.label, cache_key) else { return };
-        let _ = std::fs::write(&p.mission, mission);
+        // Audit files are kept and shared; no credential may land in them (audit #16).
+        let _ = std::fs::write(&p.mission, util::redact_secrets(mission));
         if !system.is_empty() {
-            let _ = std::fs::write(&p.system, system);
+            let _ = std::fs::write(&p.system, util::redact_secrets(system));
         }
-        let _ = std::fs::write(&p.response, &r.text);
+        let _ = std::fs::write(&p.response, util::redact_secrets(&r.text));
         let meta = json!({
             "label": r.label, "ok": r.ok, "channel": r.channel, "model": self.spec.model,
             "effort": self.spec.effort, "attempts": r.attempts, "wall_s": r.wall_s,
-            "cost_usd": r.cost_usd, "error": r.error,
+            "cost_usd": r.cost_usd, "error": util::redact_secrets(&r.error),
         });
         let _ = std::fs::write(&p.meta, serde_json::to_string_pretty(&meta).unwrap());
         r.audit = Some(p.response);

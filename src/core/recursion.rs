@@ -213,7 +213,9 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
         ) {
             Ok(r) => r,
             Err(e) => {
-                err = e.to_string();
+                // Keep why the previous attempt was rejected: it explains the fallback better
+                // than the transport error alone (audit #2).
+                err = if err.is_empty() { e.to_string() } else { format!("{e} (the attempt before was rejected: {err})") };
                 execution_failed = true;
                 spent_calls += if e.attempts > 0 { e.attempts } else { TRANSPORT_ATTEMPTS };
                 spent_usd += e.cost_usd;

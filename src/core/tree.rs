@@ -62,7 +62,7 @@ fn rx(s: &SurfaceSpec) -> Rx {
         skill: Regex::new(&format!(r"^{sd}/({NAME})/SKILL\.md$")).unwrap(),
         skill_script: Regex::new(&format!(r"^{sd}/{NAME}/scripts/[A-Za-z0-9_.\-]+$")).unwrap(),
         subagent: Regex::new(&format!(r"^sub_agents/({NAME})/AGENT\.md$")).unwrap(),
-        script: Regex::new(r"^scripts/[a-z0-9_][a-z0-9_]*\.py$").unwrap(),
+        script: Regex::new(r"^scripts/[a-z0-9_][a-z0-9_\-]*\.py$").unwrap(), // hyphens allowed, as the error message says (upstream #169)
         script_ref: Regex::new(&format!(r"(?:python3?\s+)((?:{sd}/[\w\-]+/)?scripts/[\w.\-]+\.py)"))
             .unwrap(),
         plugin: s
@@ -311,6 +311,15 @@ pub fn check_hooks(surface: &SurfaceSpec, src: &str, errs: &mut Vec<String>) {
             continue;
         };
         for (i, entry) in entries.iter().enumerate() {
+            match entry.get("matcher") {
+                None | Some(Value::Null) => {}
+                Some(Value::String(m)) => {
+                    if regex::Regex::new(&format!("^(?:{m})$")).is_err() {
+                        errs.push(format!("{hf}: {event}[{i}] matcher {m:?} is not a valid pattern"));
+                    }
+                }
+                Some(_) => errs.push(format!("{hf}: {event}[{i}] matcher must be a string such as \"Bash\" or \"write_file|append_file\"")),
+            }
             let Some(hs) = entry.get("hooks").and_then(|h| h.as_array()) else {
                 errs.push(format!("{hf}: {event}[{i}] needs a `hooks` list"));
                 continue;
@@ -320,6 +329,8 @@ pub fn check_hooks(surface: &SurfaceSpec, src: &str, errs: &mut Vec<String>) {
                     errs.push(format!(
                         "{hf}: {event}[{i}] hook type must be \"command\" — async/prompt/agent hooks are skipped as 'not supported yet'"
                     ));
+                } else if !matches!(h.get("command"), Some(Value::String(_))) {
+                    errs.push(format!("{hf}: {event}[{i}] `command` must be a string (one shell command)"));
                 } else if h.get("command").map(value_str).unwrap_or_default().trim().is_empty() {
                     errs.push(format!("{hf}: {event}[{i}] has an empty `command`"));
                 }
@@ -582,11 +593,28 @@ mod tests {
     use crate::substrate::opencode::opencode_surface;
 
     #[test]
+    fn hook_matchers_and_commands_must_be_strings() {
+        // upstream #164 / #142
+        let surface = crate::substrate::native::native_surface();
+        let errs = |src: &str| {
+            let mut e = vec![];
+            check_hooks(&surface, src, &mut e);
+            e
+        };
+        assert!(errs(r#"{"hooks":{"PreToolUse":[{"matcher":"bash|write_file","hooks":[{"type":"command","command":"true"}]}]}}"#).is_empty());
+        assert!(!errs(r#"{"hooks":{"PreToolUse":[{"matcher":["bash"],"hooks":[{"type":"command","command":"true"}]}]}}"#).is_empty());
+        assert!(!errs(r#"{"hooks":{"PreToolUse":[{"matcher":"(bash","hooks":[{"type":"command","command":"true"}]}]}}"#).is_empty());
+        assert!(!errs(r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":["rm","-rf"]}]}]}}"#).is_empty());
+    }
+
+    #[test]
     fn allowed_paths() {
         let s = opencode_surface();
         assert!(is_allowed(&s, "systemprompt.md"));
         assert!(is_allowed(&s, "skills/doc_review/SKILL.md"));
         assert!(is_allowed(&s, "scripts/check_totals.py"));
+        assert!(is_allowed(&s, "scripts/check-totals.py"));
+        assert!(!is_allowed(&s, "scripts/-x.py"));
         assert!(is_allowed(&s, "plugin/guard.ts"));
         assert!(!is_allowed(&s, "skills/Doc/SKILL.md"));
         assert!(!is_allowed(&s, "../x"));
