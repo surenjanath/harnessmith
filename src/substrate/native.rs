@@ -107,7 +107,7 @@ for c in cols:
         print(f"- {c}: text · {len(uniq)} distinct · nulls {nulls} · e.g. {sample}")
 "#;
 
-const RUNTIME_RULES: &str = "# RUNTIME\nYour working directory is the workspace. Input files for the task, if any, are in it. Write deliverables under `output/`. Use relative paths.";
+const RUNTIME_RULES: &str = "# RUNTIME\nYour working directory is the workspace. Input files for the task, if any, are in it. Write deliverables under `output/`. Use relative paths.\n\n# HOW TO WORK\n1. Read the goal and list, for yourself, every requirement in it (format, file type, length, style, sections).\n2. Create each deliverable with `write_file`, in full, in one go (not with shell echo or heredocs, which truncate). Use the file type the goal asks for: an HTML page is a complete `output/index.html` with <!DOCTYPE html>, <head>, inline <style> and </html>; a document is Markdown with headings and real depth.\n3. Read every file back and check it against each requirement; fix what is missing.\n4. Only then call `finish` with a short summary. Describing work in a reply does not do it: only tool calls change files.";
 
 /// The system prompt the solver sees: the always-on harness plus an index of on-demand parts.
 pub fn compose_system(harness: &Path) -> String {
@@ -198,6 +198,9 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     let sb = crate::llm::sandbox::Sandbox::new(&o.sandbox, &ws, &ro, o.sandbox_network);
     if sb.kind != crate::llm::sandbox::Kind::Off {
         crate::say!("      sandbox: {} · network {}", sb.kind.as_str(), if o.sandbox_network { "on" } else { "off" });
+        if !o.sandbox_network {
+            cfg.system.push_str("\n\n---\n\n# NETWORK\nThis workspace has NO internet access. Do not try to download or install anything (wget, curl, pip install, git clone): it cannot work. Use the input files and your own knowledge, and say which facts a reader should verify.");
+        }
         cfg.sandbox = Some(sb);
     }
     cfg.gate = Some(gate);

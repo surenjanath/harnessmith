@@ -480,6 +480,13 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             Ok(format!("deleted {}", util::rel(ws, &p)))
         }
         "bash" if cfg.allow_shell => {
+            // Inside a sandbox without network, downloads can only fail slowly: say so at once.
+            if cfg.sandbox.as_ref().map(|sb| !sb.network).unwrap_or(false) {
+                let dl = Regex::new(r"(^|[;&|\s(])(wget|curl|pip3?\s+install|python3?\s+-m\s+pip\s+install|git\s+clone|npm\s+(install|i)\b|apt(-get)?\s+install|brew\s+install)").unwrap();
+                if dl.is_match(&s("command")) {
+                    bail!("there is no internet access in this workspace, so downloads and installs cannot work. Do not retry: write the deliverable from the input files and your own knowledge (mark facts that would need checking), using write_file");
+                }
+            }
             let t = a.get("timeout_s").and_then(|v| v.as_u64()).unwrap_or(120).clamp(1, 600);
             let mut c = shell(cfg, &s("command"));
             config::apply_env(&mut c, &config::scrub_env(None, &[]));
@@ -823,8 +830,20 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             )));
             continue;
         }
-        // Self-check 4: a prose-only reply ends the session only once something is delivered.
-        // Small models often narrate running tools instead of calling them.
+        // Self-check 4: a prose-only reply ends the session only once something is delivered, and
+        // the delivery passes review. Small models often narrate tools instead of calling them.
+        let review_issues: Vec<String> = if resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && finish_refusals < 2 && out.steps + 1 < cfg.max_steps {
+            cfg.rescue_dir.as_ref().map(|d| super::review::review(task, d)).unwrap_or_default()
+        } else {
+            vec![]
+        };
+        if !review_issues.is_empty() {
+            finish_refusals += 1;
+            heal(&mut out, &mut traj, "finish_refused", json!({"issues": review_issues}));
+            messages.push(Msg::Assistant { text: resp.text.clone(), calls: vec![] });
+            messages.push(Msg::User(format!("[self-check] Not done yet — the deliverables do not meet the goal:\n{}\nFix every point with real tool calls (rewrite files completely with write_file), then call finish.", review_issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n"))));
+            continue;
+        }
         if resp.calls.is_empty() && cfg.depth == 0 && idle_nudges < 3 && out.steps + 1 < cfg.max_steps && undelivered(cfg) {
             idle_nudges += 1;
             heal(&mut out, &mut traj, "no_action", json!({"reply": util::take_chars(resp.text.trim(), 160)}));
@@ -915,11 +934,23 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                 heal(&mut out, &mut traj, "error_streak", json!({"streak": err_streak}));
             }
             traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": if is_error { "error" } else { "ok" }, "output": content}));
-            if call.name == "finish" && !is_error && cfg.depth == 0 && finish_refusals < 2 && undelivered(cfg) {
-                finish_refusals += 1;
-                heal(&mut out, &mut traj, "finish_refused", json!({}));
-                results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: "[self-check] finish refused: output/ is still empty. Write the deliverable with write_file first (the finish answer alone is not saved as a file), then call finish again.".into(), is_error: true });
-                continue;
+            // Self-check 5: review the deliverables against the goal before letting it finish.
+            if call.name == "finish" && !is_error && cfg.depth == 0 && finish_refusals < 2 {
+                if let Some(dir) = &cfg.rescue_dir {
+                    let issues = super::review::review(task, dir);
+                    if !issues.is_empty() {
+                        finish_refusals += 1;
+                        heal(&mut out, &mut traj, "finish_refused", json!({"issues": issues}));
+                        say!("{}! review: {}", cfg.log_prefix, util::take_chars(&issues.join("; "), 240));
+                        results.push(ToolResult {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            content: format!("[self-check] finish refused — the deliverables do not meet the goal yet:\n{}\nFix every point (rewrite files completely with write_file), read them back, then call finish again.", issues.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")),
+                            is_error: true,
+                        });
+                        continue;
+                    }
+                }
             }
             if call.name == "finish" && !is_error {
                 finish = Some(content.clone());

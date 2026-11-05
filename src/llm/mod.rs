@@ -10,5 +10,6 @@ pub mod gate;
 pub mod mcp;
 pub mod health;
 pub mod memory;
+pub mod review;
 pub mod sandbox;
 pub mod session;
