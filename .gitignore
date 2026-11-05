@@ -6,3 +6,9 @@
 !/dependencies/ASSETS.json
 .env
 connections.json
+
+# OS and tool noise
+.DS_Store
+**/.DS_Store
+*.log
+node_modules/

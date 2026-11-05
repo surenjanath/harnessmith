@@ -204,7 +204,7 @@ fn spend_and_fallbacks(ns_dir: &Path, modes: &[&str], k: usize) -> (BTreeMap<(St
             let key = (m.to_string(), k);
             let rec = recs.get(*m).cloned().unwrap_or(json!({}));
             *fb.entry(key.clone()).or_insert(0) += rec["fell_back"].as_array().map(|a| a.len()).unwrap_or(0);
-            let spend: f64 = rec["stages"].as_array().map(|a| a.iter().map(|s| s["usd"].as_f64().unwrap_or(0.0)).sum()).unwrap_or(0.0);
+            let spend: f64 = rec["stages"].as_array().map(|a| a.iter().map(|s| s["usd"].as_f64().unwrap_or(0.0) + s["replayed_usd"].as_f64().unwrap_or(0.0)).sum()).unwrap_or(0.0);
             let sel_usd = s["selections"][*m]["usd"].as_f64().unwrap_or(0.0);
             *usd.entry(key).or_insert(0.0) += spend + sel_usd;
         }

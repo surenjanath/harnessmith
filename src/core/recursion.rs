@@ -34,6 +34,8 @@ pub struct Stage {
     pub cached: bool,
     pub notes: String,
     pub execution_failed: bool,
+    /// What the replayed (cached) sessions originally cost; not spent again (upstream #50).
+    pub replayed_usd: f64,
 }
 
 impl Stage {
@@ -50,6 +52,7 @@ impl Stage {
             cached: false,
             notes: String::new(),
             execution_failed: false,
+            replayed_usd: 0.0,
         }
     }
 
@@ -111,7 +114,7 @@ impl ModeResult {
             "kept_base": self.stages.iter().filter(|s| s.kept_base).map(|s| s.label.clone()).collect::<Vec<_>>(),
             "stages": self.stages.iter().map(|s| json!({
                 "label": s.label, "dim": s.dim, "fell_back": s.fell_back, "kept_base": s.kept_base,
-                "execution_failed": s.execution_failed, "attempts": s.attempts, "usd": s.usd,
+                "execution_failed": s.execution_failed, "attempts": s.attempts, "usd": s.usd, "replayed_usd": s.replayed_usd,
                 "cached": s.cached, "notes": s.notes, "error": util::take_chars(&s.error, 400),
             })).collect::<Vec<_>>(),
             "similarity": self.similarity,
@@ -194,6 +197,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
     let mission = context::mission(&ctree, &a.job);
     let mut err = String::new();
     let (mut spent_usd, mut spent_calls, mut all_cached, mut execution_failed) = (0.0, 0u32, true, false);
+    let mut replayed_usd = 0.0;
     for attempt in 1..=STAGE_ATTEMPTS {
         let text = if err.is_empty() {
             mission.clone()
@@ -218,6 +222,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
             }
         };
         spent_usd += reply.cost_usd;
+        replayed_usd += reply.replayed_usd;
         spent_calls += if reply.cached { 0 } else { reply.attempts.max(1) };
         all_cached = all_cached && reply.cached;
         let Some(ws) = &reply.workspace else {
@@ -268,6 +273,7 @@ pub fn run_stage(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: StageArg
             fell_back: false,
             error: String::new(),
             usd: spent_usd,
+            replayed_usd,
             attempts: spent_calls,
             cached: all_cached,
             notes,

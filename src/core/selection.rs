@@ -116,7 +116,7 @@ fn render_pool(candidates: &BTreeMap<String, RunView>, adapter: &dyn BenchmarkAd
             match adapter.trajectory(&rv.run_dir, adapter.spec().obs_trunc) {
                 Err(e) => sel.dropped.push(util::take_chars(&format!("{lbl} (trajectory failed: {e})"), 200)),
                 Ok(body) => {
-                    if body.trim().is_empty() || body.starts_with("(no trajectory") {
+                    if crate::core::context::is_absent_evidence(&body) {
                         continue;
                     }
                     pool.insert(lbl.clone(), rv.clone());

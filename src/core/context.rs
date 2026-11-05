@@ -92,6 +92,15 @@ pub type PoolEntry = (String, PathBuf, Option<RunView>);
 
 /// Write the evidence tree; return what landed, so the mission describes only that.
 #[allow(clippy::too_many_arguments)]
+/// Placeholders written instead of evidence; none of them may be served as a real trajectory or
+/// artifact (upstream #143, gap 1b).
+pub const ABSENT_EVIDENCE: &[&str] = &["(no trajectory", "(trajectory unavailable", "(unavailable:", "(nothing produced)"];
+
+pub fn is_absent_evidence(s: &str) -> bool {
+    let t = s.trim_start();
+    t.is_empty() || ABSENT_EVIDENCE.iter().any(|p| t.starts_with(p))
+}
+
 pub fn build(
     dest: &Path,
     adapter: &dyn BenchmarkAdapter,
@@ -245,9 +254,23 @@ fn write_rollout(dest: &Path, r: &RunView, adapter: &dyn BenchmarkAdapter, trunc
     }
     let d = dest.join("deliverables").join(&r.label);
     std::fs::create_dir_all(&d)?;
+    // Same basename from different folders (Q1/chart.png, Q2/chart.png) must not overwrite each
+    // other (upstream #153): later ones get their parent folder prefixed, then a counter.
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     for img in adapter.deliverable_images(&r.run_dir).into_iter().take(8) {
-        if let Some(name) = img.file_name() {
-            let t = d.join("images").join(name);
+        if let Some(name) = img.file_name().map(|n| n.to_string_lossy().to_string()) {
+            let mut pick = name.clone();
+            if used.contains(&pick) {
+                let parent = img.parent().and_then(|p| p.file_name()).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                pick = if parent.is_empty() { name.clone() } else { format!("{parent}__{name}") };
+                let mut i = 2;
+                while used.contains(&pick) {
+                    pick = format!("{i}__{name}");
+                    i += 1;
+                }
+            }
+            used.insert(pick.clone());
+            let t = d.join("images").join(&pick);
             let _ = std::fs::create_dir_all(t.parent().unwrap());
             let _ = std::fs::copy(&img, &t);
         }
@@ -552,5 +575,17 @@ mod tests {
         util::write(&d.path().join("x/reference_answer.txt"), "k").unwrap();
         assert!(assert_no_leak_paths(d.path(), &["reference_answer.txt".into()]).is_err());
         assert!(assert_no_leak_paths(d.path(), &["other.txt".into()]).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod absent_evidence_tests {
+    #[test]
+    fn every_placeholder_is_absent_evidence() {
+        // upstream #143 (gap 1b): core placeholders, not just the adapters', are never evidence
+        for p in ["(no trajectory for t @ base1)", "(trajectory unavailable: io)", "(unavailable: boom)", "(nothing produced)", "  "] {
+            assert!(super::is_absent_evidence(p), "{p}");
+        }
+        assert!(!super::is_absent_evidence("[ASSISTANT] read the file"));
     }
 }

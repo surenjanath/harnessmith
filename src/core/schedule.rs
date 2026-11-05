@@ -355,7 +355,7 @@ fn resume(summary_path: &Path, task_id: &str, k: usize, adapter: &dyn BenchmarkA
             } else {
                 String::new()
             };
-            if artifact.trim().is_empty() || artifact.starts_with("(no trajectory") {
+            if crate::core::context::is_absent_evidence(&artifact) {
                 bail!("adopted output is missing");
             }
             if adapter.artifacts_intact(&run_dir) == Some(false) {
@@ -675,7 +675,13 @@ pub fn run_task(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, prop: &
         if let Err(e) = run_one_mode(mode, task_id, k, &base, adapter, prop.as_ref(), selector.as_ref(), &n, runs_root, libs.get(*mode), &base_tree, &o.pool_policy, o.width, &mut res) {
             let err = format!("{e}");
             say!("  [{task_id}] {mode} failed: {err}");
-            res.modes.insert((*mode).into(), json!({"ok": false, "error": err, "traceback": util::tail_chars(&format!("{e:?}"), 1500)}));
+            // Add the error to the record run_mode already wrote, rather than replacing it, so the
+            // stages and their spend stay visible to the report (upstream #98).
+            let mut rec = res.modes.get(*mode).cloned().filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
+            rec["ok"] = json!(false);
+            rec["error"] = json!(err);
+            rec["traceback"] = json!(util::tail_chars(&format!("{e:?}"), 1500));
+            res.modes.insert((*mode).into(), rec);
             let usd = res.selections.get(*mode).and_then(|s| s.get("usd")).and_then(|u| u.as_f64()).unwrap_or(0.0);
             let mut s = Selection::new(task_id, mode, k);
             s.error = err.clone();

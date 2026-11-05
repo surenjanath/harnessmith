@@ -363,7 +363,12 @@ fn check_skills(surface: &SurfaceSpec, tree: &Tree, body: &str, errs: &mut Vec<S
                 "{sd}/{name}/SKILL.md needs a `description:` in its frontmatter, or the skill is dropped SILENTLY at load"
             ));
         }
-        let m_name = name_re.captures(&fm).map(|c| c[1].to_string());
+        // YAML scalars: `name: "x"` and `name: 'x'` are the same value as `name: x` (upstream #156).
+        let m_name = name_re.captures(&fm).map(|c| {
+            let v = c[1].trim();
+            let unq = if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) { &v[1..v.len() - 1] } else { v };
+            unq.to_string()
+        });
         if surface.skill_name_rule == "must_match" {
             if m_name.as_deref() != Some(name.as_str()) {
                 errs.push(format!(
@@ -558,6 +563,21 @@ pub fn diversity(trees: &BTreeMap<String, Tree>) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quoted_skill_names_match_their_directory() {
+        // upstream #156: YAML quotes are not part of the name
+        let surface = crate::substrate::native::native_surface();
+        for q in ["\"", "'", ""] {
+            let mut t = crate::substrate::native::default_base_tree();
+            t.insert("skills/invoice-review/SKILL.md".into(), format!("---\nname: {q}invoice-review{q}\ndescription: review invoices\n---\nCheck totals.\n"));
+            t.insert("guardrails.md".into(), "- When reviewing invoices, load the `invoice-review` skill.\n".into());
+            assert!(validate(&surface, &t, true, None, &reserved_default()).is_ok(), "quote {q:?}");
+        }
+        let mut t = crate::substrate::native::default_base_tree();
+        t.insert("skills/invoice-review/SKILL.md".into(), "---\nname: \"other\"\ndescription: x\n---\nbody invoice-review\n".into());
+        assert!(validate(&surface, &t, true, None, &reserved_default()).is_err(), "a different name is still rejected");
+    }
+
     use super::*;
     use crate::substrate::opencode::opencode_surface;
 

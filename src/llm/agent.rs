@@ -546,6 +546,9 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
             if cfg.sandbox.as_ref().map(|sb| !sb.network).unwrap_or(false) {
                 let dl = Regex::new(r"(^|[;&|\s(])(wget|curl|pip3?\s+install|python3?\s+-m\s+pip\s+install|git\s+clone|npm\s+(install|i)\b|apt(-get)?\s+install|brew\s+install)").unwrap();
                 if dl.is_match(&s("command")) {
+                    if cfg.web {
+                        bail!("shell commands have no internet access, so downloads and installs cannot work. To read a web page, call the web_fetch tool with its URL instead");
+                    }
                     bail!("there is no internet access in this workspace, so downloads and installs cannot work. Do not retry: write the deliverable from the input files and your own knowledge (mark facts that would need checking), using write_file");
                 }
             }

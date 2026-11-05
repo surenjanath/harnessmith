@@ -146,7 +146,11 @@ fn attempt(cfg: &Settings, ws: &Path, traj: &Path, log_file: &Path, task_name: &
         .replace("{output_dir}", &ws.join("output").to_string_lossy())
         .replace("{workspace}", &ws.to_string_lossy());
     let title = format!("{task_name} | {} | a{n}", cfg.label);
-    let mut c = Command::new("timeout");
+    // GNU `timeout` is missing on macOS unless coreutils is installed as `gtimeout` (upstream #77).
+    let tbin = ["timeout", "gtimeout"].into_iter().find(|b| util::which(b).is_some()).ok_or_else(|| {
+        anyhow::anyhow!("neither `timeout` nor `gtimeout` is on PATH; the OpenCode runner needs one to enforce its time limit (macOS: `brew install coreutils`)")
+    })?;
+    let mut c = Command::new(tbin);
     c.args(["--kill-after=30s", &cfg.timeout_per_task, "bun", "run", "--cwd"])
         .arg(cfg.opencode_dir.join("packages/opencode"))
         .args(["--conditions=browser", "src/index.ts", "run", &prompt, "--dir"])

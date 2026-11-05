@@ -235,7 +235,12 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     if sb.kind != crate::llm::sandbox::Kind::Off {
         crate::say!("      sandbox: {} · network {}", sb.kind.as_str(), if o.sandbox_network { "on" } else { "off" });
         if !o.sandbox_network {
-            cfg.system.push_str("\n\n---\n\n# NETWORK\nThis workspace has NO internet access. Do not try to download or install anything (wget, curl, pip install, git clone): it cannot work. Use the input files and your own knowledge, and say which facts a reader should verify.");
+            // With web access on, the web tools are the way out; say so instead of "no internet".
+            cfg.system.push_str(if o.web_access {
+                "\n\n---\n\n# NETWORK\nShell commands have no internet access: do not use wget, curl, pip install or git clone. To read the web, call the web_fetch tool (and web_search when it is listed)."
+            } else {
+                "\n\n---\n\n# NETWORK\nThis workspace has NO internet access. Do not try to download or install anything (wget, curl, pip install, git clone): it cannot work. Use the input files and your own knowledge, and say which facts a reader should verify."
+            });
         }
         cfg.sandbox = Some(sb);
     }

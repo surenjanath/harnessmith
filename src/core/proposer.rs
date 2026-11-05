@@ -44,6 +44,8 @@ pub struct Reply {
     pub channel: String,
     pub error: String,
     pub audit: Option<PathBuf>,
+    /// Cost of the original session when this reply is a cache replay (its `cost_usd` is 0).
+    pub replayed_usd: f64,
     pub workspace: Option<PathBuf>,
 }
 
@@ -269,11 +271,13 @@ impl Proposer {
         if txt.trim().is_empty() {
             return None;
         }
+        let replayed_usd = std::fs::read_to_string(&p.meta).ok().and_then(|m| serde_json::from_str::<Value>(&m).ok()).and_then(|m| m["cost_usd"].as_f64()).unwrap_or(0.0);
         Some(Reply {
             label: label.into(),
             text: txt,
             ok: true,
             cached: true,
+            replayed_usd,
             channel: self.spec.kind.clone(),
             audit: Some(p.response.clone()),
             workspace: p.workspace.is_dir().then(|| p.workspace.clone()),
