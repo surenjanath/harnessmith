@@ -26,6 +26,7 @@
 //! ```
 
 pub mod ab;
+mod boost;
 pub mod advisor;
 pub mod assist;
 pub mod auth;
@@ -241,6 +242,12 @@ pub fn serve(host: &str, port: u16) -> Result<()> {
             .route("/api/advisor/pull", post(advisor::pull))
             .route("/api/advisor/pulls", get(advisor::pull_status))
             .route("/api/projects/:p/schedules", get(schedules_get))
+            .route("/api/projects/:p/experience", get(boost::experience_get))
+            .route("/api/projects/:p/experience/:id", put(boost::experience_edit).delete(boost::experience_delete))
+            .route("/api/projects/:p/sleep", post(boost::sleep_start))
+            .route("/api/projects/:p/sleep/cancel", post(boost::sleep_cancel))
+            .route("/api/accuracy", get(boost::accuracy_get).post(boost::accuracy_start))
+            .route("/api/accuracy/cancel", post(boost::accuracy_cancel))
             .route("/api/hooks/goal", post(inbound::hook_goal))
             .route("/api/hooks/github", post(inbound::hook_github))
             .route("/api/approvals", get(approvals_list))

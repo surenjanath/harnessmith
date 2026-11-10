@@ -57,6 +57,10 @@ enum Cmd {
     Goal(GoalArgs),
     /// One solver attempt on the base harness (no improvement loop): a quick model check.
     Solve(SolveArgs),
+    /// Measure how often a model answers exact questions correctly: plain vs the harness.
+    Accuracy(AccuracyArgs),
+    /// Consolidate a project's experience and rehearse on practice tasks (run it while idle).
+    Sleep(SleepArgs),
     /// Manage model connections (list, add, test, remove).
     Models(ModelsArgs),
     /// Start the web UI.
@@ -120,6 +124,69 @@ struct SolveArgs {
     project: String,
     #[arg(long, default_value_t = 20)]
     steps: u32,
+    /// Accuracy boost for exact questions: auto | on | off (default: the project's setting).
+    #[arg(long)]
+    accuracy: Option<String>,
+    /// Independent attempts the accuracy boost votes over.
+    #[arg(long)]
+    samples: Option<usize>,
+}
+
+#[derive(Args)]
+struct SleepArgs {
+    #[arg(long, default_value = "default")]
+    project: String,
+    /// `<connection>/<model>` to rehearse with (default: the project's solver).
+    #[arg(long)]
+    model: Option<String>,
+    /// Practice tasks to rehearse (default: the project's setting).
+    #[arg(long)]
+    dreams: Option<usize>,
+    /// New questions the model may ask itself about the project's files.
+    #[arg(long, default_value_t = 2)]
+    explore: usize,
+    /// Attempts per rehearsal answer.
+    #[arg(long, default_value_t = 1)]
+    samples: usize,
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+}
+
+#[derive(Args)]
+struct AccuracyArgs {
+    /// `<connection>/<model>` to measure.
+    #[arg(long)]
+    model: String,
+    /// Comma-separated: plain (the model alone), agent (harness, accuracy boost off), boost (on),
+    /// learned (boost, after working through other questions of the same kinds and sleeping).
+    #[arg(long, default_value = "plain,boost")]
+    modes: String,
+    /// Questions per kind (14 kinds).
+    #[arg(long, default_value_t = 2)]
+    per_category: usize,
+    #[arg(long, default_value_t = 1)]
+    seed: u64,
+    /// Only these kinds or question ids (comma-separated), e.g. `csv_total,dates` or `json-1`.
+    #[arg(long, default_value = "")]
+    only: String,
+    /// Where results go (resumable); default runs/accuracy/<model>.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Independent attempts the accuracy boost votes over.
+    #[arg(long, default_value_t = 3)]
+    samples: usize,
+    /// Step budget per question in the harness modes.
+    #[arg(long, default_value_t = 14)]
+    steps: u32,
+    /// Seconds allowed per question.
+    #[arg(long, default_value_t = 600)]
+    timeout: u64,
+    /// A stronger model the boost may ask when its attempts disagree.
+    #[arg(long, default_value = "")]
+    escalate: String,
+    /// Practice tasks in the sleep before the `learned` mode.
+    #[arg(long, default_value_t = 6)]
+    dreams: usize,
 }
 
 #[derive(Args)]
@@ -174,6 +241,8 @@ pub fn main() -> i32 {
         Cmd::Bridge(a) => setup::bridge_cmd(a),
         Cmd::Goal(a) => goal_cmd(a).map(|_| 0),
         Cmd::Models(a) => models(a).map(|_| 0),
+        Cmd::Accuracy(a) => accuracy(a),
+        Cmd::Sleep(a) => sleep_cmd(a),
         Cmd::Solve(a) => solve(a),
         Cmd::Serve(a) => crate::ui::serve(&a.host, a.port).map(|_| 0),
         Cmd::JbOcRunner => crate::benchmarks::jb_oc_runner::main(),
@@ -274,6 +343,12 @@ fn solve(a: SolveArgs) -> Result<i32> {
     let mut s = GoalAdapter::open(&root)?.settings;
     s.solver_model = a.model.clone();
     s.solver_steps = a.steps;
+    if let Some(acc) = &a.accuracy {
+        s.accuracy = acc.clone();
+    }
+    if let Some(n) = a.samples {
+        s.accuracy_samples = n;
+    }
     let adapter = GoalAdapter::with_settings(&root, s)?;
     let mut files = vec![];
     for f in &a.files {
@@ -287,6 +362,53 @@ fn solve(a: SolveArgs) -> Result<i32> {
         usage["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(", ended: {e}")).unwrap_or_default());
     println!("{}", adapter.deliverable_text(&rd)?);
     Ok(if adapter.delivered(&rd) { 0 } else { 2 })
+}
+
+/// The options a project's sleep runs with.
+pub fn sleep_opts(adapter: &GoalAdapter, model: Option<String>) -> crate::llm::sleep::SleepOpts {
+    let mut o = crate::llm::sleep::SleepOpts::new(&model.unwrap_or_else(|| adapter.settings.solver_model.clone()));
+    o.dreams = adapter.settings.sleep_dreams;
+    o.sandbox = adapter.settings.sandbox.clone();
+    o.notes = crate::llm::precise::notes_from_harness(&adapter.root.join("base"));
+    o
+}
+
+fn sleep_cmd(a: SleepArgs) -> Result<i32> {
+    let root = goal::project_dir(&a.project)?;
+    let adapter = GoalAdapter::open(&root)?;
+    let mut o = sleep_opts(&adapter, a.model);
+    if o.model_id.trim().is_empty() {
+        bail!("no model: pass --model, or set the project's solver");
+    }
+    if let Some(d) = a.dreams {
+        o.dreams = d;
+    }
+    o.explore = a.explore;
+    o.samples = a.samples;
+    o.seed = a.seed;
+    let j = crate::llm::sleep::sleep(&root, &o)?;
+    println!("{}", serde_json::to_string_pretty(&json!({"rehearsed": j["rehearsed"], "right_cold": j["right_cold"], "right_with_experience": j["right_with_experience"], "helped": j["helped"], "no_help": j["no_help"], "learned": j["learned"], "consolidated": j["consolidated"]}))?);
+    Ok(0)
+}
+
+fn accuracy(a: AccuracyArgs) -> Result<i32> {
+    use crate::benchmarks::accuracy as acc;
+    let slug: String = a.model.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    let o = acc::BenchOpts {
+        model: a.model.clone(),
+        modes: a.modes.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        seed: a.seed,
+        per_category: a.per_category,
+        only: a.only.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        out: a.out.unwrap_or_else(|| config::get().runs.join("accuracy").join(slug)),
+        samples: a.samples,
+        agent_steps: a.steps,
+        timeout: a.timeout,
+        escalate_model: a.escalate,
+        dreams: a.dreams,
+    };
+    acc::run(&o)?;
+    Ok(0)
 }
 
 fn models(a: ModelsArgs) -> Result<()> {

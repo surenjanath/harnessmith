@@ -452,6 +452,27 @@ fn roll_bases(task_id: &str, adapter: &dyn BenchmarkAdapter, pending: &[(String,
 #[allow(clippy::too_many_arguments)]
 fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, selector: &dyn Propose, n: &Namespace, runs_root: &Path, mode_lib: Option<&Library>, base_tree: &Tree, pool_policy: &str, width: usize, res: &mut TaskResult) -> Result<()> {
     let work_dir = n.task_dir(runs_root, task_id);
+    // A base attempt whose answer is already verified is adopted as it stands: the recursion
+    // exists to improve a harness on evidence of what went wrong, and here nothing did.
+    if let Some(b) = base.iter().find(|b| b.ok && b.delivered && adapter.settled(&b.run_dir)) {
+        crate::log::set_mode(mode);
+        say!("  [{task_id}] {mode}: the base attempt's answer is verified by agreeing attempts; adopting it without the improvement loop");
+        let mut one = BTreeMap::new();
+        one.insert(b.label.clone(), b.clone());
+        let mut sel = selection::trivial_selection(task_id, k, mode, &one, adapter, &work_dir)?;
+        sel.why = "the base attempt's answer was verified by independent attempts that agree (accuracy boost), so the harness-improvement loop was skipped for this goal".into();
+        tree::write_tree(&adapter.surface(), base_tree, &work_dir.join("harnesses").join(&b.label), true)?;
+        res.modes.insert(mode.into(), json!({"mode": mode, "task_id": task_id, "k": k, "finals": Vec::<String>::new(), "ok": true, "fell_back": false, "kept_base": Vec::<String>::new(), "stages": Vec::<Value>::new(), "similarity": Value::Null, "ledger": Value::Null, "errors": Vec::<String>::new(), "settled": true}));
+        let mut d = sel.to_json();
+        d["selected_at"] = json!(util::now_iso());
+        d["chosen_run_dir"] = json!(b.run_dir.to_string_lossy().to_string());
+        d["chosen_tree_is_base"] = json!(true);
+        d["settled"] = json!(true);
+        d["harness_fingerprint"] = json!(runmark::fingerprint(Some(&work_dir.join("harnesses").join(&b.label))));
+        res.selections.insert(mode.into(), d);
+        crate::log::event("select", "settled", json!({"chosen": b.label, "why": sel.why}));
+        return Ok(());
+    }
     let lib_dir = mode_lib.and_then(|l| l.context_dir());
     let nn = n.clone();
     let tid = task_id.to_string();
@@ -531,7 +552,28 @@ pub fn looks_failed(text: &str) -> bool {
 /// a healthy candidate remains. Returns whether the pool changed.
 /// File types the goal asks for ("an HTML page", "a CSV"), as lowercase extensions.
 pub fn expected_exts(prompt: &str) -> Vec<&'static str> {
-    let p = prompt.to_lowercase();
+    // A file the goal reads is not a file it asks for: "Using sales.csv, what is the total?"
+    // wants an answer, not a CSV. Input files are named after the goal; other file names count
+    // only when the goal says to write them.
+    let (goal, inputs) = prompt.split_once("\n\nInput files (in your workspace):").unwrap_or((prompt, ""));
+    let input_exts: Vec<String> = inputs.split(',').filter_map(|f| f.trim().rsplit_once('.').map(|(_, e)| e.trim().to_lowercase())).collect();
+    let p = goal.to_lowercase();
+    let writes = regex::Regex::new(r"\b(write|save|export|output|produce|create|generate|store|dump|put|deliver|convert|make|build)\b[^.;:!?\n]{0,48}$").unwrap();
+    let fname = regex::Regex::new(r"[\w\-./]+\.(html?|csv|json|py|svg|js|css|xlsx|docx|pdf)\b").unwrap();
+    let mut blanked = String::with_capacity(p.len());
+    let mut last = 0;
+    for m in fname.find_iter(&p) {
+        blanked.push_str(&p[last..m.start()]);
+        let before = &p[..m.start()];
+        if m.as_str().starts_with("output/") || writes.is_match(before) {
+            blanked.push_str(m.as_str());
+        } else {
+            blanked.push(' ');
+        }
+        last = m.end();
+    }
+    blanked.push_str(&p[last..]);
+    let p = blanked;
     let mut v = vec![];
     for (ext, words) in [
         ("html", &["html", "web page", "webpage", "landing page", "website"][..]),
@@ -545,7 +587,15 @@ pub fn expected_exts(prompt: &str) -> Vec<&'static str> {
         ("docx", &["docx", "word document"][..]),
         ("pdf", &["pdf"][..]),
     ] {
-        if words.iter().any(|w| p.contains(w)) {
+        // When an input of this type exists, the bare word ("the CSV data") is about the input
+        // unless the goal says to write one.
+        let is_input = input_exts.iter().any(|e| e == ext || (ext == "html" && e == "htm"));
+        let hit = words.iter().any(|w| {
+            // ".js" must not match inside ".json": an extension ends at a word boundary.
+            let ends_ok = |i: usize| !w.starts_with('.') || !p[i + w.len()..].chars().next().map(|c| c.is_alphanumeric()).unwrap_or(false);
+            p.match_indices(w).any(|(i, _)| ends_ok(i) && (!is_input || writes.is_match(&p[..i])))
+        });
+        if hit {
             v.push(ext);
         }
     }
@@ -850,5 +900,13 @@ mod guard_tests {
         assert!(looks_failed("Error: unknown tool `client`"));
         assert_eq!(super::expected_exts("create a hello world sleek html page"), vec!["html"]);
         assert!(super::expected_exts("write a research report on dogs").is_empty());
+        // a file the goal reads is not a file it asks for
+        assert!(super::expected_exts("Using sales.csv, what is the total revenue?").is_empty());
+        assert!(super::expected_exts("In config.json, what is the timeout?\n\nInput files (in your workspace): config.json").is_empty());
+        assert!(super::expected_exts("Using the csv data, what is the total?\n\nInput files (in your workspace): sales.csv").is_empty());
+        assert_eq!(super::expected_exts("Read sales.csv and write the totals to totals.json"), vec!["json"]);
+        assert_eq!(super::expected_exts("Clean sales.csv and export the result as a csv\n\nInput files (in your workspace): sales.csv"), vec!["csv"]);
+        assert_eq!(super::expected_exts("Summarise notes.txt as a JSON file"), vec!["json"]);
+        assert_eq!(super::expected_exts("Save the chart to output/chart.svg"), vec!["svg"]);
     }
 }

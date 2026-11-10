@@ -454,6 +454,19 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
     <div class="live-head"><div class="ph" style="margin:0">Model advisor · what runs best on this machine</div><div class="spacer"></div><button class="btn small" id="adv-scan">Scan again</button></div>
     <div id="adv-body" style="margin-top:10px"><p class="muted">Scanning hardware and local model servers…</p></div>
   </div>
+  <div class="panel" id="acc-check">
+    <div class="live-head"><div class="ph" style="margin:0">Accuracy check · what the harness adds to a model</div><div class="spacer"></div><button class="btn small hidden" id="ac-stop">Stop</button></div>
+    <p class="hint">Asks a model questions that have one exact answer (arithmetic, percentages, dates, counting, statistics, and sums and lookups over CSV, JSON and log files). The questions are generated from a seed, so the right answers are computed, and no model has seen them. Each is asked to the model alone and through the harness.</p>
+    <div class="row">
+      <div><label>Model to measure</label><input id="ac-model" list="all-models" placeholder="connection/model"></div>
+      <div><label>Compare</label><select id="ac-modes"><option value="plain,boost">Model alone vs accuracy boost</option><option value="plain,boost,learned">…and after learning + a sleep</option><option value="plain,agent,boost">…and the agent loop without boost (slow)</option></select></div>
+      <div><label>Questions</label><select id="ac-n"><option value="1">14 (one of each kind)</option><option value="2">28</option><option value="3">42</option></select></div>
+      <div><label>&nbsp;</label><button class="btn primary" id="ac-go">Run check</button></div>
+    </div>
+    <div id="ac-msg" class="hint"></div>
+    <pre class="log hidden" id="ac-log" style="max-height:220px"></pre>
+    <div id="ac-reports"></div>
+  </div>
   <div class="grid2">
     <div class="panel">
       <h2>Connections</h2>
@@ -516,6 +529,14 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
       <div><label>Judge (optional, rubric grading)</label><input id="r-judge" list="all-models"></div>
     </div>
     <datalist id="all-models"></datalist>
+    <h3>Accuracy boost <span class="st" id="acc-state"></span></h3>
+    <p class="hint">When a goal asks for one exact answer (a number, a name, a date), the solver writes a short program instead of answering from memory. The harness runs it, repeats the attempt independently and keeps the answer most attempts agree on; the agreement is reported as confidence. In every other goal the agent gets <code>python</code> and <code>calc</code> tools, and figures it writes are checked against what it actually read or computed.</p>
+    <div class="row">
+      <div><label>Accuracy boost</label><select id="s-acc"><option value="auto">Auto: on for local and small models</option><option value="on">On for every model</option><option value="off">Off</option></select></div>
+      <div><label>Attempts to vote over</label><select id="s-accn"><option value="1">1 (no vote)</option><option value="3">3</option><option value="5">5</option></select></div>
+      <div><label>If attempts disagree, ask</label><input id="s-esc" list="all-models" placeholder="a stronger model (optional)"></div>
+      <div><label>Learn from verified answers</label><select id="s-exp"><option value="true">On: keep them as worked examples</option><option value="false">Off</option></select></div>
+    </div>
     <details><summary>Advanced</summary>
       <div class="row">
         <div><label>Improver channel</label><select id="s-channel"><option value="api">Native (any connected model)</option><option value="opencode">OpenCode CLI</option><option value="claude_cli">Claude Code CLI</option></select></div>
@@ -661,8 +682,23 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
       </div>
     </div>
   </div>
+  <div class="panel" id="exp-panel">
+    <div class="live-head"><div class="ph" style="margin:0">Experience · verified answers kept as worked examples · <span id="x-stats"></span></div><div class="spacer"></div>
+      <button class="btn small primary" id="x-sleep" title="Consolidate the examples and rehearse on practice tasks">🌙 Sleep now</button><button class="btn small hidden" id="x-stop">Wake up</button></div>
+    <p class="hint">When independent attempts agree on an answer, the question and the program that computed it are kept here. The next question of the same kind gets that program as a worked example. <b>Sleep</b> is what the project does with them while idle, after Google Research's “Language Models Need Sleep”: it <b>consolidates</b> (one example per kind of question; the ones that never helped are forgotten), then <b>dreams</b>: it turns each example into a new practice task by changing the data, computes the right answer by running the verified program on the changed data, and checks whether the model gets it right alone and with the example. It can also ask itself new questions about your files and keep the answers every attempt agrees on.</p>
+    <div class="row" style="align-items:end">
+      <div><label><input type="checkbox" id="x-auto" style="width:auto;margin-right:6px">Sleep on its own when idle</label></div>
+      <div><label>Practice tasks per sleep</label><select id="x-dreams"><option>3</option><option>6</option><option>10</option><option>16</option></select></div>
+      <div><label>New questions to explore</label><select id="x-explore"><option value="0">0</option><option value="2" selected>2</option><option value="4">4</option></select></div>
+      <div><button class="btn small" id="x-save">Save</button> <span id="x-msg" class="hint"></span></div>
+    </div>
+    <div id="x-journal" style="margin-top:10px"></div>
+    <pre class="log hidden" id="x-log" style="max-height:200px"></pre>
+    <div class="rows" id="x-list" style="margin-top:10px"></div>
+  </div>
 </section>
 
+<!-- (experience panel is part of the memory view) -->
 <!-- LIBRARY -->
 <section id="v-library" class="hidden">
   <div class="panel"><h2>Experience library</h2><p class="hint">Lessons the selector wrote after each adopted harness. Later goals in the same project and domain read these before proposing edits.</p><div id="lib"></div></div>
@@ -1131,15 +1167,20 @@ function nodeDrawer(n, t0) {
       cls = "act";
       const what = {failover: `Failed over ${esc(e.from || "")} → <b>${esc(e.to || "")}</b>`, recovered: `Recovered: back on <b>${esc(e.to || "")}</b> (from ${esc(e.from || "")})`, wait_recovery: `Every model down — waited ${e.seconds}s for <b>${esc(e.model)}</b>`, retry_call: `Retried a failed model call (attempt ${e.attempt})`,
         loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, loop_block: `Loop stop: blocked <code>${esc(e.call)}</code> after too many repeats`, read_streak: `Improver read ${e.calls} times without editing: asked it to decide`, finish_refused: `Finish refused: the deliverable still had problems`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
-        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: output/ was still empty`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`}[e.status] || esc(e.status);
+        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: output/ was still empty`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`, escalate: `Attempts did not agree: asked the stronger model <b>${esc(e.to || "")}</b>`, ungrounded_figures: `Figures with no source in the inputs or tool results: sent back to compute them`, ran_code_block: `Ran the Python block the model wrote instead of a tool call`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
+    } else if (e.kind === "accuracy") {
+      cls = e.status === "vote" ? (e.confidence === "high" ? "ok" : e.confidence === "low" || e.confidence === "none" ? "bad" : "act") : "act";
+      txt = e.status === "vote" ? `🎯 Accuracy boost: ${e.answer ? `<b>${esc(e.answer)}</b> — ${e.agree} of ${e.answered} attempt(s) agree · confidence <b>${esc(e.confidence)}</b>${e.escalated ? " · settled by the stronger model" : ""}` : "no attempt produced an answer"}`
+        : e.status === "examples" ? `📚 Experience: showed ${(e.ids || []).length} worked example(s) from earlier goals (${(e.ids || []).map(esc).join(", ")})`
+        : `📚 Experience: kept this solution as a worked example <code>${esc(e.id || "")}</code>`;
     } else if (e.kind === "memory") {
       cls = "act"; txt = e.status === "remember" ? `🧠 Saved a note <code>${esc(e.id)}</code>${e.dup ? " (already known)" : ""}: ${esc(e.text)}` : e.status === "recall" ? `🧠 Recalled ${e.hits} note(s) for “${esc(e.query)}”` : `🧠 Memory settled: kept ${e.kept}, archived ${e.archived}, promoted ${e.promoted}`;
     } else if (e.kind === "gate") {
       cls = e.status === "approved" ? "ok" : "bad"; txt = `${e.status === "ask" ? "✋" : "⛔"} Gate ${{blocked: "blocked", would_block: "would block (observe)", ask: "asked a person about", approved: "approved", denied: "denied"}[e.status] || e.status} <code>${esc(e.call || e.tool)}</code> — rule <b>${esc(e.rule)}</b>: ${esc(e.reason)}`;
     } else if (e.kind === "select") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
-      txt = e.status === "guard" ? `🛡 Regression guard: ${(e.added || []).length ? "added the unmodified base attempt <b>" + esc(e.added.join(", ")) + "</b> to the pool" : ""}${(e.added || []).length && (e.dropped || []).length ? "; " : ""}${(e.dropped || []).length ? "dropped failure-looking outputs <b>" + esc(e.dropped.join(", ")) + "</b>" : ""}` : e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
+      txt = e.status === "settled" ? `🎯 The first attempt's answer is verified by attempts that agree: adopted as it stands, improvement loop skipped` : e.status === "guard" ? `🛡 Regression guard: ${(e.added || []).length ? "added the unmodified base attempt <b>" + esc(e.added.join(", ")) + "</b> to the pool" : ""}${(e.added || []).length && (e.dropped || []).length ? "; " : ""}${(e.dropped || []).length ? "dropped failure-looking outputs <b>" + esc(e.dropped.join(", ")) + "</b>" : ""}` : e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
     } else if (e.kind === "learn") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
       txt = e.status === "start" ? "Reflecting on what each edit did" : e.status === "done" ? (e.entry ? `Lesson: <b>${esc(e.cue)}</b> → ${esc(e.lesson)}` : "No lesson the evidence supports") : `<span class="err">${esc(e.error)}</span>`;
@@ -1368,6 +1409,9 @@ async function loadModels() {
   $("#s-stime").value = s.solver_timeout; $("#s-itime").value = s.improver_timeout; $("#s-effort").value = s.effort;
   $("#s-shell").value = String(s.allow_shell); $("#s-subs").value = String(s.allow_subagents); $("#s-par").value = String(s.parallelism || 2); $("#s-maxusd").value = s.max_usd_per_run || 0;
   $("#s-brief").value = String(s.improver_brief !== false); $("#s-jrep").value = String(s.judge_repeats || 3); $("#s-web").value = String(!!s.web_access);
+  $("#s-acc").value = s.accuracy || "auto"; $("#s-accn").value = String([1, 3, 5].includes(s.accuracy_samples) ? s.accuracy_samples : 3); $("#s-esc").value = s.escalate_model || ""; $("#s-exp").value = String(s.experience !== false);
+  if (!$("#ac-model").value) $("#ac-model").value = s.solver_model || "";
+  loadAccuracy();
   const ids = new Set();
   conns.connections.forEach(c => { if (c.default_model) ids.add(`${c.name}/${c.default_model}`); });
   ["openai/gpt-4.1", "anthropic/claude-sonnet-4-5", "gemini/gemini-2.5-pro", "ollama/qwen3", "mock/mock-1"].forEach(x => ids.add(x));
@@ -1535,6 +1579,7 @@ function settingsForm() {
   s.solver_timeout = +$("#s-stime").value || 1800; s.improver_timeout = +$("#s-itime").value || 1800; s.effort = $("#s-effort").value;
   s.allow_shell = $("#s-shell").value === "true"; s.allow_subagents = $("#s-subs").value === "true"; s.parallelism = +$("#s-par").value; s.max_usd_per_run = +($("#s-maxusd").value || 0);
   s.improver_brief = $("#s-brief").value === "true"; s.judge_repeats = +$("#s-jrep").value; s.web_access = $("#s-web").value === "true";
+  s.accuracy = $("#s-acc").value; s.accuracy_samples = +$("#s-accn").value; s.escalate_model = $("#s-esc").value.trim(); s.experience = $("#s-exp").value === "true";
   return s;
 }
 $("#r-save").onclick = async () => {
@@ -2320,6 +2365,88 @@ async function loadResults() {
 
 // ---------- memory ----------
 let memNotes = [];
+// ---- accuracy check -------------------------------------------------------------------------
+let acTimer = null;
+function accBar(m) {
+  const pct = Math.round((m.accuracy || 0) * 100), name = {plain: "model alone", agent: "agent loop, no boost", boost: "accuracy boost", learned: "boost + experience"}[m.mode] || m.mode;
+  const col = m.mode === "plain" ? "var(--muted)" : m.mode === "agent" ? "var(--warn)" : m.mode === "learned" ? "var(--selector)" : "var(--ok)";
+  return `<div class="r" style="grid-template-columns:170px minmax(0,1fr) 150px;align-items:center;padding:4px 0"><span>${esc(name)}</span>
+    <span style="background:var(--line);border-radius:6px;height:14px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:${col}"></span></span>
+    <span class="v" style="text-align:right"><b>${pct}%</b> · ${m.correct}/${m.asked} · ${Math.round(m.avg_seconds || 0)}s each</span></div>`;
+}
+function renderAccuracy(r) {
+  const run = r.running;
+  $("#ac-stop").classList.toggle("hidden", !run); $("#ac-go").disabled = !!run;
+  $("#ac-log").classList.toggle("hidden", !run && !(r.log_tail || []).length);
+  $("#ac-log").textContent = (r.log_tail || []).join("\n");
+  if (run) $("#ac-msg").textContent = `Running: ${run.questions} question(s) × ${run.modes.join(", ")} on ${run.model}…`;
+  $("#ac-reports").innerHTML = (r.reports || []).slice(0, 6).map(rep => {
+    const modes = rep.modes || [], kinds = (modes[0] && modes[0].by_category || []).map(c => c.category);
+    const cell = (m, k) => { const c = (m.by_category || []).find(x => x.category === k); return c ? `${c.correct}/${c.asked}` : "–"; };
+    const t = rep.training;
+    return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px"><div><b>${esc(rep.model)}</b> <span class="muted">· ${rep.questions} questions · seed ${rep.seed} · ${esc((rep.at || "").slice(0, 16).replace("T", " "))}</span></div>
+      <div class="rows" style="margin-top:6px">${modes.map(accBar).join("")}</div>
+      ${t ? `<p class="hint" style="margin:6px 0 0">“boost + experience” first worked through ${t.asked} other questions (${t.right} right), kept ${t.examples} worked example(s), then slept: ${t.sleep.rehearsed} practice task(s), ${t.sleep.right_cold} right without help, ${t.sleep.helped} more with its experience.</p>` : ""}
+      <details><summary>By kind of question</summary><table><thead><tr><th>kind</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
+        ${kinds.map(k => `<tr><td>${esc(k)}</td>${modes.map(m => `<td>${cell(m, k)}</td>`).join("")}</tr>`).join("")}</tbody></table></details>
+      <details><summary>Every question</summary><table><thead><tr><th>question</th><th>expected</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
+        ${(rep.rows || []).map(q => `<tr><td style="max-width:420px">${esc(q.question)}</td><td><code>${esc(q.expected)}</code></td>${modes.map(m => { const a = q[m.mode]; return a ? `<td class="${a.ok ? "" : "err"}">${a.ok ? "✔" : "✘"} <span class="muted">${esc(String(a.answer || "").slice(0, 40))}</span></td>` : "<td>–</td>"; }).join("")}</tr>`).join("")}</tbody></table></details></div>`;
+  }).join("") || '<p class="muted" style="margin-top:10px">No check has been run yet. On a local model, 14 questions take a few minutes.</p>';
+}
+async function loadAccuracy() {
+  try {
+    const r = await api("accuracy"); renderAccuracy(r);
+    clearTimeout(acTimer);
+    if (r.running && !$("#v-models").classList.contains("hidden")) acTimer = setTimeout(loadAccuracy, 4000);
+    else if (!r.running && $("#ac-msg").textContent.startsWith("Running")) $("#ac-msg").textContent = "Done.";
+  } catch (e) { $("#ac-msg").textContent = e.message; }
+}
+$("#ac-go").onclick = async () => {
+  try {
+    await jpost("accuracy", {model: $("#ac-model").value.trim(), modes: $("#ac-modes").value.split(","), per_category: +$("#ac-n").value, samples: +$("#s-accn").value || 3, escalate: $("#s-esc").value.trim()});
+    $("#ac-msg").textContent = "Running…"; loadAccuracy();
+  } catch (e) { msg("#ac-msg", e.message); }
+};
+$("#ac-stop").onclick = async () => { try { await jpost("accuracy/cancel", {}); loadAccuracy(); } catch (e) { msg("#ac-msg", e.message); } };
+
+// ---- experience and sleep ----------------------------------------------------------------------
+let xTimer = null;
+async function loadExperience() {
+  try {
+    const r = await api(`projects/${encodeURIComponent(project)}/experience`), st = r.stats, sl = r.sleep;
+    $("#x-stats").textContent = `${st.active} example(s) · used ${st.uses}× · ${st.rehearsed} rehearsed · ${st.unrehearsed} not yet${st.dreamed ? ` · ${st.dreamed} learned by exploring` : ""}${r.boost_on ? "" : " · accuracy boost is off for this project's solver"}`;
+    $("#x-auto").checked = !!r.settings.sleep_auto; if (document.activeElement !== $("#x-dreams")) $("#x-dreams").value = String([3, 6, 10, 16].includes(r.settings.sleep_dreams) ? r.settings.sleep_dreams : 6);
+    $("#x-sleep").classList.toggle("hidden", sl.running); $("#x-stop").classList.toggle("hidden", !sl.running);
+    $("#x-log").classList.toggle("hidden", !sl.running); $("#x-log").textContent = (sl.log_tail || []).join("\n");
+    const j = (sl.journals || [])[0];
+    $("#x-journal").innerHTML = sl.running ? '<div class="hint">💤 Asleep: consolidating and rehearsing…</div>' : j ? `<div class="pol"><div><span class="dot ${j.helped ? "ok" : "hollow"}"></span><span><b>Last sleep</b> ${esc((j.at || "").slice(0, 16).replace("T", " "))} · ${j.seconds}s · ${j.rehearsed} practice task(s): <b>${j.right_cold}</b> right without help, <b>${j.helped}</b> more with experience, ${j.no_help} not solved${j.skipped ? `, ${j.skipped} skipped` : ""} · consolidated: ${j.consolidated.merged} merged, ${j.consolidated.forgotten} forgotten${j.learned ? ` · <b>${j.learned}</b> new solution(s) learned by exploring` : ""}</span></div></div>
+      <details><summary>Dream journal</summary><table><thead><tr><th>practice task</th><th>right answer</th><th>alone</th><th>with the example</th><th>result</th></tr></thead><tbody>
+      ${(j.dreams || []).map(d => `<tr><td style="max-width:380px">${esc(d.question)}</td><td><code>${esc(d.truth || "")}</code></td><td>${esc(d.cold == null ? "–" : d.cold)}</td><td>${esc(d.with == null ? "–" : d.with)}</td><td class="${d.verdict === "no help" ? "err" : ""}">${esc(d.verdict)}${d.verdict === "skipped" ? ` <span class="muted">(${esc(d.why)})</span>` : ""}</td></tr>`).join("")}
+      ${(j.explored || []).map(x => `<tr><td style="max-width:380px">💭 ${esc(x.question)}</td><td><code>${esc(x.answer || "")}</code></td><td colspan="2" class="muted">${x.agree} of ${x.answered} attempts agree</td><td>${x.kept ? "kept" : "not kept"}</td></tr>`).join("")}</tbody></table></details>` : '<div class="hint">This project has not slept yet.</div>';
+    const rec = (e) => e.dreams ? `rehearsed ${e.dreams}× · needed in ${e.helped} · model managed alone in ${e.cold_ok}${e.failed ? ` · no help in ${e.failed}` : ""}` : "not rehearsed yet";
+    $("#x-list").innerHTML = r.examples.length ? r.examples.map(e => `<div class="r" style="grid-template-columns:12px minmax(0,1fr);padding:10px 0;border-bottom:1px solid var(--line);${e.status === "archived" ? "opacity:.55" : ""}">
+      <span class="dot ${e.status !== "active" ? "hollow" : e.helped ? "ok" : e.dreams ? "selector" : "warn"}"></span>
+      <span><span style="font-size:13.5px">${e.pinned ? '<b style="color:var(--selector)">★</b> ' : ""}${e.origin === "dream" ? "💭 " : ""}${esc(e.question)}</span>
+        <div class="v" style="white-space:normal">answer <code>${esc(e.answer)}</code> · ${e.agree} of ${e.answered} attempts agreed · shown ${e.uses}× · ${rec(e)}${e.files.length ? " · files: " + e.files.map(f => esc(f.name)).join(", ") : ""}${e.note ? " · " + esc(e.note) : ""}</div>
+        <details><summary>Program</summary><pre>${esc(e.program)}</pre></details></span>
+      <span></span><span class="btnrow" style="margin-top:4px">
+        <button class="btn small" onclick="expEdit('${e.id}',{pinned:${!e.pinned}})">${e.pinned ? "Unpin" : "Pin"}</button>
+        <button class="btn small" onclick="expEdit('${e.id}',{status:'${e.status === "archived" ? "active" : "archived"}'})">${e.status === "archived" ? "Restore" : "Archive"}</button>
+        <button class="btn small" onclick="expDel('${e.id}')">Delete</button></span></div>`).join("")
+      : '<p class="muted">Nothing yet. Ask this project a question with one exact answer (for example about a CSV you attach); when independent attempts agree, the solution is kept here.</p>';
+    clearTimeout(xTimer);
+    if (sl.running && !$("#v-memory").classList.contains("hidden")) xTimer = setTimeout(loadExperience, 4000);
+  } catch (e) { $("#x-list").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+window.expEdit = async (id, body) => { try { await jpost(`projects/${encodeURIComponent(project)}/experience/${id}`, body, "PUT"); loadExperience(); } catch (e) { msg("#x-msg", e.message); } };
+window.expDel = async (id) => { if (!confirm("Delete this worked example?")) return; try { await api(`projects/${encodeURIComponent(project)}/experience/${id}`, {method: "DELETE"}); loadExperience(); } catch (e) { msg("#x-msg", e.message); } };
+$("#x-sleep").onclick = async () => { try { await jpost(`projects/${encodeURIComponent(project)}/sleep`, {dreams: +$("#x-dreams").value, explore: +$("#x-explore").value}); loadExperience(); } catch (e) { msg("#x-msg", e.message); } };
+$("#x-stop").onclick = async () => { try { await jpost(`projects/${encodeURIComponent(project)}/sleep/cancel`, {}); loadExperience(); } catch (e) { msg("#x-msg", e.message); } };
+$("#x-save").onclick = async () => {
+  const s = Object.assign({}, projectData.settings, {sleep_auto: $("#x-auto").checked, sleep_dreams: +$("#x-dreams").value});
+  try { await jpost("projects/" + encodeURIComponent(project) + "/settings", s, "PUT"); await refreshProject(); msg("#x-msg", "Saved.", true); } catch (e) { msg("#x-msg", e.message); }
+};
+
 async function loadMemory() {
   try {
     const r = await api(`projects/${encodeURIComponent(project)}/memory`);
@@ -2328,7 +2455,7 @@ async function loadMemory() {
     $("#m-stats").textContent = `${st.active} active · ${st.candidate} candidate · ${st.pinned} pinned · ${st.promoted} promoted · ${st.uses} recalls`;
     $("#m-on").checked = projectData.settings.memory_enabled !== false; $("#m-promote").checked = projectData.settings.memory_promote !== false;
     $("#m-shared").checked = !!projectData.settings.memory_shared; $("#m-embed").value = projectData.settings.memory_embed_model || "";
-    renderMemory();
+    renderMemory(); loadExperience();
   } catch (e) { $("#m-list").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 function renderMemory() {

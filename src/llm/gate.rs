@@ -119,6 +119,11 @@ impl Gate {
                 let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
                 self.check_command(cmd)
             }
+            // Model-written Python can shell out, so the same rules read its source.
+            "python" => {
+                let code = args.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                self.check_command(code)
+            }
             _ => wired_command.and_then(|c| self.check_command(c)),
         }
     }

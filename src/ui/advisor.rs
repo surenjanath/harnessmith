@@ -307,7 +307,7 @@ pub(crate) async fn bench(Json(b): Json<BenchReq>) -> ApiResult {
         }
         let msgs = vec![client::Msg::User("Count from 1 to 60, separated by spaces. Output only the numbers.".into())];
         let t0 = Instant::now();
-        let r = client::chat(&conn, &model, &client::ChatReq { system: "", messages: &msgs, tools: &[], max_tokens: 200 }, Duration::from_secs(300))?;
+        let r = client::chat(&conn, &model, &client::ChatReq { system: "", messages: &msgs, tools: &[], max_tokens: 200, temperature: None }, Duration::from_secs(300))?;
         let secs = t0.elapsed().as_secs_f64();
         let out_tok = r.output_tokens.max(1) as f64;
         let res = json!({"id": b.id, "seconds": round1(secs), "out_tokens": r.output_tokens, "tok_s": round1(out_tok / secs.max(0.01)), "at": util::now_iso()});

@@ -51,6 +51,12 @@ pub struct AgentConfig {
     pub improver: bool,
     /// Offer `web_fetch` (and `web_search` when a search API key is set).
     pub web: bool,
+    /// Sampling temperature for this session's calls (None: the connection's setting).
+    pub temperature: Option<f64>,
+    /// Accuracy boost: offer `python` and `calc`, run a fenced Python block the model wrote
+    /// instead of calling a tool, and check figures in the deliverable against what the
+    /// session actually read or computed before it may finish.
+    pub boost: bool,
 }
 
 /// `bash -c cmd` in the workspace, inside the sandbox when there is one.
@@ -89,6 +95,8 @@ impl AgentConfig {
             mcp: None,
             improver: false,
             web: false,
+            temperature: None,
+            boost: false,
         }
     }
 }
@@ -163,6 +171,20 @@ pub fn tool_defs(cfg: &AgentConfig) -> Vec<ToolDef> {
             name: "bash".into(),
             description: "Run a shell command in the workspace directory (e.g. `python3 scripts/x.py`). Output is truncated to 30k chars.".into(),
             parameters: obj(json!({"command": {"type": "string"}, "timeout_s": {"type": "integer", "description": "default 120, max 600"}}), &["command"]),
+        });
+    }
+    if cfg.boost {
+        if cfg.allow_shell && super::pycode::available() {
+            t.push(ToolDef {
+                name: "python".into(),
+                description: "Run Python code in the workspace and get back what it prints (the value of the last line is printed for you). Use it for EVERY calculation, count, sort, date difference and for reading data files; never work a number out in your head. Standard library only (csv, json, math, datetime, statistics, re are already imported).".into(),
+                parameters: obj(json!({"code": {"type": "string", "description": "a complete Python program; print() the values you need"}}), &["code"]),
+            });
+        }
+        t.push(ToolDef {
+            name: "calc".into(),
+            description: "Evaluate one arithmetic expression exactly, e.g. `1250 - 387 + 3*144` or `round(1480 * (1 - 15%) * 1.075, 2)`. Functions: sqrt abs round floor ceil min max sum avg median pow log exp. Use it instead of mental arithmetic.".into(),
+            parameters: obj(json!({"expression": {"type": "string"}}), &["expression"]),
         });
     }
     if cfg.memory.is_some() {
@@ -408,7 +430,7 @@ fn list_files(ws: &Path, dir: &Path) -> String {
     let mut out = vec![];
     for p in util::files_sorted(dir) {
         let rel = util::rel(ws, &p);
-        if rel.starts_with(".harness/") || util::in_pycache(&p) {
+        if rel.starts_with(".harness/") || rel.starts_with(".hx/") || util::in_pycache(&p) {
             continue;
         }
         let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
@@ -434,6 +456,8 @@ fn required(tool: &str) -> &'static [&'static str] {
         "export_pdf" => &["source", "path"],
         "web_fetch" => &["url"],
         "web_search" => &["query"],
+        "python" => &["code"],
+        "calc" => &["expression"],
         _ => &[],
     }
 }
@@ -594,6 +618,22 @@ fn exec_tool_raw(cfg: &AgentConfig, call: &ToolCall) -> Result<String> {
                 bail!("exit_code={code}\n{text}");
             }
             Ok(if text.trim().is_empty() { "(no output)".into() } else { text })
+        }
+        "python" if cfg.boost && cfg.allow_shell => {
+            // A model may wrap the code in a fence inside the argument.
+            let raw = s("code");
+            let code = super::pycode::extract_code(&raw).unwrap_or(raw);
+            let t = a.get("timeout_s").and_then(|v| v.as_u64()).unwrap_or(60).clamp(1, 300);
+            let out = super::pycode::run(ws, cfg.sandbox.as_ref(), &code, Duration::from_secs(t))?;
+            if !out.ok() {
+                bail!("{}", out.render());
+            }
+            Ok(if out.stdout.trim().is_empty() { "(the program printed nothing — print() the value you need)".into() } else { out.stdout })
+        }
+        "calc" if cfg.boost => {
+            let e = s("expression");
+            let v = super::calc::eval(&e)?;
+            Ok(format!("{} = {}", e.trim(), super::calc::format(v)))
         }
         "skill" => {
             let h = cfg.harness.as_ref().ok_or_else(|| anyhow::anyhow!("no harness installed"))?;
@@ -792,6 +832,34 @@ fn obs_key(s: &str) -> String {
     hex::encode(&h[..8])
 }
 
+/// Accuracy boost, at finish: figures in the written deliverable that are neither in the inputs
+/// nor in any tool output of this session. Returns the message that sends the agent back to
+/// compute them (at most twice per session; after that the figures are reported, not blocked).
+fn ungrounded(cfg: &AgentConfig, task: &str, evidence: &mut super::ground::Evidence, refusals: &mut u32) -> Option<String> {
+    if !cfg.boost || *refusals >= 2 {
+        return None;
+    }
+    let dir = cfg.rescue_dir.as_ref()?;
+    evidence.load_inputs(&cfg.workspace, task);
+    // Only goals about data: with no numbers in the inputs there is nothing to check against.
+    if evidence.input_values < 5 {
+        return None;
+    }
+    let bad = super::ground::unsupported(dir, evidence, 6);
+    if bad.is_empty() {
+        return None;
+    }
+    *refusals += 1;
+    let has_py = cfg.allow_shell && super::pycode::available();
+    Some(format!(
+        "[self-check] Not done yet — these figures in {} are not in the input files and were not produced by any tool call in this session: {}.\nDo not estimate numbers. Compute each one with the {} tool{}, then rewrite the file with the computed values and finish. (A figure that is a known fact rather than a result may stay if the text says so.)",
+        bad[0].0,
+        bad.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", "),
+        if has_py { "python" } else { "calc" },
+        if has_py { " (read the data files in the code and print the results)" } else { "" },
+    ))
+}
+
 /// Run the loop until the model finishes, the step budget runs out, or the wall clock does.
 /// Self-healing: model failover along the chain, waiting out a full outage, loop breaking,
 /// error-streak and deadline rescue.
@@ -835,6 +903,10 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     let mut warned: HashSet<String> = HashSet::new();
     let mut err_streak = 0u32;
     let mut rescued = false;
+    // Accuracy boost: every number the session has read or computed, and how often a finish
+    // was refused over figures that match none of them.
+    let mut evidence = super::ground::Evidence::default();
+    let mut ground_refusals = 0u32;
     let event = |status: &str, extra: Value| crate::log::event("step", status, extra);
     let heal = |out: &mut AgentOutcome, traj: &mut Traj, kind: &str, detail: Value| {
         out.heals += 1;
@@ -896,7 +968,7 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         out.steps += 1;
         compact(&mut messages, budget);
         event("call", json!({"model": model_id, "step": out.steps, "depth": cfg.depth}));
-        let resp = match client::chat(conn, model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens }, left.max(Duration::from_secs(30))) {
+        let resp = match client::chat(conn, model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens, temperature: cfg.temperature }, left.max(Duration::from_secs(30))) {
             Ok(r) => {
                 out.served_by = model_id.clone();
                 avoid[ci] = None;
@@ -930,6 +1002,16 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
             }
         }
         let _ = &model;
+        let mut resp = resp;
+        // A fenced Python block instead of a tool call, while nothing is delivered yet: the model
+        // meant to run it. Small models write code blocks far more reliably than JSON arguments.
+        if cfg.boost && resp.calls.is_empty() && cfg.allow_shell && cfg.depth == 0 && undelivered(cfg) && tools.iter().any(|t| t.name == "python") {
+            let tagged = Regex::new(r"(?s)```[ \t]*(?:python3?|py)[ \t]*\r?\n(.*?)```").unwrap();
+            if let Some(c) = tagged.captures(&resp.text) {
+                heal(&mut out, &mut traj, "ran_code_block", json!({"chars": c[1].len()}));
+                resp.calls = vec![ToolCall { id: format!("block_{}", out.steps), name: "python".into(), args: json!({"code": c[1].to_string()}), extra: None }];
+            }
+        }
         if !resp.text.trim().is_empty() {
             traj.ev(json!({"type": "assistant", "text": resp.text}));
         }
@@ -965,6 +1047,15 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         } else {
             vec![]
         };
+        // Self-check 6 (accuracy boost): figures nobody computed.
+        if review_issues.is_empty() && resp.calls.is_empty() && cfg.depth == 0 && !undelivered(cfg) && out.steps + 1 < cfg.max_steps {
+            if let Some(msg) = ungrounded(cfg, task, &mut evidence, &mut ground_refusals) {
+                heal(&mut out, &mut traj, "ungrounded_figures", json!({"message": util::take_chars(&msg, 300)}));
+                messages.push(Msg::Assistant { text: resp.text.clone(), calls: vec![] });
+                messages.push(Msg::User(msg));
+                continue;
+            }
+        }
         if !review_issues.is_empty() {
             finish_refusals += 1;
             last_review_size = out_size(cfg);
@@ -1094,6 +1185,11 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                 heal(&mut out, &mut traj, "error_streak", json!({"streak": err_streak}));
             }
             traj.ev(json!({"type": "tool", "name": call.name, "input": call.args, "status": if is_error { "error" } else { "ok" }, "output": content}));
+            // What a tool returned is evidence for the figures the deliverable may state (the
+            // writing tools only report what was written, so they do not count).
+            if cfg.boost && !is_error && !matches!(call.name.as_str(), "write_file" | "append_file" | "edit_file" | "delete_file" | "finish" | "remember" | "export_pdf" | "list_files") {
+                evidence.add_tool_output(&content);
+            }
             // Self-check 5: review the deliverables against the goal before letting it finish.
             let size_now = out_size(cfg);
             let budget = if finish_refusals >= 2 && size_now > last_review_size { 4 } else { 2 };
@@ -1113,6 +1209,14 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                         });
                         continue;
                     }
+                }
+            }
+            if call.name == "finish" && !is_error && cfg.depth == 0 {
+                if let Some(msg) = ungrounded(cfg, task, &mut evidence, &mut ground_refusals) {
+                    heal(&mut out, &mut traj, "ungrounded_figures", json!({"message": util::take_chars(&msg, 300)}));
+                    say!("{}! figures without a source: finish refused", cfg.log_prefix);
+                    results.push(ToolResult { id: call.id.clone(), name: call.name.clone(), content: msg, is_error: true });
+                    continue;
                 }
             }
             if call.name == "finish" && !is_error {
@@ -1156,6 +1260,12 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
     if cfg.depth == 0 {
         if let Some(d) = &cfg.rescue_dir {
             out.review_open = super::review::review(task, d);
+            if cfg.boost && evidence.loaded && evidence.input_values >= 5 {
+                let bad = super::ground::unsupported(d, &mut evidence, 6);
+                if !bad.is_empty() {
+                    out.review_open.push(format!("figures that match nothing in the inputs or in any tool output: {}", bad.iter().map(|(f, n)| format!("{n} ({f})")).collect::<Vec<_>>().join(", ")));
+                }
+            }
         }
     }
     traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd, "review_open": out.review_open,

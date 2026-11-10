@@ -301,6 +301,11 @@ pub trait BenchmarkAdapter: Send + Sync {
     fn guard_selection(&self) -> bool {
         false
     }
+    /// Is this run's answer already verified (so that improving the harness on the task would
+    /// buy nothing)? When the base attempt is, the mode adopts it and skips the recursion.
+    fn settled(&self, _run_dir: &Path) -> bool {
+        false
+    }
     /// Readable trajectory in the shared [ACTION]/[OBSERVATION]/[ERROR] grammar.
     fn trajectory(&self, run_dir: &Path, obs_trunc: usize) -> Result<String>;
     /// Optional. filename -> extracted readable text, one entry per artifact produced.

@@ -39,7 +39,7 @@ pub fn expand(model_chain: &str, text: &str, has_files: &[String]) -> Result<Val
             continue;
         }
         let msgs = vec![Msg::User(user.clone())];
-        match client::chat(&conn, &model, &ChatReq { system: SYSTEM, messages: &msgs, tools: &[], max_tokens: 2500 }, Duration::from_secs(300)) {
+        match client::chat(&conn, &model, &ChatReq { system: SYSTEM, messages: &msgs, tools: &[], max_tokens: 2500, temperature: None }, Duration::from_secs(300)) {
             Ok(r) => {
                 let body = r.text.trim();
                 let body = body.split_once("```json").map(|(_, b)| b.split("```").next().unwrap_or(b)).or_else(|| body.split_once("```").map(|(_, b)| b.split("```").next().unwrap_or(b))).unwrap_or(body);

@@ -1,6 +1,7 @@
 //! Benchmark adapters: the demo, open-world goals, and the three professional benchmarks
 //! (JobBench, LAB, WorkBuddy-Bench), plus their shared helpers.
 
+pub mod accuracy;
 pub mod demo;
 pub mod goal;
 pub mod jb_oc_runner;

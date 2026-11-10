@@ -61,6 +61,10 @@ pub struct ChatReq<'a> {
     pub messages: &'a [Msg],
     pub tools: &'a [ToolDef],
     pub max_tokens: u32,
+    /// Sampling temperature for this call; `None` uses the connection's setting (or the
+    /// server's default). The answer engine sets it per sample: low for a best guess, higher
+    /// for the independent attempts it votes over.
+    pub temperature: Option<f64>,
 }
 
 /// Whether `url`'s host should skip the environment proxy (loopback, or listed in NO_PROXY).
@@ -298,7 +302,7 @@ pub fn probe(conn: &Connection, model: &str) -> Value {
     let t0 = std::time::Instant::now();
     let tools = [ToolDef { name: "ping".into(), description: "Reply by calling this tool.".into(), parameters: serde_json::json!({"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]}) }];
     let msgs = [Msg::User("Call the ping tool with word=\"ok\". Do not reply with text.".into())];
-    let req = ChatReq { system: "You are a test harness. Use the tool.", messages: &msgs, tools: &tools, max_tokens: 200 };
+    let req = ChatReq { system: "You are a test harness. Use the tool.", messages: &msgs, tools: &tools, max_tokens: 200, temperature: None };
     let res = match conn.provider.as_str() {
         "openai" => openai(conn, model, &req, Duration::from_secs(20)),
         _ => chat(conn, model, &req, Duration::from_secs(20)),
@@ -396,19 +400,40 @@ pub fn text_tool_calls(text: &str, tools: &[ToolDef]) -> Vec<ToolCall> {
     }
     let mut out = vec![];
     let mut push = |v: &Value| {
-        let name = v.get("name").and_then(|n| n.as_str()).or_else(|| v.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()));
+        // The name: `name`, or `function` as a string (Llama-1B style), or `function.name`.
+        let name = v
+            .get("name")
+            .and_then(|n| n.as_str())
+            .or_else(|| v.get("function").and_then(|f| f.as_str()))
+            .or_else(|| v.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()))
+            .or_else(|| v.get("tool").and_then(|n| n.as_str()));
         let Some(name) = name.filter(|n| known(n)) else { return };
-        let mut args = v.get("arguments").or_else(|| v.get("parameters")).or_else(|| v.get("function").and_then(|f| f.get("arguments"))).cloned().unwrap_or(json!({}));
+        let mut args = v.get("arguments").or_else(|| v.get("parameters")).or_else(|| v.get("function").and_then(|f| f.get("arguments"))).or_else(|| v.get("args")).cloned().unwrap_or(json!({}));
         if let Value::String(s) = &args {
             args = lenient_json(s).unwrap_or(json!({}));
+        }
+        // Arguments wrapped the way a schema is ({"properties": {...}}): unwrap, unless the
+        // tool really has a parameter of that name.
+        let has_param = |p: &str| tools.iter().find(|t| t.name == name).map(|t| t.parameters["properties"].get(p).is_some()).unwrap_or(false);
+        if !has_param("properties") {
+            if let Some(inner) = args.get("properties").filter(|p| p.is_object()).cloned() {
+                if args.as_object().map(|m| m.keys().all(|k| matches!(k.as_str(), "properties" | "required" | "type"))).unwrap_or(false) {
+                    args = inner;
+                }
+            }
         }
         out.push(ToolCall { id: format!("text_{}", out.len()), name: name.to_string(), args, extra: None });
     };
     for c in cands {
-        match lenient_json(&c).ok_or(()) {
-            Ok(Value::Array(a)) => a.iter().for_each(&mut push),
-            Ok(v) => push(&v),
-            Err(_) => {}
+        match lenient_json(&c) {
+            Some(Value::Array(a)) => a.iter().for_each(&mut push),
+            Some(v) => push(&v),
+            // Trailing junk after a complete object ("...}}}" or "}\n}()"): take the object.
+            None => {
+                if let Some(v) = balanced_objects(&c, 1).first().and_then(|o| lenient_json(o)) {
+                    push(&v);
+                }
+            }
         }
     }
     out
@@ -521,7 +546,7 @@ fn ollama(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
         }
     }
     let mut options = json!({"num_ctx": conn.window(), "num_predict": req.max_tokens});
-    if let Some(t) = conn.temperature {
+    if let Some(t) = req.temperature.or(conn.temperature) {
         options["temperature"] = json!(t);
     }
     let mut body = json!({"model": model, "messages": msgs, "stream": false, "options": options});
@@ -587,7 +612,7 @@ fn openai(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
     } else {
         body["max_tokens"] = json!(req.max_tokens);
     }
-    if let Some(t) = conn.temperature {
+    if let Some(t) = req.temperature.or(conn.temperature) {
         body["temperature"] = json!(t);
     }
     if !req.tools.is_empty() {
@@ -671,8 +696,8 @@ fn anthropic(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -
     if !req.system.is_empty() {
         body["system"] = if cache { json!([{"type": "text", "text": req.system, "cache_control": eph}]) } else { json!(req.system) };
     }
-    if let Some(t) = conn.temperature {
-        body["temperature"] = json!(t);
+    if let Some(t) = req.temperature.or(conn.temperature) {
+        body["temperature"] = json!(t.min(1.0));
     }
     if !req.tools.is_empty() {
         let mut tools: Vec<Value> = req.tools.iter().map(|t| json!({"name": t.name, "description": t.description, "input_schema": t.parameters})).collect();
@@ -732,7 +757,7 @@ fn gemini(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
         }
     }
     let mut body = json!({"contents": contents, "generationConfig": {"maxOutputTokens": req.max_tokens}});
-    if let Some(t) = conn.temperature {
+    if let Some(t) = req.temperature.or(conn.temperature) {
         body["generationConfig"]["temperature"] = json!(t);
     }
     if !req.system.is_empty() {
@@ -829,6 +854,17 @@ mod tests {
         assert_eq!(c[0].args["content"], "line1\nline2");
         assert_eq!(lenient_json("{\"a\": [1, 2,],}").unwrap()["a"][1], 2);
         assert!(text_tool_calls("just prose", &tools).is_empty());
+        // an extra closing brace after the call, as Qwen-3B wrote it three times in one session
+        let c = text_tool_calls("I will write it now.\n<tool_call>\n{\"name\": \"write_file\", \"arguments\": {\"content\":\"```md\\n# T\\n```\", \"path\":\"output/answer.md\"}}}", &tools);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].args["path"], "output/answer.md");
+        let c = text_tool_calls("<tool_call>\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"a.py\", \"content\": \"x\"}\n}()\n", &tools);
+        assert_eq!(c.len(), 1, "junk after the object");
+        // Llama-1B: `function` as the name, arguments wrapped like a schema
+        let rf = vec![ToolDef { name: "read_file".into(), description: String::new(), parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}) }];
+        let c = text_tool_calls("{\"function\": \"read_file\", \"parameters\": {\"properties\": {\"path\": \"sales.csv\"}}}", &rf);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].args["path"], "sales.csv");
         assert_eq!(strip_think("<think>hmm</think>\nanswer"), "answer");
     }
 
@@ -918,7 +954,7 @@ pub fn discover_local() -> Vec<Value> {
 /// A one-line round trip: proves the key, the URL and the model id all work.
 pub fn ping(conn: &Connection, model: &str) -> Result<String> {
     let msgs = vec![Msg::User("Reply with the single word: ready".into())];
-    let r = chat(conn, model, &ChatReq { system: "", messages: &msgs, tools: &[], max_tokens: 64 }, Duration::from_secs(60))?;
+    let r = chat(conn, model, &ChatReq { system: "", messages: &msgs, tools: &[], max_tokens: 64, temperature: None }, Duration::from_secs(60))?;
     Ok(r.text.trim().to_string())
 }
 

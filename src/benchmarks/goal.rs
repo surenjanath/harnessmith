@@ -112,6 +112,32 @@ pub struct GoalSettings {
     /// Base-harness files the improver may not change or delete (upstream #94).
     #[serde(default)]
     pub pinned_paths: Vec<String>,
+    /// Accuracy boost for exact questions (program-aided answers, voted over independent
+    /// attempts): "auto" (on for local and small models) | "on" | "off".
+    #[serde(default = "auto")]
+    pub accuracy: String,
+    /// Independent attempts the answer engine votes over (1: no voting).
+    #[serde(default = "three")]
+    pub accuracy_samples: usize,
+    /// A stronger model asked once when the attempts do not agree (`connection/model`; empty: none).
+    #[serde(default)]
+    pub escalate_model: String,
+    /// Keep verified solutions as worked examples for later questions of the same kind.
+    #[serde(default = "yes")]
+    pub experience: bool,
+    /// When the first attempt's answer is verified by agreeing attempts, adopt it and skip the
+    /// harness-improvement loop for that goal.
+    #[serde(default = "yes")]
+    pub settle_verified: bool,
+    /// Sleep on its own when the project is idle and has unrehearsed experience.
+    #[serde(default)]
+    pub sleep_auto: bool,
+    /// Practice tasks per sleep.
+    #[serde(default = "six")]
+    pub sleep_dreams: usize,
+}
+fn six() -> usize {
+    6
 }
 
 /// Characters that hide text from a human reviewer but not from a model: zero-width, bidi
@@ -221,6 +247,13 @@ impl Default for GoalSettings {
             judge_repeats: 3,
             web_access: false,
             pinned_paths: vec![],
+            accuracy: auto(),
+            accuracy_samples: 3,
+            escalate_model: String::new(),
+            experience: true,
+            settle_verified: true,
+            sleep_auto: false,
+            sleep_dreams: 6,
         }
     }
 }
@@ -429,6 +462,10 @@ impl BenchmarkAdapter for GoalAdapter {
                 sandbox_network: self.settings.sandbox_network,
                 mcp_servers: self.settings.mcp_servers.clone(),
                 web_access: self.settings.web_access,
+                accuracy: self.settings.accuracy.clone(),
+                accuracy_samples: self.settings.accuracy_samples,
+                escalate_model: self.settings.escalate_model.clone(),
+                experience: self.settings.experience.then(|| (self.root.clone(), task_id.to_string())),
             },
         )
     }
@@ -437,6 +474,11 @@ impl BenchmarkAdapter for GoalAdapter {
     }
     fn guard_selection(&self) -> bool {
         self.settings.select_guard
+    }
+    /// An exact answer that independent attempts agreed on (accuracy boost, confidence high).
+    fn settled(&self, run_dir: &Path) -> bool {
+        self.settings.settle_verified
+            && std::fs::read_to_string(run_dir.join("usage.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).map(|u| u["accuracy"]["confidence"] == "high").unwrap_or(false)
     }
     fn trajectory(&self, run_dir: &Path, obs_trunc: usize) -> Result<String> {
         Ok(native::render_events(&run_dir.join("trajectory.jsonl"), obs_trunc, 2_000_000, 400))
@@ -507,7 +549,7 @@ impl BenchmarkAdapter for GoalAdapter {
         let mut votes: Vec<Vec<Value>> = vec![];
         let mut last_err = None;
         for _ in 0..repeats {
-            match client::chat(&conn, &model, &client::ChatReq { system: "You are a strict, fair grader. Output JSON only.", messages: &msgs, tools: &[], max_tokens: 4096 }, Duration::from_secs(300)) {
+            match client::chat(&conn, &model, &client::ChatReq { system: "You are a strict, fair grader. Output JSON only.", messages: &msgs, tools: &[], max_tokens: 4096, temperature: None }, Duration::from_secs(300)) {
                 Ok(r) => {
                     let txt = r.text.trim();
                     let body = match (txt.find('{'), txt.rfind('}')) {

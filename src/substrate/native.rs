@@ -17,6 +17,8 @@ use super::{cap_rendered, clip, pystr};
 use crate::core::runmark;
 use crate::core::tree::{self, SurfaceSpec};
 use crate::llm::agent::{self, AgentConfig};
+use crate::llm::experience;
+use crate::llm::precise;
 use crate::util;
 use anyhow::Result;
 use serde_json::Value;
@@ -66,7 +68,7 @@ pub fn default_base_tree() -> tree::Tree {
     t.insert("LongTermMEMORY.md".into(), String::new());
     t.insert(
         "tool_descriptions/tool_guidance.md".into(),
-        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace, e.g. `python3 scripts/<name>.py`.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n- Wired tools (listed under WIRED TOOLS) are called directly; prefer them over hand-rolled shell steps.\n".into(),
+        "- `list_files` / `read_file` to inspect inputs (page large files with offset/limit).\n- `write_file` / `edit_file` to produce deliverables under `output/`.\n- `bash` runs shell commands in the workspace.\n- `skill` loads a named skill's full instructions; `task` delegates to a named sub-agent.\n- Wired tools (listed under WIRED TOOLS) are called directly; prefer them over hand-rolled shell steps.\n".into(),
     );
     t
 }
@@ -144,6 +146,9 @@ for c in cols:
 
 const RUNTIME_RULES: &str = "# RUNTIME\nYour working directory is the workspace. Input files for the task, if any, are in it. Write deliverables under `output/`. Use relative paths.\n\n# HOW TO WORK\n1. Read the goal and list, for yourself, every requirement in it (format, file type, length, style, sections).\n2. Create each deliverable with `write_file`, in full, in one go (not with shell echo or heredocs, which truncate). Use the file type the goal asks for: an HTML page is a complete `output/index.html` with <!DOCTYPE html>, <head>, inline <style> and </html>; a document is Markdown with headings and real depth.\n3. Read every file back and check it against each requirement; fix what is missing.\n4. Only then call `finish` with a short summary. Describing work in a reply does not do it: only tool calls change files.";
 
+/// Added to the solver's instructions when the accuracy boost is on.
+const BOOST_RULES: &str = "\n\n---\n\n# NUMBERS\nEvery figure you report must come from the input files or from a tool result in this session. For any calculation, count, sort or date difference, call the `python` tool (or `calc` for plain arithmetic) and copy its result; never work a number out in your head and never guess one. Before you finish, the figures in your deliverable are checked against what you actually read and computed.";
+
 /// The system prompt the solver sees: the always-on harness plus an index of on-demand parts.
 pub fn compose_system(harness: &Path) -> String {
     let surface = native_surface();
@@ -196,6 +201,15 @@ pub struct SolveOpts {
     /// MCP servers whose tools the solver may call.
     pub mcp_servers: Vec<crate::llm::mcp::ServerCfg>,
     pub web_access: bool,
+    /// Accuracy boost: "auto" (on for local and small models) | "on" | "off".
+    pub accuracy: String,
+    /// Independent attempts the answer engine votes over.
+    pub accuracy_samples: usize,
+    /// A stronger model asked once when the attempts do not agree (empty: none).
+    pub escalate_model: String,
+    /// Project root whose experience (verified worked examples) is read and added to, with the
+    /// goal id new examples are filed under. None: no learning from experience.
+    pub experience: Option<(PathBuf, String)>,
 }
 
 /// Run one rollout of `harness` (None = `base`) on `task` into `run_dir`, idempotently:
@@ -217,7 +231,12 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     if harness.join("scripts").is_dir() {
         util::copy_tree_filtered(&harness.join("scripts"), &ws.join("scripts"), |r| r.ends_with(".py"))?;
     }
+    let boost = precise::enabled(&o.accuracy, &o.model_id);
     let mut cfg = AgentConfig::new(&o.model_id, &compose_system(harness), &ws);
+    cfg.boost = boost;
+    if boost {
+        cfg.system.push_str(BOOST_RULES);
+    }
     cfg.max_steps = o.max_steps;
     cfg.wall = Duration::from_secs(o.timeout);
     cfg.allow_shell = o.allow_shell;
@@ -232,6 +251,79 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
     }
     let ro = if o.gate_protect_inputs { gate.protected_list().into_iter().filter(|p| !p.starts_with("scripts/")).collect() } else { vec![] };
     let sb = crate::llm::sandbox::Sandbox::new(&o.sandbox, &ws, &ro, o.sandbox_network);
+    // Accuracy boost: a goal that asks for one exact answer goes to the answer engine, which has
+    // the model write a program instead of guessing and votes over independent attempts.
+    let mut engine_usage = (0u32, 0u64, 0u64, 0.0f64);
+    if o.allow_shell && precise::enabled(&o.accuracy, &o.model_id) && precise::is_exact_question(task) && crate::llm::pycode::available() {
+        let files: Vec<String> = source.filter(|s| s.is_dir()).map(|s| util::files_sorted(s).iter().map(|p| util::rel(s, p)).collect()).unwrap_or_default();
+        let mut po = precise::Opts::new(&o.model_id);
+        po.samples = o.accuracy_samples.clamp(1, 9);
+        po.notes = precise::notes_from_harness(harness);
+        po.sandbox = (sb.kind != crate::llm::sandbox::Kind::Off).then(|| sb.clone());
+        po.wall = Duration::from_secs(o.timeout);
+        po.trajectory = Some(run_dir.join("trajectory.jsonl"));
+        po.escalate_model = o.escalate_model.clone();
+        po.gate = Some(gate.clone());
+        // Experience: the most similar verified solutions of this project, as worked examples.
+        let store = o.experience.as_ref().map(|(root, _)| experience::Store::open(root));
+        let sigs: Vec<experience::FileSig> = files.iter().map(|f| experience::sig_of(&ws, f)).collect();
+        if let Some(st) = &store {
+            let mut ex = st.similar(task, &sigs, 2, 0.5);
+            // A second example only when it is nearly as close as the first.
+            if ex.len() == 2 && ex[1].0 < ex[0].0 - 0.15 {
+                ex.truncate(1);
+            }
+            if !ex.is_empty() {
+                crate::say!("      experience: {} worked example(s) from earlier goals ({})", ex.len(), ex.iter().map(|(s, e)| format!("{} {:.0}%", e.id, s * 100.0)).collect::<Vec<_>>().join(", "));
+                crate::log::event("accuracy", "examples", serde_json::json!({"ids": ex.iter().map(|(_, e)| e.id.clone()).collect::<Vec<_>>(), "scores": ex.iter().map(|(s, _)| (s * 100.0).round() / 100.0).collect::<Vec<_>>()}));
+                st.mark_used(&ex.iter().map(|(_, e)| e.id.clone()).collect::<Vec<_>>());
+            }
+            po.examples = ex;
+        }
+        crate::say!("      accuracy boost: exact question → program-aided answer, up to {} attempt(s){}", po.samples, if po.sandbox.is_some() { " (sandboxed)" } else { "" });
+        match precise::answer(task, &ws, &files, &po) {
+            Ok(v) if v.answer.is_some() => {
+                // A verified solution becomes experience: two or more computed attempts agree
+                // and none of them disagrees.
+                let answer = v.answer.clone().unwrap_or_default();
+                let computed: Vec<&precise::Sample> = v.samples.iter().filter(|s| s.answer.is_some() && s.how != "reasoned").collect();
+                let unanimous = computed.len() >= 2 && computed.iter().all(|s| precise::same_answer(s.answer.as_deref().unwrap_or(""), &answer, task));
+                if let (Some(st), Some((_, goal)), true, false) = (&store, &o.experience, unanimous, v.program.trim().is_empty()) {
+                    let rec = st.record(experience::Exemplar {
+                        goal: goal.clone(),
+                        question: task.to_string(),
+                        files: sigs.clone(),
+                        program: v.program.clone(),
+                        output: v.output.clone(),
+                        answer: answer.clone(),
+                        agree: v.agree,
+                        answered: v.answered,
+                        model: v.served_by.clone(),
+                        status: "active".into(),
+                        ..Default::default()
+                    });
+                    if let Ok((e, replaced)) = rec {
+                        crate::say!("      experience: kept this solution as a worked example ({}{})", e.id, if replaced { ", replacing an older one of the same kind" } else { "" });
+                        crate::log::event("accuracy", "learned", serde_json::json!({"id": e.id, "replaced": replaced}));
+                    }
+                }
+                return finish_precise(run_dir, &ws, fp_dir, o, &v);
+            }
+            Ok(v) => {
+                if crate::log::cancelled() {
+                    anyhow::bail!("solver session failed: cancelled by user");
+                }
+                crate::say!("      accuracy boost: no attempt produced an answer ({}); continuing with the agent loop", util::take_chars(&v.error.replace('\n', " "), 160));
+                engine_usage = (v.calls, v.input_tokens, v.output_tokens, v.cost_usd);
+            }
+            Err(e) => {
+                if format!("{e}").contains("cancelled") {
+                    anyhow::bail!("solver session failed: cancelled by user");
+                }
+                crate::say!("      accuracy boost unavailable ({}); continuing with the agent loop", util::take_chars(&format!("{e}"), 160));
+            }
+        }
+    }
     if sb.kind != crate::llm::sandbox::Kind::Off {
         crate::say!("      sandbox: {} · network {}", sb.kind.as_str(), if o.sandbox_network { "on" } else { "off" });
         if !o.sandbox_network {
@@ -267,7 +359,19 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         cfg.system = format!("{}\n\n---\n\n{}", cfg.system, crate::llm::memory::system_section(&store.pinned()));
         cfg.memory = Some((store, crate::llm::memory::Source { goal: goal.clone(), by: "agent".into(), ..Default::default() }));
     }
-    let out = agent::run(&cfg, task)?;
+    // Accuracy boost: small inputs are shown with the task, so the first step is work, not a read.
+    let shown_task = if boost {
+        let files: Vec<String> = source.filter(|s| s.is_dir()).map(|s| util::files_sorted(s).iter().map(|p| util::rel(s, p)).collect()).unwrap_or_default();
+        let block = precise::files_block(&ws, &files);
+        if !block.is_empty() && util::char_len(&block) <= 6000 { format!("{task}{}", block.replace("Files in the current directory:", "The input files (already in your workspace):")) } else { task.to_string() }
+    } else {
+        task.to_string()
+    };
+    let mut out = agent::run(&cfg, &shown_task)?;
+    out.steps += engine_usage.0;
+    out.input_tokens += engine_usage.1;
+    out.output_tokens += engine_usage.2;
+    out.cost_usd += engine_usage.3;
     util::write(&run_dir.join("final.md"), &out.final_text)?;
     // A session that died (transport error, cancellation) before producing anything is a dead
     // rollout: report it and leave it UNMARKED, so a rerun rolls it again instead of serving an
@@ -289,6 +393,54 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         &run_dir.join("usage.json"),
         serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error, "heals": out.heals, "model": out.served_by, "review_open": out.review_open}))?,
     )?;
+    runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
+    Ok(run_dir.to_path_buf())
+}
+
+/// Deliver the answer engine's verdict as the rollout's result: the answer first, then how it
+/// was reached and how far it can be trusted.
+fn finish_precise(run_dir: &Path, ws: &Path, fp_dir: Option<&Path>, o: &SolveOpts, v: &precise::Verdict) -> Result<PathBuf> {
+    let answer = v.answer.clone().unwrap_or_default();
+    let others: Vec<String> = {
+        let mut seen: Vec<String> = vec![];
+        for s in &v.samples {
+            if let Some(a) = &s.answer {
+                if !precise::same_answer(a, &answer, "") && !seen.iter().any(|x| precise::same_answer(x, a, "")) {
+                    seen.push(a.clone());
+                }
+            }
+        }
+        seen
+    };
+    let how = match v.confidence() {
+        "high" if v.escalated => format!("The attempts did not agree, so a stronger model settled it; {} of {} answers match.", v.agree, v.answered),
+        "high" => format!("Checked: {} of {} independent attempts gave this answer.", v.agree, v.answered),
+        _ if v.how == "reasoned" || v.how == "direct" => "Low confidence: no program produced an answer, so this is the model's own step-by-step estimate. Check it before relying on it.".to_string(),
+        "medium" if v.answered == 1 => "Computed once by a program; no second attempt confirmed it.".to_string(),
+        "medium" => format!("{} of {} independent attempts gave this answer; the others differed ({}).", v.agree, v.answered, others.iter().map(|a| util::take_chars(a, 40)).collect::<Vec<_>>().join(", ")),
+        _ => format!("Low confidence: the attempts did not agree (other answers: {}). Treat this as a best guess and check it.", others.iter().map(|a| util::take_chars(a, 40)).collect::<Vec<_>>().join(", ")),
+    };
+    let mut md = format!("{answer}\n\n---\n\n*{how}*\n");
+    if !v.program.trim().is_empty() {
+        md.push_str(&format!("\n<details><summary>The program that computed it</summary>\n\n```python\n{}\n```\n\nIt printed:\n\n```\n{}\n```\n\n</details>\n", v.program.trim(), util::take_chars(v.output.trim(), 1500)));
+    }
+    util::write(&ws.join("output/answer.md"), &md)?;
+    util::write(&run_dir.join("final.md"), &answer)?;
+    util::write(&run_dir.join("accuracy.json"), serde_json::to_string_pretty(&v.to_json())?)?;
+    crate::say!("      accuracy boost: {} — {} of {} attempts agree (confidence {})", util::take_chars(&answer, 100), v.agree, v.answered, v.confidence());
+    let mut extra = serde_json::Map::new();
+    extra.insert("model".into(), Value::String(o.model_id.clone()));
+    extra.insert("steps".into(), Value::from(v.calls));
+    extra.insert("cost_usd".into(), Value::from(v.cost_usd));
+    extra.insert("error".into(), Value::String(String::new()));
+    util::write(
+        &run_dir.join("usage.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "steps": v.calls, "input_tokens": v.input_tokens, "output_tokens": v.output_tokens, "cost_usd": v.cost_usd, "error": "", "heals": 0, "model": v.served_by, "review_open": Vec::<String>::new(),
+            "accuracy": {"agree": v.agree, "answered": v.answered, "tried": v.tried, "confidence": v.confidence(), "escalated": v.escalated},
+        }))?,
+    )?;
+    crate::log::event("step", "end", serde_json::json!({"steps": v.calls, "in": v.input_tokens, "out": v.output_tokens, "usd": v.cost_usd, "error": "", "depth": 0, "heals": 0, "model": v.served_by}));
     runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
     Ok(run_dir.to_path_buf())
 }

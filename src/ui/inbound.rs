@@ -137,9 +137,17 @@ pub(crate) async fn hook_github(h: HeaderMap, body: Bytes) -> ApiResult {
 
 /// Every 30 s: start each enabled schedule that is due (one run per schedule at a time).
 pub fn start_scheduler() {
-    std::thread::spawn(|| loop {
-        std::thread::sleep(std::time::Duration::from_secs(30));
-        let _ = tick();
+    std::thread::spawn(|| {
+        let mut n = 0u64;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let _ = tick();
+            // Every five minutes: let an idle project with unrehearsed experience sleep.
+            n += 1;
+            if n % 10 == 0 {
+                super::boost::auto_sleep_tick();
+            }
+        }
     });
 }
 

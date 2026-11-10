@@ -144,6 +144,29 @@ impl Connection {
     }
 }
 
+/// Billions of parameters, when the model's name states it: `qwen2.5:3b`, `llama-3.2-1b-instruct`,
+/// `gpt-oss-20b`, `smollm2-360m`.
+pub fn params_b(model: &str) -> Option<f64> {
+    let re = regex::Regex::new(r"(?i)(?:^|[^a-z0-9.])(\d+(?:\.\d+)?)\s*([bm])(?:[^a-z0-9]|$)").unwrap();
+    // The last match: "llama-3.2-1b" has the size after the version.
+    re.captures_iter(model).last().and_then(|c| {
+        let n: f64 = c[1].parse().ok()?;
+        Some(if c[2].eq_ignore_ascii_case("m") { n / 1000.0 } else { n })
+    })
+}
+
+/// A model the accuracy boost is meant for: served locally, or small by its name.
+pub fn is_small(c: &Connection, model: &str) -> bool {
+    let base = c.base();
+    let host = base.split("://").nth(1).unwrap_or(&base).split(['/', ':']).next().unwrap_or("").to_string();
+    let private = host == "localhost" || host.starts_with("127.") || host == "[" || host == "host.docker.internal" || host.starts_with("192.168.") || host.starts_with("10.")
+        || host.strip_prefix("172.").and_then(|r| r.split('.').next()).and_then(|o| o.parse::<u8>().ok()).map(|o| (16..=31).contains(&o)).unwrap_or(false);
+    let local = c.provider == "ollama" && (c.base_url.trim().is_empty() || private) || (c.provider == "openai" && private);
+    let by_size = params_b(model).map(|b| b <= 40.0).unwrap_or(false);
+    let by_name = regex::Regex::new(r"(?i)(^|[^a-z])(mini|tiny|small|nano|smol|lite)([^a-z]|$)").unwrap().is_match(model);
+    local || by_size || by_name
+}
+
 pub fn default_base(provider: &str) -> &'static str {
     match provider {
         "openai" => "https://api.openai.com/v1",
@@ -264,4 +287,29 @@ pub fn resolve(model_id: &str) -> Result<(Connection, String)> {
         bail!("model id {model_id:?} names no model and connection {prefix:?} has no default_model");
     }
     Ok((conn, model))
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn model_sizes_are_read_from_names() {
+        assert_eq!(params_b("qwen2.5:3b"), Some(3.0));
+        assert_eq!(params_b("llama-3.2-1b-instruct"), Some(1.0));
+        assert_eq!(params_b("gpt-oss-20b"), Some(20.0));
+        assert_eq!(params_b("phi-4-mini-3.8b"), Some(3.8));
+        assert_eq!(params_b("smollm2-360m"), Some(0.36));
+        assert_eq!(params_b("gpt-4.1"), None);
+        assert_eq!(params_b("claude-opus-5-5"), None);
+        let api = builtin("openai").unwrap();
+        assert!(!is_small(&api, "gpt-4.1"));
+        assert!(is_small(&api, "gpt-4.1-mini"));
+        assert!(is_small(&builtin("ollama").unwrap(), "anything"));
+        assert!(is_small(&builtin("openrouter").unwrap(), "meta-llama/llama-3.2-3b-instruct:free"));
+        assert!(!is_small(&builtin("openrouter").unwrap(), "meta-llama/llama-3.3-70b-instruct"));
+        let mut local = builtin("openai").unwrap();
+        local.base_url = "http://127.0.0.1:8080/v1".into();
+        assert!(is_small(&local, "some-model"));
+    }
 }
