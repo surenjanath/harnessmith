@@ -31,16 +31,24 @@ use std::time::{Duration, Instant};
 pub enum Kind {
     Page,
     Code,
+    /// A written document about the goal's data files.
+    Report,
 }
 
 /// Is this goal a single page, or a Python coding task? Anything else stays on the agent loop.
 pub fn kind(task: &str) -> Option<Kind> {
     let goal = task.split("\n\nInput files (in your workspace):").next().unwrap_or(task);
-    if task.contains("\n\nInput files (in your workspace):") || util::char_len(goal) > 2500 {
-        return None; // goals with inputs need the agent's tools
+    if util::char_len(goal) > 2500 {
+        return None;
     }
     let g = goal.to_lowercase();
-    let exts = crate::core::schedule::expected_exts(goal);
+    let exts = crate::core::schedule::expected_exts(task);
+    if let Some((_, inputs)) = task.split_once("\n\nInput files (in your workspace):") {
+        // With data files: a written piece about them is a report; anything else needs the agent's tools.
+        let data = inputs.split(',').any(|f| matches!(f.trim().rsplit('.').next().unwrap_or("").to_lowercase().as_str(), "csv" | "tsv" | "json" | "jsonl" | "log" | "txt"));
+        let writes = Regex::new(r"\b(report|summary|summari[sz]e|brief|overview|analysis|analy[sz]e|write[- ]?up|describe|findings|memo|table)\b").unwrap().is_match(&g);
+        return (data && writes && exts.is_empty() && inputs.split(',').count() <= 4).then_some(Kind::Report);
+    }
     // "a sleek hello world page" is a web page; "a one-page brief" is a document.
     let doc = Regex::new(r"\b(report|brief|essay|article|document|memo|letter|summary|pdf|docx|one[- ]page|\d+[- ]page|pages)\b").unwrap().is_match(&g);
     let page = Regex::new(r"\b(html|web ?page|landing page|website|home ?page)\b").unwrap().is_match(&g) || (Regex::new(r"\bpage\b").unwrap().is_match(&g) && !doc);
@@ -505,7 +513,7 @@ Rules:
 - Standard library only. No input(), no reading files unless the task says so, no code that runs on import except definitions.
 - Handle the edge cases the task mentions (empty input, zero, negative numbers, duplicates).";
 
-const TEST_ASK: &str = "Now write tests for that task. Reply with ONE ```python block that contains only single-line assert statements calling the function(s), one per line, 6 to 10 of them. Start with the examples the task gives, then edge cases. Every expected value must be what a correct solution returns.";
+const TEST_ASK: &str = "Now write tests for that task. Reply with ONE ```python block that contains only single-line assert statements calling the function(s), one per line, 6 to 10 of them. Start with the examples the task gives, then write at least one test for EVERY requirement the task states, including how the result must be ordered or sorted (use an input whose natural order differs from the required order), then edge cases. Every expected value must be exactly what the task's rules give.";
 
 const DRIVER: &str = r#"import json, sys, io, contextlib, signal
 sols, asserts = json.load(open(sys.argv[1]))
@@ -633,6 +641,32 @@ fn make_code(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
             }
         }
     }
+    // Requirements review: tests the model wrote can miss a sentence of the task (an ordering,
+    // an edge case). Ask once for a re-read; keep the revision only if it passes every test the
+    // current best passes.
+    if !crate::log::cancelled() && !c.left().is_zero() {
+        let msgs = vec![
+            Msg::User(ask.clone()),
+            Msg::Assistant { text: format!("```python\n{}\n```", sols[best].trim()), calls: vec![] },
+            Msg::User("Re-read the task sentence by sentence. For each requirement (names, arguments, return type, ordering or sorting of the result, edge cases) check that the solution does exactly that. If something is missing or different, fix it. Reply with the complete final solution in one ```python block and nothing else.".into()),
+        ];
+        if let Ok(reply) = c.call(&system, &msgs, 0.2) {
+            if let Some(code) = fenced(&reply, &["python", "py", "python3"]).filter(|x| x.trim() != sols[best].trim()) {
+                let mut both = vec![sols[best].clone(), code.clone()];
+                if let Ok(m) = if asserts.is_empty() { Ok(vec![vec![], vec![]]) } else { cross_run(ws, c.o.sandbox.as_ref(), &both, &asserts) } {
+                    let keeps = (0..asserts.len()).all(|a| !m[0][a] || m[1][a]);
+                    // With no tests at all, the revision must at least run.
+                    let runs = !asserts.is_empty() || pycode::run(ws, c.o.sandbox.as_ref(), &code, Duration::from_secs(10)).map(|o| o.ok()).unwrap_or(false);
+                    if keeps && runs {
+                        crate::say!("{}code: requirements review revised the solution (still passes every test)", c.o.log_prefix);
+                        sols.push(both.remove(1));
+                        best = sols.len() - 1;
+                        matrix.push(m[1].clone());
+                    }
+                }
+            }
+        }
+    }
     util::write(&ws.join(&file), format!("{}\n", sols[best].trim()))?;
     let failing: Vec<String> = asserts.iter().enumerate().filter(|(a, _)| !matrix[best].get(*a).copied().unwrap_or(true)).map(|(_, t)| t.clone()).collect();
     c.m.file = file;
@@ -648,6 +682,191 @@ fn make_code(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
         c.m.passed,
         passing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
     );
+    Ok(())
+}
+
+// ---- reports on data -------------------------------------------------------------------------
+
+const FACTS_SYSTEM: &str = "You prepare the figures for a written report by writing a short Python program. The program is run for you; what it prints becomes the report's facts.
+Rules:
+- Compute every figure the report will need (totals, per-group values, counts, averages, the largest and smallest) from the files. Never calculate in your head.
+- Print each fact on its own line as `label: value`, with clear labels (for a per-group result, one line per group). Round money to 2 decimals.
+- Standard library only (csv, json, math, statistics, collections, re, datetime). Simple step-by-step code with plain loops. No input().
+- Do NOT write or open any file for writing, and do not write the report itself: only print() the facts. The report is written later from what you print.";
+
+const WRITE_SYSTEM: &str = "You write clear, short business documents in Markdown.
+Rules:
+- Reply with the whole document in ONE ```markdown block and nothing else.
+- Use ONLY the facts you are given. Copy each figure exactly as it appears; do not calculate new figures, do not round differently, do not invent any number.
+- Say which is highest or lowest only as the facts' `Highest:` and `Lowest:` lines say; never rank things yourself.
+- Structure: a `# Title` line; `## Summary` with one paragraph on the main finding; a `## ` section with a Markdown table when the task asks for one or the facts are per-group; `## Conclusion` with two or three sentences. Headings on their own lines, a blank line after each. No front matter, no `title:` labels.
+- No placeholders, no template variables, no code.";
+
+/// The per-group facts with the largest and the smallest value: (label, value as printed).
+/// Totals, averages and counts are not groups.
+pub fn ranking(facts: &str) -> (Option<(String, String)>, Option<(String, String)>) {
+    let line = Regex::new(r"^\s*(.+?)\s*:\s*\$?\s*(-?[\d,]+(?:\.\d+)?)\s*%?\s*$").unwrap();
+    let agg = Regex::new(r"(?i)\b(total|sum|overall|average|avg|mean|median|count|number of|all|grand)\b").unwrap();
+    let mut groups: Vec<(String, String, f64)> = vec![];
+    for l in facts.lines() {
+        if let Some(c) = line.captures(l) {
+            if agg.is_match(&c[1]) {
+                continue;
+            }
+            if let Ok(v) = c[2].replace(',', "").parse::<f64>() {
+                groups.push((c[1].trim().to_string(), c[2].to_string(), v));
+            }
+        }
+    }
+    if groups.len() < 3 {
+        return (None, None);
+    }
+    let hi = groups.iter().max_by(|a, b| a.2.partial_cmp(&b.2).unwrap()).unwrap();
+    let lo = groups.iter().min_by(|a, b| a.2.partial_cmp(&b.2).unwrap()).unwrap();
+    // A tie at either end leaves no single answer to hold the text to.
+    if groups.iter().filter(|g| g.2 == hi.2).count() > 1 || groups.iter().filter(|g| g.2 == lo.2).count() > 1 {
+        return (None, None);
+    }
+    (Some((hi.0.clone(), hi.1.clone())), Some((lo.0.clone(), lo.1.clone())))
+}
+
+/// A sentence that names a leader or a laggard other than the real one.
+pub fn wrong_ranking(doc: &str, top: Option<&str>, bottom: Option<&str>) -> Option<String> {
+    let hi = Regex::new(r"(?i)\b(leads?|leading|highest|largest|biggest|top|most|best|strongest|greatest)\b").unwrap();
+    let lo = Regex::new(r"(?i)\b(lowest|smallest|least|worst|weakest|bottom|trails?)\b").unwrap();
+    // The last word of a label ("East", "revenue for East" -> "east") identifies it in prose.
+    let key = |l: &str| l.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).last().unwrap_or("").to_lowercase();
+    for sent in doc.split(|c| c == '.' || c == '\n' || c == ';' || c == ',') {
+        let s = sent.to_lowercase();
+        let has = |name: Option<&str>| name.map(|n| !key(n).is_empty() && s.split(|c: char| !c.is_alphanumeric()).any(|w| w == key(n))).unwrap_or(false);
+        if hi.is_match(&s) && !lo.is_match(&s) && has(bottom) && !has(top) {
+            return Some(format!("this is wrong: \"{}\". The highest is {}, the lowest is {}", sent.trim(), top.unwrap_or("?"), bottom.unwrap_or("?")));
+        }
+        if hi.is_match(&s) && !lo.is_match(&s) && !has(top) && top.is_some() {
+            // Names another group as the leader?
+            if let Some(t) = top {
+                if s.contains(" with ") || s.contains(" at ") || s.contains(" region") {
+                    let mentions_other = Regex::new(r"\b[A-Z][a-z]+\b").unwrap().find_iter(sent).any(|m| !["The", "This", "It", "In", "A", "An", "Our"].contains(&m.as_str()) && m.as_str().to_lowercase() != key(t));
+                    if mentions_other && Regex::new(r"(?i)\b(leads?|leading|highest|largest|top)\b").unwrap().is_match(&s) {
+                        return Some(format!("this names the wrong leader: \"{}\". The highest is {}", sent.trim(), t));
+                    }
+                }
+            }
+        }
+        if lo.is_match(&s) && !hi.is_match(&s) && has(top) && !has(bottom) {
+            return Some(format!("this is wrong: \"{}\". The lowest is {}, the highest is {}", sent.trim(), bottom.unwrap_or("?"), top.unwrap_or("?")));
+        }
+    }
+    None
+}
+
+fn make_report(c: &mut Ctx, task: &str, goal: &str, ws: &Path) -> Result<()> {
+    if !pycode::available() {
+        bail!("python3 is not installed");
+    }
+    let files: Vec<String> = task.split_once("\n\nInput files (in your workspace):").map(|(_, f)| f.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+    let file = Regex::new(r"(?i)\boutput/([\w\-]+\.(?:md|txt))\b").unwrap().captures(goal).map(|m| format!("output/{}", &m[1])).unwrap_or_else(|| "output/report.md".into());
+    // 1. The facts, computed.
+    let system = format!("{FACTS_SYSTEM}{}", super::precise::cookbook(ws, &files));
+    let ask = format!("A report will be written later about this:\n\"{goal}\"{}\n\nYour job now is only the figures. Write the Python program that print()s the facts that report needs. Reply with one ```python block and nothing else.", super::precise::files_block(ws, &files));
+    let mut msgs = vec![Msg::User(ask)];
+    let mut facts = String::new();
+    for round in 0..3 {
+        let Ok(reply) = c.call(&system, &msgs, if round == 0 { 0.2 } else { 0.6 }) else { break };
+        let Some(code) = pycode::extract_code(&reply) else {
+            msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+            msgs.push(Msg::User("Reply with the program in one ```python block.".into()));
+            continue;
+        };
+        if let Some(v) = c.o.gate.as_ref().and_then(|g| g.check("python", &json!({"code": code}), None).filter(|_| g.mode != super::gate::Mode::Observe)) {
+            bail!("blocked by the operator's gate (rule {})", v.rule);
+        }
+        let out = pycode::run(ws, c.o.sandbox.as_ref(), &code, Duration::from_secs(40))?;
+        c.ev(json!({"type": "tool", "name": "python", "input": {"code": pycode::clean(&code)}, "status": if out.ok() { "ok" } else { "error" }, "output": util::take_chars(&out.render(), 3000)}));
+        let lines = out.stdout.lines().filter(|l| !l.trim().is_empty()).count();
+        if out.ok() && lines >= 2 && lines <= 80 {
+            facts = out.stdout.trim().to_string();
+            break;
+        }
+        let problem = if !out.ok() { format!("The program failed:\n{}", util::take_chars(&out.render(), 800)) } else if lines < 2 { "The program printed almost nothing. Do not write to a file: print() every fact the report needs, one `label: value` per line.".to_string() } else { format!("The program printed {lines} lines, too many for a short report. Print only summary facts (totals and per-group values), not every row.") };
+        msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+        msgs.push(Msg::User(format!("{problem}\n\nFix it. Reply with the full corrected program in one ```python block.")));
+    }
+    if facts.is_empty() {
+        bail!("no facts could be computed from the files");
+    }
+    // Rankings are where a small model slips with correct numbers in hand ("West leads" when
+    // East is higher), so the harness works them out and states them as facts.
+    let (top, bottom) = ranking(&facts);
+    if let (Some(t), Some(b)) = (&top, &bottom) {
+        facts.push_str(&format!("\nHighest: {} ({})\nLowest: {} ({})", t.0, t.1, b.0, b.1));
+    }
+    crate::say!("{}report: {} computed fact(s)", c.o.log_prefix, facts.lines().count());
+    // 2. The document, written from those facts only, and 3. every figure checked.
+    let mut ev = super::ground::Evidence::default();
+    ev.load_inputs(ws, goal);
+    ev.add_tool_output(&facts);
+    let ask = format!("Task: {goal}\n\nFacts (computed from the files; use only these):\n{facts}\n\nWrite the document. Reply with one ```markdown block.");
+    let mut msgs = vec![Msg::User(ask)];
+    let mut best: Option<(usize, String, Vec<String>)> = None;
+    let tmp = ws.join(pycode::DIR).join("draft");
+    for round in 0..3 {
+        let Ok(reply) = c.call(WRITE_SYSTEM, &msgs, if round == 0 { 0.3 } else { 0.5 }) else { break };
+        let doc = fenced(&reply, &["markdown", "md"]).unwrap_or_else(|| reply.clone());
+        util::rmtree(&tmp);
+        util::write(&tmp.join("report.md"), doc.trim())?;
+        let mut miss: Vec<String> = super::ground::unsupported(&tmp, &mut ev, 8).into_iter().map(|(_, n)| n).collect();
+        let placeholders = Regex::new(r"\$\{[^}]*\}|\{[a-z_]+(:[^}]*)?\}|\[[A-Za-z ]{3,30}\]\s*$|TODO|lorem ipsum").unwrap().is_match(&doc);
+        let words = doc.split_whitespace().count();
+        let mut notes = vec![];
+        if !miss.is_empty() {
+            notes.push(format!("these figures are not among the facts or in the files: {}. Use only figures from the facts, copied exactly", miss.join(", ")));
+        }
+        if placeholders {
+            notes.push("it contains template placeholders: write the actual values".into());
+            miss.push("placeholder".into());
+        }
+        if words < 60 {
+            notes.push(format!("it has only {words} words: write the title, the summary paragraph, the table and a conclusion"));
+            miss.push("too short".into());
+        }
+        if let Some(wrong) = wrong_ranking(&doc, top.as_ref().map(|t| t.0.as_str()), bottom.as_ref().map(|b| b.0.as_str())) {
+            notes.push(wrong);
+            miss.push("ranking".into());
+        }
+        if !doc.lines().any(|l| l.starts_with("# ")) || doc.lines().filter(|l| l.starts_with("## ")).count() < 2 || Regex::new(r"(?im)^(title|summary|table|total|conclusion)\s*:").unwrap().is_match(&doc) {
+            notes.push("format it as Markdown: one `# Title` line, then `## Summary`, `## ...` section headings on their own lines with a blank line after each; no `title:` or `summary:` labels and no front matter".into());
+            miss.push("format".into());
+        }
+        if Regex::new(r"(?im)^#\s+\S*\.(md|txt|csv)\s*$").unwrap().is_match(&doc) {
+            notes.push("the title is a file name: give the document a real title that says what it is about".into());
+            miss.push("title".into());
+        }
+        if goal.to_lowercase().contains("table") && !doc.contains("|---") && !doc.contains("| ---") {
+            notes.push("the task asks for a table: add a Markdown table".into());
+            miss.push("no table".into());
+        }
+        c.ev(json!({"type": "tool", "name": "report_check", "input": {"round": round + 1}, "status": if notes.is_empty() { "ok" } else { "error" }, "output": if notes.is_empty() { "every figure is supported".to_string() } else { notes.join("\n") }}));
+        crate::say!("{}report draft {}: {}", c.o.log_prefix, round + 1, if notes.is_empty() { "every figure is supported".to_string() } else { format!("{} problem(s)", notes.len()) });
+        if best.as_ref().map(|b| miss.len() < b.0).unwrap_or(true) {
+            best = Some((miss.len(), doc.clone(), notes.clone()));
+        }
+        if notes.is_empty() {
+            break;
+        }
+        msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+        msgs.push(Msg::User(format!("Not finished:\n{}\n\nReply with the complete corrected document in one ```markdown block.", notes.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n"))));
+    }
+    util::rmtree(&tmp);
+    let Some((n_miss, doc, notes)) = best else { bail!("the model wrote no document") };
+    util::write(&ws.join(&file), format!("{}\n", doc.trim()))?;
+    c.m.file = file;
+    c.m.kind = "report".into();
+    c.m.candidates = 1;
+    c.m.total = 4;
+    c.m.passed = 4usize.saturating_sub(n_miss.min(4));
+    c.m.open = notes;
+    c.m.summary = format!("A document written from {} facts that a program computed from the input files; every figure in it was checked against those facts and the files.", facts.lines().count());
     Ok(())
 }
 
@@ -669,6 +888,7 @@ pub fn make(task: &str, workspace: &Path, k: Kind, o: &Opts) -> Result<Made> {
     match k {
         Kind::Page => make_page(&mut c, goal, workspace)?,
         Kind::Code => make_code(&mut c, goal, workspace)?,
+        Kind::Report => make_report(&mut c, task, goal, workspace)?,
     }
     crate::log::event("accuracy", "made", json!({"file": c.m.file, "kind": c.m.kind, "passed": c.m.passed, "total": c.m.total, "candidates": c.m.candidates, "confidence": c.m.confidence()}));
     c.ev(json!({"type": "made", "file": c.m.file, "passed": c.m.passed, "total": c.m.total}));
@@ -690,7 +910,10 @@ mod tests {
         assert_eq!(kind("Coding challenge: given a list of integers, return the two that sum to a target."), Some(Kind::Code));
         assert_eq!(kind("Implement a function fizzbuzz(n) in JavaScript"), None);
         assert_eq!(kind("i want a research document on dogs"), None);
-        assert_eq!(kind("Write a script that summarises sales.csv\n\nInput files (in your workspace): sales.csv"), None);
+        assert_eq!(kind("Write a script that parses sales.csv\n\nInput files (in your workspace): sales.csv"), None);
+        assert_eq!(kind("Using sales.csv, write a short report to output/report.md on revenue per region, with a table.\n\nInput files (in your workspace): sales.csv"), Some(Kind::Report));
+        assert_eq!(kind("Convert sales.csv to JSON\n\nInput files (in your workspace): sales.csv"), None);
+        assert_eq!(kind("Fix the bug in app.py\n\nInput files (in your workspace): app.py"), None);
     }
 
     #[test]
@@ -723,6 +946,20 @@ main{padding:clamp(2rem,6vw,4rem);border-radius:24px;box-shadow:0 20px 60px rgba
         assert!(contrast([255.0, 255.0, 255.0], [0.0, 0.0, 0.0]) > 20.9 && contrast([0.0, 123.0, 255.0], [0.0, 105.0, 217.0]) < 1.5);
         assert_eq!(fenced(&format!("Here you go:\n```html\n{good}\n```\nEnjoy"), &["html"]).unwrap().trim(), good);
         assert_eq!(out_file("save it as output/hello.html please", "html?", "index.html"), "output/hello.html");
+    }
+
+    #[test]
+    fn rankings_are_computed_and_wrong_ones_are_caught() {
+        let facts = "Total Revenue: 6263.75\nEast: 1881.25\nNorth: 1440.00\nSouth: 1350.00\nWest: 1592.50";
+        let (top, bottom) = ranking(facts);
+        assert_eq!((top.clone().unwrap().0.as_str(), bottom.clone().unwrap().0.as_str()), ("East", "South"));
+        // What Qwen-3B wrote with the right numbers in front of it.
+        let bad = "The revenue breakdown shows that the West region leads with $1592.50, followed by East at $1881.25. The South region has the lowest revenue.";
+        assert!(wrong_ranking(bad, Some("East"), Some("South")).unwrap().contains("highest is East"));
+        let good = "East leads with $1881.25, followed by West. South has the lowest revenue of $1350.00.";
+        assert!(wrong_ranking(good, Some("East"), Some("South")).is_none());
+        assert!(wrong_ranking("South has the highest revenue.", Some("East"), Some("South")).is_some());
+        assert_eq!(ranking("Total: 5\nA: 1"), (None, None));
     }
 
     #[test]

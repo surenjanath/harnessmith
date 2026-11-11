@@ -182,7 +182,7 @@ fn explain(err: &str) -> String {
     } else if err.contains("KeyError") {
         "\nHint: print the available keys / column names first (for a CSV: print(rows[0].keys())), then use the exact spelling."
     } else if err.contains("could not convert string to float") || err.contains("invalid literal for int()") {
-        "\nHint: a value is not a plain number. Print one raw line/row to see its real format, and strip symbols or skip the header before converting."
+        "\nHint: that value is text, not a number. Do not convert a text column (a name, a region, an id): use it as it is, as a label or a dictionary key. Convert only the columns that hold numbers. csv.DictReader already skips the header row."
     } else {
         ""
     };

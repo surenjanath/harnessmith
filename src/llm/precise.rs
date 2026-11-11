@@ -361,8 +361,21 @@ pub fn cookbook(workspace: &Path, files: &[String]) -> String {
         match sig.kind.as_str() {
             "csv" | "tsv" => {
                 let delim = if sig.kind == "tsv" { ", delimiter=\"\\t\"" } else { "" };
-                let first = sig.header.split(if sig.kind == "tsv" { '\t' } else { ',' }).next().unwrap_or("col").trim().to_string();
-                lines.push(format!("  rows = list(csv.DictReader(open(\"{rel}\"){delim}))   # columns: {}. Every value is a string: use float(row[\"{first}\"]) style conversion for numbers", util::take_chars(&sig.header.replace(['\t'], ", "), 200)));
+                let sep = if sig.kind == "tsv" { '\t' } else { ',' };
+                // Which columns hold numbers and which hold text, from the first data row.
+                let cols: Vec<&str> = sig.header.split(sep).map(|c| c.trim()).collect();
+                let row: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).nth(1).map(|l| l.split(sep).map(|c| c.trim()).collect()).unwrap_or_default();
+                let is_num = |i: usize| row.get(i).map(|v| v.replace(',', "").parse::<f64>().is_ok()).unwrap_or(false);
+                let nums: Vec<&str> = cols.iter().enumerate().filter(|(i, _)| is_num(*i)).map(|(_, c)| *c).collect();
+                let texts: Vec<&str> = cols.iter().enumerate().filter(|(i, _)| !is_num(*i)).map(|(_, c)| *c).collect();
+                let mut note = format!("columns: {}", util::take_chars(&cols.join(", "), 200));
+                if let Some(n) = nums.first() {
+                    note.push_str(&format!(". Every value is read as a string. Number columns ({}): convert with float(row[\"{n}\"])", nums.join(", ")));
+                }
+                if !texts.is_empty() {
+                    note.push_str(&format!(". Text columns ({}): use as they are, never convert them", texts.join(", ")));
+                }
+                lines.push(format!("  rows = list(csv.DictReader(open(\"{rel}\"){delim}))   # {note}"));
             }
             "json" => {
                 let mut note = if sig.header.is_empty() { String::new() } else { format!("   # top-level keys: {}", sig.header) };
@@ -970,7 +983,8 @@ mod tests {
         std::fs::write(d.path().join("access.log"), "2024-06-01 09:00:30 REQ-3475 GET /api/v1/items/123 status=200 time_ms=520\n".repeat(60)).unwrap();
         let files: Vec<String> = ["sales.csv", "config.json", "access.log"].iter().map(|s| s.to_string()).collect();
         let c = cookbook(d.path(), &files);
-        assert!(c.contains(r#"csv.DictReader(open("sales.csv"))"#) && c.contains("region, product, units, unit_price") || c.contains("region,product,units,unit_price"), "{c}");
+assert!(c.contains(r#"csv.DictReader(open("sales.csv"))"#) && c.contains("columns: region, product, units, unit_price"), "{c}");
+        assert!(c.contains(r#"Number columns (units, unit_price): convert with float(row["units"])"#) && c.contains("Text columns (region, product): use as they are"), "{c}");
         assert!(c.contains(r#"json.load(open("config.json"))"#) && c.contains(r#"data["services"] is a list of dicts with keys: "#) && c.contains("timeout_s"), "{c}");
         assert!(c.contains(r#"open("access.log").read().splitlines()"#) && c.contains(r#"re.search(r"time_ms=(\d+)", line)"#), "{c}");
         let b = files_block(d.path(), &files);

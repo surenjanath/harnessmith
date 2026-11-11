@@ -185,7 +185,7 @@ fn accuracy_boost_scenarios() {
     // The first request named the real file and its columns.
     let first = seen_a.lock().unwrap()[0].clone();
     let sys = first["messages"][0]["content"].as_str().unwrap().to_string();
-    assert!(sys.contains(r#"csv.DictReader(open("sales.csv"))"#) && sys.contains("region,product,units,unit_price"), "{sys}");
+    assert!(sys.contains(r#"csv.DictReader(open("sales.csv"))"#) && sys.contains("columns: region, product, units, unit_price"), "{sys}");
 
     // ---- D: the same kind of question again gets the example, and the store still has one entry.
     let before = seen_a.lock().unwrap().len();

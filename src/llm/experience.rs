@@ -245,7 +245,11 @@ impl Store {
     /// The examples most like this question, best first: at most `k`, each at least `min` alike.
     pub fn similar(&self, question: &str, files: &[FileSig], k: usize, min: f64) -> Vec<(f64, Exemplar)> {
         let goal = question.split("\n\nInput files (in your workspace):").next().unwrap_or(question);
-        let mut v: Vec<(f64, Exemplar)> = self.load().into_iter().filter(|e| e.status == "active" && !e.program.trim().is_empty()).map(|e| (similarity(goal, files, &e), e)).filter(|(s, _)| *s >= min).collect();
+        let mut v: Vec<(f64, Exemplar)> = self.load().into_iter().filter(|e| e.status == "active" && !e.program.trim().is_empty())
+            // An example that failed in rehearsal more often than it helped is not shown: a wrong
+            // solution that attempts once agreed on must not teach the next question.
+            .filter(|e| e.pinned || e.failed <= e.helped)
+            .map(|e| (similarity(goal, files, &e), e)).filter(|(s, _)| *s >= min).collect();
         v.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         v.truncate(k);
         v
