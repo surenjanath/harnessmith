@@ -311,6 +311,46 @@ fn accuracy_boost_scenarios() {
     assert_eq!(again["selections"]["agg"]["chosen_label"], "base1");
     assert_eq!(seen_a.lock().unwrap().len() - before, 2, "a second run reuses the first");
 
+    // ---- J: a page. The first draft is bare; the checklist sends it back; the fix is kept.
+    const GOOD_PAGE: &str = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Hello</title><style>:root{--bg:#0f172a;--fg:#e2e8f0;--accent:#38bdf8}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:linear-gradient(135deg,var(--bg),#1e293b);color:var(--fg)}main{padding:clamp(2rem,6vw,4rem);border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.4);background:rgba(255,255,255,.05);transition:transform .3s}main:hover{transform:translateY(-4px)}h1{color:var(--accent)}</style></head><body><main><h1>Hello, World!</h1></main></body></html>";
+    let (pj, seen_j) = server(Arc::new(|n, req: &Value| {
+        if n == 1 {
+            return text("```html\n<html><body><h1>Hello, world!</h1></body></html>\n```");
+        }
+        assert!(last(req).contains("not finished") && last(req).contains("viewport"), "the misses are listed: {}", last(req));
+        text(&format!("```html\n{GOOD_PAGE}\n```"))
+    }));
+    // ---- K: a coding task. The first candidate is wrong; the tests pick a right one.
+    let (pk, _) = server(Arc::new(|n, req: &Value| {
+        if last(req).contains("write tests") {
+            return text("```python\nassert is_palindrome(\"Racecar\") == True\nassert is_palindrome(\"A man, a plan, a canal: Panama\") == True\nassert is_palindrome(\"hello\") == False\nassert is_palindrome(\"\") == True\n```");
+        }
+        if n == 1 {
+            return program("def is_palindrome(s):\n    return s == s[::-1]");
+        }
+        program("def is_palindrome(s):\n    t = [c.lower() for c in s if c.isalnum()]\n    return t == t[::-1]")
+    }));
+    // Register the two extra servers through the registry (it is cached after first use).
+    let mut reg = harness2::llm::connections::load();
+    for c in [conn("j", pj), conn("k", pk)] {
+        reg.connections.push(serde_json::from_value(c).unwrap());
+    }
+    harness2::llm::connections::save(&reg).unwrap();
+    let j = project(&d.path().join("proj_j"), "j/m", "on");
+    let (rd, _) = solve(&j, "code me a sleek designed hello world page", &[], "j1");
+    let page = std::fs::read_to_string(rd.join("workspace/output/index.html")).unwrap();
+    assert!(page.starts_with("<!DOCTYPE html>") && page.contains("var(--accent)") && page.contains("Hello, World!"), "{page}");
+    assert_eq!(seen_j.lock().unwrap().len(), 2, "one draft, one repair, and a candidate that passes everything ends it");
+    let u = read_json(&rd.join("usage.json"));
+    assert_eq!((u["accuracy"]["confidence"].as_str(), u["accuracy"]["passed"].as_u64()), (Some("high"), Some(14)), "{u}");
+    assert_eq!(u["review_open"], json!([]));
+    let k = project(&d.path().join("proj_k"), "k/m", "on");
+    let (rd, out) = solve(&k, "Write a Python function is_palindrome(s) that ignores case and punctuation.", &[], "k1");
+    let sol = std::fs::read_to_string(rd.join("workspace/output/solution.py")).unwrap();
+    assert!(sol.contains("isalnum"), "the candidate that passes the tests is kept: {sol}");
+    assert!(out.contains("passes 4"), "{out}");
+    assert_eq!(read_json(&rd.join("usage.json"))["accuracy"]["confidence"], "high");
+
     // ---- H: a fenced Python block written instead of a tool call is run, not ignored.
     let h = project(&d.path().join("proj_h"), "h/m", "on");
     let (rd, out) = solve(&h, "Write a line saying what six sevens make to output/answer.md.", &[], "h1");

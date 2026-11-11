@@ -360,6 +360,8 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
 .tlfilter { float: right; font-weight: 400; } .tlfilter button { font-size: 11px; }
 @media (max-width: 600px) { .r .v .muted { display: none; } .r { grid-template-columns: 12px minmax(70px, max-content) minmax(0, 1fr); } .r .s { grid-column: 2 / -1; text-align: left; } header { padding: 10px 16px; } }
 
+.accbar { grid-template-columns: 170px minmax(0, 1fr) 150px; align-items: center; padding: 4px 0; }
+@media (max-width: 640px) { .accbar { grid-template-columns: 1fr; gap: 2px; } .accbar .v { text-align: left !important; } }
 </style>
 </head>
 <body>
@@ -471,7 +473,7 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
     <div class="panel">
       <h2>Connections</h2>
       <p class="hint">A model id is <code>connection/model</code>. Built-in prefixes work from environment variables without setup: <span id="builtins"></span>.</p>
-      <table><thead><tr><th>Name</th><th>Provider</th><th>Endpoint</th><th>Key</th><th></th></tr></thead><tbody id="conn-rows"></tbody></table>
+      <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Provider</th><th>Endpoint</th><th>Key</th><th></th></tr></thead><tbody id="conn-rows"></tbody></table></div>
       <h3>Live health</h3><div id="health-table" class="muted">No calls yet.</div>
       <div class="actions"><button class="btn" id="disc-go">Detect local servers</button><span class="hint" id="disc-msg">Ollama, LM Studio, llama.cpp, vLLM, text-generation-webui on their usual ports.</span></div>
       <div id="disc-list"></div>
@@ -2370,7 +2372,7 @@ let acTimer = null;
 function accBar(m) {
   const pct = Math.round((m.accuracy || 0) * 100), name = {plain: "model alone", agent: "agent loop, no boost", boost: "accuracy boost", learned: "boost + experience"}[m.mode] || m.mode;
   const col = m.mode === "plain" ? "var(--muted)" : m.mode === "agent" ? "var(--warn)" : m.mode === "learned" ? "var(--selector)" : "var(--ok)";
-  return `<div class="r" style="grid-template-columns:170px minmax(0,1fr) 150px;align-items:center;padding:4px 0"><span>${esc(name)}</span>
+  return `<div class="r accbar"><span>${esc(name)}</span>
     <span style="background:var(--line);border-radius:6px;height:14px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:${col}"></span></span>
     <span class="v" style="text-align:right"><b>${pct}%</b> · ${m.correct}/${m.asked} · ${Math.round(m.avg_seconds || 0)}s each</span></div>`;
 }
@@ -2387,10 +2389,10 @@ function renderAccuracy(r) {
     return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px"><div><b>${esc(rep.model)}</b> <span class="muted">· ${rep.questions} questions · seed ${rep.seed} · ${esc((rep.at || "").slice(0, 16).replace("T", " "))}</span></div>
       <div class="rows" style="margin-top:6px">${modes.map(accBar).join("")}</div>
       ${t ? `<p class="hint" style="margin:6px 0 0">“boost + experience” first worked through ${t.asked} other questions (${t.right} right), kept ${t.examples} worked example(s), then slept: ${t.sleep.rehearsed} practice task(s), ${t.sleep.right_cold} right without help, ${t.sleep.helped} more with its experience.</p>` : ""}
-      <details><summary>By kind of question</summary><table><thead><tr><th>kind</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
-        ${kinds.map(k => `<tr><td>${esc(k)}</td>${modes.map(m => `<td>${cell(m, k)}</td>`).join("")}</tr>`).join("")}</tbody></table></details>
-      <details><summary>Every question</summary><table><thead><tr><th>question</th><th>expected</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
-        ${(rep.rows || []).map(q => `<tr><td style="max-width:420px">${esc(q.question)}</td><td><code>${esc(q.expected)}</code></td>${modes.map(m => { const a = q[m.mode]; return a ? `<td class="${a.ok ? "" : "err"}">${a.ok ? "✔" : "✘"} <span class="muted">${esc(String(a.answer || "").slice(0, 40))}</span></td>` : "<td>–</td>"; }).join("")}</tr>`).join("")}</tbody></table></details></div>`;
+      <details><summary>By kind of question</summary><div style="overflow-x:auto"><table><thead><tr><th>kind</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
+        ${kinds.map(k => `<tr><td>${esc(k)}</td>${modes.map(m => `<td>${cell(m, k)}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>
+      <details><summary>Every question</summary><div style="overflow-x:auto"><table><thead><tr><th>question</th><th>expected</th>${modes.map(m => `<th>${esc(m.mode)}</th>`).join("")}</tr></thead><tbody>
+        ${(rep.rows || []).map(q => `<tr><td style="max-width:420px">${esc(q.question)}</td><td><code>${esc(q.expected)}</code></td>${modes.map(m => { const a = q[m.mode]; return a ? `<td class="${a.ok ? "" : "err"}">${a.ok ? "✔" : "✘"} <span class="muted">${esc(String(a.answer || "").slice(0, 40))}</span></td>` : "<td>–</td>"; }).join("")}</tr>`).join("")}</tbody></table></div></details></div>`;
   }).join("") || '<p class="muted" style="margin-top:10px">No check has been run yet. On a local model, 14 questions take a few minutes.</p>';
 }
 async function loadAccuracy() {
@@ -2420,9 +2422,9 @@ async function loadExperience() {
     $("#x-log").classList.toggle("hidden", !sl.running); $("#x-log").textContent = (sl.log_tail || []).join("\n");
     const j = (sl.journals || [])[0];
     $("#x-journal").innerHTML = sl.running ? '<div class="hint">💤 Asleep: consolidating and rehearsing…</div>' : j ? `<div class="pol"><div><span class="dot ${j.helped ? "ok" : "hollow"}"></span><span><b>Last sleep</b> ${esc((j.at || "").slice(0, 16).replace("T", " "))} · ${j.seconds}s · ${j.rehearsed} practice task(s): <b>${j.right_cold}</b> right without help, <b>${j.helped}</b> more with experience, ${j.no_help} not solved${j.skipped ? `, ${j.skipped} skipped` : ""} · consolidated: ${j.consolidated.merged} merged, ${j.consolidated.forgotten} forgotten${j.learned ? ` · <b>${j.learned}</b> new solution(s) learned by exploring` : ""}</span></div></div>
-      <details><summary>Dream journal</summary><table><thead><tr><th>practice task</th><th>right answer</th><th>alone</th><th>with the example</th><th>result</th></tr></thead><tbody>
+      <details><summary>Dream journal</summary><div style="overflow-x:auto"><table><thead><tr><th>practice task</th><th>right answer</th><th>alone</th><th>with the example</th><th>result</th></tr></thead><tbody>
       ${(j.dreams || []).map(d => `<tr><td style="max-width:380px">${esc(d.question)}</td><td><code>${esc(d.truth || "")}</code></td><td>${esc(d.cold == null ? "–" : d.cold)}</td><td>${esc(d.with == null ? "–" : d.with)}</td><td class="${d.verdict === "no help" ? "err" : ""}">${esc(d.verdict)}${d.verdict === "skipped" ? ` <span class="muted">(${esc(d.why)})</span>` : ""}</td></tr>`).join("")}
-      ${(j.explored || []).map(x => `<tr><td style="max-width:380px">💭 ${esc(x.question)}</td><td><code>${esc(x.answer || "")}</code></td><td colspan="2" class="muted">${x.agree} of ${x.answered} attempts agree</td><td>${x.kept ? "kept" : "not kept"}</td></tr>`).join("")}</tbody></table></details>` : '<div class="hint">This project has not slept yet.</div>';
+      ${(j.explored || []).map(x => `<tr><td style="max-width:380px">💭 ${esc(x.question)}</td><td><code>${esc(x.answer || "")}</code></td><td colspan="2" class="muted">${x.agree} of ${x.answered} attempts agree</td><td>${x.kept ? "kept" : "not kept"}</td></tr>`).join("")}</tbody></table></div></details>` : '<div class="hint">This project has not slept yet.</div>';
     const rec = (e) => e.dreams ? `rehearsed ${e.dreams}× · needed in ${e.helped} · model managed alone in ${e.cold_ok}${e.failed ? ` · no help in ${e.failed}` : ""}` : "not rehearsed yet";
     $("#x-list").innerHTML = r.examples.length ? r.examples.map(e => `<div class="r" style="grid-template-columns:12px minmax(0,1fr);padding:10px 0;border-bottom:1px solid var(--line);${e.status === "archived" ? "opacity:.55" : ""}">
       <span class="dot ${e.status !== "active" ? "hollow" : e.helped ? "ok" : e.dreams ? "selector" : "warn"}"></span>

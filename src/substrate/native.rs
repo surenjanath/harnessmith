@@ -324,6 +324,31 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
             }
         }
     }
+    // Accuracy boost: a single page or a Python coding task is built by the maker, which asks for
+    // the file in one fenced block, checks it by running it (tests) or reading it (design
+    // checklist), repairs it, and keeps the best of a few candidates.
+    if boost {
+        if let Some(k) = crate::llm::maker::kind(task) {
+            let mut mo = crate::llm::maker::Opts::new(&o.model_id);
+            mo.candidates = o.accuracy_samples.clamp(1, 4);
+            mo.notes = precise::notes_from_harness(harness);
+            mo.sandbox = (sb.kind != crate::llm::sandbox::Kind::Off).then(|| sb.clone());
+            mo.wall = Duration::from_secs(o.timeout);
+            mo.trajectory = Some(run_dir.join("trajectory.jsonl"));
+            mo.gate = Some(gate.clone());
+            crate::say!("      accuracy boost: {} → built from fenced blocks and checked, up to {} candidate(s)", if k == crate::llm::maker::Kind::Page { "a page" } else { "a coding task" }, mo.candidates);
+            match crate::llm::maker::make(task, &ws, k, &mo) {
+                Ok(m) if !m.file.is_empty() => return finish_made(run_dir, &ws, fp_dir, o, &m),
+                Ok(m) => engine_usage = (m.calls, m.input_tokens, m.output_tokens, m.cost_usd),
+                Err(e) => {
+                    if format!("{e}").contains("cancelled") {
+                        anyhow::bail!("solver session failed: cancelled by user");
+                    }
+                    crate::say!("      accuracy boost: the maker gave nothing ({}); continuing with the agent loop", util::take_chars(&format!("{e}"), 160));
+                }
+            }
+        }
+    }
     if sb.kind != crate::llm::sandbox::Kind::Off {
         crate::say!("      sandbox: {} · network {}", sb.kind.as_str(), if o.sandbox_network { "on" } else { "off" });
         if !o.sandbox_network {
@@ -393,6 +418,34 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         &run_dir.join("usage.json"),
         serde_json::to_string_pretty(&serde_json::json!({"steps": out.steps, "input_tokens": out.input_tokens, "output_tokens": out.output_tokens, "cost_usd": out.cost_usd, "error": out.error, "heals": out.heals, "model": out.served_by, "review_open": out.review_open}))?,
     )?;
+    runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
+    Ok(run_dir.to_path_buf())
+}
+
+/// Deliver what the maker built as the rollout's result.
+fn finish_made(run_dir: &Path, ws: &Path, fp_dir: Option<&Path>, o: &SolveOpts, m: &crate::llm::maker::Made) -> Result<PathBuf> {
+    let open = if m.open.is_empty() { String::new() } else { format!("\n\nStill open:\n{}", m.open.iter().map(|x| format!("- {x}")).collect::<Vec<_>>().join("\n")) };
+    let note = format!("`{}`\n\n{}{open}", m.file, m.summary);
+    if m.kind == "code" {
+        util::write(&ws.join("output/answer.md"), &format!("{note}\n"))?;
+    }
+    util::write(&run_dir.join("final.md"), &note)?;
+    util::write(&run_dir.join("accuracy.json"), serde_json::to_string_pretty(&m.to_json())?)?;
+    crate::say!("      accuracy boost: wrote {} — {}/{} checks passed (confidence {})", m.file, m.passed, m.total, m.confidence());
+    let mut extra = serde_json::Map::new();
+    extra.insert("model".into(), Value::String(o.model_id.clone()));
+    extra.insert("steps".into(), Value::from(m.calls));
+    extra.insert("cost_usd".into(), Value::from(m.cost_usd));
+    extra.insert("error".into(), Value::String(String::new()));
+    let review_open = crate::llm::review::review(&m.summary, &ws.join("output")).into_iter().chain(m.open.iter().cloned()).collect::<Vec<_>>();
+    util::write(
+        &run_dir.join("usage.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "steps": m.calls, "input_tokens": m.input_tokens, "output_tokens": m.output_tokens, "cost_usd": m.cost_usd, "error": "", "heals": 0, "model": m.served_by, "review_open": review_open,
+            "accuracy": {"kind": m.kind, "passed": m.passed, "total": m.total, "candidates": m.candidates, "confidence": m.confidence()},
+        }))?,
+    )?;
+    crate::log::event("step", "end", serde_json::json!({"steps": m.calls, "in": m.input_tokens, "out": m.output_tokens, "usd": m.cost_usd, "error": "", "depth": 0, "heals": 0, "model": m.served_by}));
     runmark::mark_complete(run_dir, &run_dir.to_string_lossy(), fp_dir, o.inputs_fingerprint.as_deref(), Some(extra))?;
     Ok(run_dir.to_path_buf())
 }

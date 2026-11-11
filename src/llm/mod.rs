@@ -11,6 +11,7 @@ pub mod export;
 pub mod approval;
 pub mod gate;
 pub mod ground;
+pub mod maker;
 pub mod mcp;
 pub mod precise;
 pub mod pycode;
