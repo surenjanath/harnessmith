@@ -61,6 +61,8 @@ Measured on Qwen 2.5 3B (4 CPU cores), 28 generated questions with exact answers
 
 On real tasks with the same model: a sleek hello-world page and a coffee-shop landing page in about 30 s each, and four of five coding challenges passing every hidden test (the fifth 3 of 4). Details and limits are in the guide.
 
+!["code me a sleek designed hello world page", as Qwen 2.5 3B delivered it through the harness in 17 seconds](docs/img/page_hello_qwen3b.png)
+
 Measure your own model with **Models → Accuracy check**, or:
 
 ```bash
