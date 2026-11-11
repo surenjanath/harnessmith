@@ -902,6 +902,7 @@ const fmtK = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3)
 const MODE_NAME = {agg: "Parallel recursion", seq: "Sequential recursion"};
 
 function reduceEvents(events) {
+  settledRun = false;
   const S = {plan: null, nodes: {}, t0: null, t1: null, done: null, inTok: 0, outTok: 0, usd: 0, runs: 0, sessions: 0, now: null, heals: [], gates: [], mem: []};
   const get = (mode, node) => {
     const key = (node.startsWith("base") ? "" : mode) + "|" + node;
@@ -933,6 +934,7 @@ function reduceEvents(events) {
       n.guard = e;
     } else if (e.kind === "select" || e.kind === "learn") {
       if (e.status === "start") n.sel = {s: "active", t: e.t, n: e.n};
+      else if (e.status === "settled") { settledRun = true; n.sel = {...n.sel, ...e, s: "ok", t1: e.t}; }
       else { n.sel = {...n.sel, ...e, s: e.status === "done" ? "ok" : "failed", t1: e.t}; if (!(e.kind === "select" && e.trivial)) S.sessions++; }
     } else if (e.kind === "step") {
       const ph = e.phase === "run" ? n.run : e.phase === "edit" ? n.edit : n.sel;
@@ -954,9 +956,10 @@ function reduceEvents(events) {
   return S;
 }
 
+let settledRun = false;
 function phaseLine(name, p, kind) {
   const map = {
-    wait: ["", "waiting"], active: ["active", kind === "run" ? "running" : "editing"],
+    wait: ["", settledRun ? "not needed: answer already verified" : "waiting"], active: ["active", kind === "run" ? "running" : "editing"],
     kept: ["ok", "kept harness"], edited: ["ok", "edited " + (((p.changed || {}).added || []).length + ((p.changed || {}).modified || []).length + ((p.changed || {}).removed || []).length) + " file(s)"],
     fell: ["warn", "fell back"], ok: ["ok", "delivered"], empty: ["warn", "no output"], failed: ["bad", "failed"],
   };
