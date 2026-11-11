@@ -197,7 +197,9 @@ Rules:
 - Reply with the whole page in ONE ```html block and nothing else. No explanations.
 - Start with <!DOCTYPE html>. Include <html lang>, <head> with <meta charset>, <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">, a <title>, and one <style> block; then <body>; end with </html>.
 - All CSS goes in the <style> block. No external files, fonts, images or scripts from the internet.
-- Design: define colours as CSS variables in :root, use a system font stack, centre the content with flexbox or grid, give the main element generous padding, rounded corners and a soft shadow, use a gradient or tinted background, and add one subtle transition or animation (for example on hover).
+- Structure: <body> holds exactly ONE <main> element and only centres it. Everything else goes inside <main>, stacked top to bottom (headline first, then sections), with a max-width around 720px.
+- Design: define colours as CSS variables in :root, use a system font stack, centre <main> with flexbox or grid, give it generous padding, rounded corners and a soft shadow, use a smooth gradient or tinted page background, and add one subtle transition or animation (for example on hover).
+- Readability comes first: text must contrast strongly with what is directly behind it. Use dark text (#111-#333) on a white or very light card, or white text on a dark card. Never put text in a colour close to its background.
 - Make it responsive with clamp() or a media query.
 - Put in exactly the content the task asks for; no placeholder text.";
 
@@ -221,6 +223,10 @@ pub fn page_checks(goal: &str, html: &str) -> (Vec<&'static str>, Vec<String>) {
     check(style.contains("transition") || style.contains("animation") || style.contains("@keyframes"), "motion", "add one subtle transition or animation (for example on :hover)");
     check(style.contains("@media") || style.contains("clamp(") || style.contains("vw") || style.contains("min("), "responsive", "make it responsive: use clamp() for sizes or add a @media query");
     check(!Regex::new(r"lorem ipsum|placeholder text|your (text|content) here|\[[a-z ]{3,30}\]").unwrap().is_match(&h), "real content", "replace the placeholder text with real content");
+    let (worst, pair) = worst_contrast(&style);
+    check(worst >= 3.0, "contrast", &format!("text is hard to read: {pair} have a contrast of only {worst:.1}:1. Use dark text (#1f2937) on a white or very light surface, or white text on a dark one"));
+    let kids = body_children(&h);
+    check(kids <= 1 || !(Regex::new(r"body\s*\{[^}]*display\s*:\s*(flex|grid)").unwrap().is_match(&style)) || Regex::new(r"body\s*\{[^}]*flex-direction\s*:\s*column").unwrap().is_match(&style), "structure", &format!("<body> has {kids} elements side by side: wrap everything in ONE <main> element and stack the sections inside it top to bottom"));
     // Words the goal puts in quotes, and "hello world" when it asks for one, must be on the page.
     let mut wanted: Vec<String> = Regex::new(r#""([^"]{2,60})"|'([^']{3,60})'"#).unwrap().captures_iter(goal).map(|c| c.get(1).or(c.get(2)).unwrap().as_str().to_lowercase()).collect();
     if goal.to_lowercase().contains("hello world") {
@@ -232,8 +238,219 @@ pub fn page_checks(goal: &str, html: &str) -> (Vec<&'static str>, Vec<String>) {
     (ok, miss)
 }
 
+/// sRGB colour from CSS: #rgb, #rrggbb, rgb()/rgba() (None when mostly transparent), common names.
+fn parse_color(v: &str) -> Option<[f64; 3]> {
+    let v = v.trim().to_lowercase();
+    if let Some(h) = v.strip_prefix('#') {
+        let h: String = h.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        let full = match h.len() {
+            3 | 4 => h.chars().take(3).flat_map(|c| [c, c]).collect::<String>(),
+            6 | 8 => h[..6].to_string(),
+            _ => return None,
+        };
+        let n = u32::from_str_radix(&full, 16).ok()?;
+        return Some([((n >> 16) & 255) as f64, ((n >> 8) & 255) as f64, (n & 255) as f64]);
+    }
+    if let Some(c) = Regex::new(r"rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?").unwrap().captures(&v) {
+        let alpha = c.get(4).map(|a| { let t = a.as_str(); if let Some(p) = t.strip_suffix('%') { p.parse::<f64>().unwrap_or(100.0) / 100.0 } else { t.parse::<f64>().unwrap_or(1.0) } }).unwrap_or(1.0);
+        if alpha < 0.6 {
+            return None;
+        }
+        return Some([c[1].parse().ok()?, c[2].parse().ok()?, c[3].parse().ok()?]);
+    }
+    let named = [("white", [255.0, 255.0, 255.0]), ("black", [0.0, 0.0, 0.0]), ("red", [255.0, 0.0, 0.0]), ("green", [0.0, 128.0, 0.0]), ("blue", [0.0, 0.0, 255.0]), ("gray", [128.0, 128.0, 128.0]), ("grey", [128.0, 128.0, 128.0]), ("navy", [0.0, 0.0, 128.0]), ("teal", [0.0, 128.0, 128.0]), ("orange", [255.0, 165.0, 0.0]), ("yellow", [255.0, 255.0, 0.0]), ("purple", [128.0, 0.0, 128.0]), ("pink", [255.0, 192.0, 203.0]), ("silver", [192.0, 192.0, 192.0]), ("whitesmoke", [245.0, 245.0, 245.0]), ("ivory", [255.0, 255.0, 240.0]), ("beige", [245.0, 245.0, 220.0]), ("brown", [165.0, 42.0, 42.0]), ("gold", [255.0, 215.0, 0.0]), ("crimson", [220.0, 20.0, 60.0])];
+    let word = v.split(|c: char| !c.is_ascii_alphabetic()).find(|w| !w.is_empty())?;
+    named.iter().find(|(n, _)| *n == word).map(|(_, c)| *c)
+}
+
+fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let lum = |c: [f64; 3]| {
+        let f = |x: f64| { let x = x / 255.0; if x <= 0.03928 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) } };
+        0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The worst text-on-surface contrast the stylesheet sets up, and which pair it is. Text in a
+/// rule is compared with that rule's own background when it has one; otherwise with the card
+/// surfaces (backgrounds of rules other than html/body), or the page background when there are
+/// none. Hover and other state rules are left out. Returns 21 when nothing can be compared.
+pub fn worst_contrast(style: &str) -> (f64, String) {
+    let mut vars: Vec<(String, String)> = vec![];
+    for c in Regex::new(r"(--[\w-]+)\s*:\s*([^;}]+)").unwrap().captures_iter(style) {
+        vars.push((c[1].to_string(), c[2].trim().to_string()));
+    }
+    let resolve = |v: &str| -> String {
+        let mut out = v.to_string();
+        for _ in 0..3 {
+            for (k, val) in &vars {
+                out = out.replace(&format!("var({k})"), val);
+            }
+        }
+        out
+    };
+    let colors_in = |v: &str| -> Vec<[f64; 3]> {
+        let v = resolve(v);
+        Regex::new(r"#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|\b[a-z]{3,10}\b").unwrap().find_iter(&v).filter_map(|m| parse_color(m.as_str())).collect()
+    };
+    let rule = Regex::new(r"([^{}]+)\{([^{}]*)\}").unwrap();
+    let decl = |body: &str, prop: &str| -> Option<String> {
+        Regex::new(&format!(r"(?:^|;)\s*{prop}\s*:\s*([^;]+)")).unwrap().captures_iter(body).last().map(|c| c[1].to_string())
+    };
+    let (mut page, mut cards): (Vec<[f64; 3]>, Vec<[f64; 3]>) = (vec![], vec![]);
+    let mut texts: Vec<(String, [f64; 3], Vec<[f64; 3]>)> = vec![];
+    for c in rule.captures_iter(style) {
+        let sel = c[1].trim().to_string();
+        if sel.starts_with('@') || sel.contains(':') && !sel.starts_with(":root") {
+            continue;
+        }
+        let body = &c[2];
+        // Gradient-filled text (background-clip: text) paints the letters, not a surface.
+        let clipped = body.contains("background-clip") || Regex::new(r"(?:^|;)\s*color\s*:\s*transparent").unwrap().is_match(body);
+        let bg: Vec<[f64; 3]> = if clipped { vec![] } else { decl(body, "background(?:-color|-image)?").map(|v| colors_in(&v)).unwrap_or_default() };
+        if clipped {
+            continue;
+        }
+        let has_own_text = decl(body, "color").is_some();
+        let is_page = Regex::new(r"^(html|body|:root|\*)(\s*,\s*(html|body))*$").unwrap().is_match(&sel);
+        // A rule that sets both its text and its background (a button, a badge) is its own
+        // surface, not the surface other text sits on.
+        if is_page { page.extend(bg.iter()) } else if !has_own_text { cards.extend(bg.iter()) }
+        if let Some(fg) = decl(body, "color").and_then(|v| colors_in(&v).first().copied()) {
+            if !is_page || !bg.is_empty() {
+                texts.push((sel, fg, bg));
+            } else {
+                texts.push((sel, fg, vec![]));
+            }
+        }
+    }
+    let mut worst = (21.0, String::new());
+    for (sel, fg, own) in texts {
+        let is_page = sel == "body" || sel == "html";
+        let against: &Vec<[f64; 3]> = if !own.is_empty() { &own } else if is_page || cards.is_empty() { &page } else { &cards };
+        for bg in against {
+            let r = contrast(fg, *bg);
+            if r < worst.0 {
+                worst = (r, format!("the text colour of `{sel}` (rgb {:.0},{:.0},{:.0}) and the background behind it (rgb {:.0},{:.0},{:.0})", fg[0], fg[1], fg[2], bg[0], bg[1], bg[2]));
+            }
+        }
+    }
+    worst
+}
+
+/// How many elements sit directly inside <body> (scripts and styles aside).
+fn body_children(html: &str) -> usize {
+    let Some(start) = html.find("<body") else { return 0 };
+    let body = &html[start..];
+    let body = &body[body.find('>').map(|i| i + 1).unwrap_or(0)..];
+    let tag = Regex::new(r"<(/?)([a-z][a-z0-9]*)[^>]*?(/?)>").unwrap();
+    let void = ["br", "hr", "img", "input", "meta", "link", "source", "wbr", "area", "base", "col", "embed", "track"];
+    let (mut depth, mut kids) = (0i32, 0usize);
+    for c in tag.captures_iter(body) {
+        let (close, name, selfc) = (&c[1] == "/", &c[2], &c[3] == "/");
+        if name == "body" || name == "html" {
+            break;
+        }
+        if close {
+            depth -= 1;
+            continue;
+        }
+        if depth == 0 && !matches!(name, "script" | "style" | "noscript") {
+            kids += 1;
+        }
+        if !selfc && !void.contains(&name) {
+            depth += 1;
+        }
+    }
+    kids
+}
+
+/// The design kit: a stylesheet and page frame that are known to look good, so a small model
+/// only has to write the content. Its CSS design sense is the weak part; its HTML is fine.
+const KIT_CSS: &str = ":root{--accent:ACCENT;--ink:#0f172a;--muted:#475569;--line:#e2e8f0;--card:#ffffff;--bg1:#f8fafc;--bg2:#e0e7ff}
+*{box-sizing:border-box}
+html{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.6}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:clamp(1rem,4vw,3rem);background:radial-gradient(1200px 600px at 10% -10%,rgba(99,102,241,.16),rgba(99,102,241,0)),linear-gradient(160deg,var(--bg1),var(--bg2))}
+main{width:min(100%,760px);background:var(--card);border:1px solid var(--line);border-radius:28px;padding:clamp(1.75rem,5vw,3.5rem);box-shadow:0 30px 80px -30px rgba(15,23,42,.35),0 2px 6px rgba(15,23,42,.06);animation:rise .6s ease both}
+h1{font-size:clamp(2.2rem,6vw,3.6rem);line-height:1.08;letter-spacing:-.03em;margin:0 0 .6rem;background:linear-gradient(120deg,var(--ink),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-size:1.25rem;margin:2rem 0 .75rem;letter-spacing:-.01em;color:var(--ink)}
+p{margin:.4rem 0 1rem;color:var(--muted);font-size:1.08rem}
+ul{list-style:none;padding:0;margin:0;display:grid;gap:.5rem}
+li{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 1rem;border:1px solid var(--line);border-radius:14px;background:#f8fafc;color:var(--ink);transition:transform .2s ease,border-color .2s ease}
+li:hover{transform:translateX(4px);border-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem}
+.card{padding:1.1rem;border:1px solid var(--line);border-radius:18px;background:#f8fafc;color:var(--ink);transition:transform .2s ease,box-shadow .2s ease}
+.card:hover{transform:translateY(-4px);box-shadow:0 14px 30px -18px rgba(15,23,42,.5)}
+.card h3{margin:0 0 .25rem;font-size:1.05rem;color:var(--ink)}
+.price,strong{color:var(--accent);font-weight:700}
+.button{display:inline-block;margin-top:1rem;padding:.85rem 1.5rem;border-radius:999px;background:var(--accent);color:#ffffff;text-decoration:none;font-weight:600;transition:transform .2s ease,filter .2s ease}
+.button:hover{transform:translateY(-2px);filter:brightness(1.08)}
+footer{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.95rem}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media (max-width:520px){main{border-radius:20px}li{flex-direction:column;gap:.1rem}}";
+
+const KIT_SYSTEM: &str = "You write the content of a web page. The design (colours, layout, typography, animation) is already done; you supply only what goes inside it.
+Reply in exactly this form and nothing else:
+
+TITLE: <the browser tab title>
+ACCENT: <one strong colour as #rrggbb that suits the topic, dark enough for white text on it>
+```html
+<the inner HTML of the page's <main> element>
+```
+
+Inside the block use only: <h1> (once, first), <p>, <h2>, <ul><li>, <strong>, <a class=\"button\" href=\"#\">, <footer>, and for items with a price or short facts either <li><span>name</span><span class=\"price\">$3.50</span></li> or <div class=\"grid\"><div class=\"card\"><h3>…</h3><p>…</p></div>…</div>.
+No <html>, <head>, <body>, <main>, <style>, <script> or inline styles. Write only what the task asks for, with real text: no placeholders, and no invented sections, links, news or company details the task did not mention. A simple request gets a short page (a hello world page is a headline and a sentence or two).";
+
+/// A page from the design kit: the model's content inside the harness's frame.
+fn kit_page(reply: &str) -> Option<String> {
+    let inner = fenced(reply, &["html", "htm"])?;
+    // The frame already has the <main>: a wrapper the model added would draw a card in a card.
+    let inner = Regex::new(r"(?is)^\s*<main[^>]*>(.*)</main>\s*$").unwrap().captures(&inner).map(|c| c[1].to_string()).unwrap_or(inner);
+    let low = inner.to_lowercase();
+    if low.contains("<style") || low.contains("<body") || low.contains("<html") || !low.contains("<h1") {
+        return None;
+    }
+    let title = Regex::new(r"(?im)^\s*TITLE:\s*(.+)$").unwrap().captures(reply).map(|c| c[1].trim().to_string()).unwrap_or_else(|| "Page".into());
+    // The accent must carry white button text; otherwise a safe default.
+    let accent = Regex::new(r"(?im)^\s*ACCENT:\s*(#[0-9a-fA-F]{6})").unwrap().captures(reply).map(|c| c[1].to_string()).filter(|a| parse_color(a).map(|c| contrast(c, [255.0, 255.0, 255.0]) >= 3.5).unwrap_or(false)).unwrap_or_else(|| "#4f46e5".into());
+    let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    Some(format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>{}</title>\n<style>\n{}\n</style>\n</head>\n<body>\n<main>\n{}\n</main>\n</body>\n</html>\n",
+        esc(&title),
+        KIT_CSS.replace("ACCENT", &accent),
+        inner.trim()
+    ))
+}
+
 fn make_page(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
     let file = out_file(goal, "html?", "index.html");
+    // First choice: the design kit. The model writes content; the frame is known to look right.
+    let mut msgs = vec![Msg::User(format!("{goal}\n\nWrite the page content in the form described."))];
+    for round in 0..2 {
+        let Ok(reply) = c.call(KIT_SYSTEM, &msgs, 0.4) else { break };
+        let Some(html) = kit_page(&reply) else {
+            msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+            msgs.push(Msg::User("Use exactly the form: a TITLE: line, an ACCENT: line, then one ```html block holding only the inner HTML of <main>, starting with an <h1>. No <style>, <body> or <html>.".into()));
+            continue;
+        };
+        let (ok, miss) = page_checks(goal, &html);
+        crate::say!("{}page from the design kit (round {}): {}/{} checks", c.o.log_prefix, round + 1, ok.len(), ok.len() + miss.len());
+        c.ev(json!({"type": "tool", "name": "page_check", "input": {"candidate": "design kit", "round": round + 1}, "status": if miss.is_empty() { "ok" } else { "error" }, "output": if miss.is_empty() { format!("all {} checks passed", ok.len()) } else { miss.join("\n") }}));
+        if miss.is_empty() || round == 1 && miss.len() <= 1 {
+            util::write(&ws.join(&file), &html)?;
+            c.m.file = file;
+            c.m.kind = "page".into();
+            c.m.candidates = 1;
+            c.m.passed = ok.len();
+            c.m.total = ok.len() + miss.len();
+            c.m.open = miss;
+            c.m.summary = format!("A single-file page: the content was written for this goal and set in the harness's design frame. It passes {} of {} design, readability and completeness checks.", c.m.passed, c.m.total);
+            return Ok(());
+        }
+        msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+        msgs.push(Msg::User(format!("Not finished. Fix these and reply again in the same form:\n{}", miss.iter().map(|m| format!("- {m}")).collect::<Vec<_>>().join("\n"))));
+    }
     let system = if c.o.notes.trim().is_empty() { PAGE_SYSTEM.to_string() } else { format!("{PAGE_SYSTEM}\n\nNotes from earlier work on this project:\n{}", c.o.notes.trim()) };
     let ask = format!("{goal}\n\nReply with the complete page in one ```html block.");
     let mut best: Option<(usize, usize, String, Vec<String>)> = None;
@@ -487,7 +704,23 @@ main{padding:clamp(2rem,6vw,4rem);border-radius:24px;box-shadow:0 20px 60px rgba
 <body><main><h1>Hello, World!</h1></main></body></html>"#;
         let (ok, miss) = page_checks("create a hello world sleek html page", good);
         assert!(miss.is_empty(), "{miss:?}");
-        assert_eq!(ok.len(), 14);
+        assert_eq!(ok.len(), 16);
+        // What a real 3B model produced, and a first checklist let through: blue text on a blue card.
+        let unreadable = good.replace("main{padding", "main{background:#007bff;padding").replace("h1{color:var(--accent)", "h1{color:#0069d9");
+        let (_, miss) = page_checks("create a hello world sleek html page", &unreadable);
+        assert!(miss.iter().any(|m| m.contains("hard to read")), "{miss:?}");
+        // ...and a body that lays three blocks out side by side.
+        let row = good.replace("display:grid;place-items:center", "display:flex").replace("<main><h1>Hello, World!</h1></main>", "<h1>Hello, World!</h1><div>a</div><div>b</div>");
+        let (_, miss) = page_checks("create a hello world sleek html page", &row);
+        assert!(miss.iter().any(|m| m.contains("ONE <main>")), "{miss:?}");
+        // The design kit's own frame passes every check with any content and a weak accent.
+        let kit = kit_page("TITLE: Hello\nACCENT: #ffee88\n```html\n<h1>Hello, World!</h1>\n<p>A small page.</p>\n```").unwrap();
+        let (ok, miss) = page_checks("create a hello world sleek html page", &kit);
+        assert!(miss.is_empty() && ok.len() == 16, "{miss:?}");
+        assert!(kit.contains("--accent:#4f46e5"), "an accent too pale for white text is replaced");
+        assert!(kit_page("```html\n<style>x</style><h1>a</h1>\n```").is_none());
+        assert_eq!(kit_page("```html\n<main>\n<h1>Hi</h1>\n</main>\n```").unwrap().matches("<main").count(), 1, "a wrapper <main> is unwrapped");
+        assert!(contrast([255.0, 255.0, 255.0], [0.0, 0.0, 0.0]) > 20.9 && contrast([0.0, 123.0, 255.0], [0.0, 105.0, 217.0]) < 1.5);
         assert_eq!(fenced(&format!("Here you go:\n```html\n{good}\n```\nEnjoy"), &["html"]).unwrap().trim(), good);
         assert_eq!(out_file("save it as output/hello.html please", "html?", "index.html"), "output/hello.html");
     }

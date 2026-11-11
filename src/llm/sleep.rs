@@ -419,6 +419,13 @@ fn rehearse(project_root: &Path, ws: &Path, ex: &Exemplar, o: &SleepOpts, rng: &
         return skip(d, "its program prints more than one line, so there is no single answer to check against");
     }
     d.truth = lines[0].trim().to_string();
+    // A program that printed a real figure on the original data and prints zero (or nothing
+    // found) on the changed data has lost its footing (a hard-coded id, a row that was dropped):
+    // that is no ground truth to hold the model to.
+    let zero = |a: &str| precise::atoms(a).0.iter().all(|n| n.v == 0.0) && !precise::atoms(a).0.is_empty();
+    if precise::is_non_answer(&d.truth) || (zero(&d.truth) && !zero(&ex.answer)) {
+        return skip(d, "its program finds nothing on the changed data, so there is no reliable answer to check against");
+    }
     let left = o.wall;
     // Cold: no worked example, no notes.
     let cold = precise::answer(&question, ws, &files, &engine_opts(o, ws, left));

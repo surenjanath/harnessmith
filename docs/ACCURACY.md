@@ -2,7 +2,30 @@
 
 A small model asked "what is the total revenue in this CSV?" will usually reply with a number that looks right and is not. Harnessmith's **accuracy boost** changes how such a question is answered, and measures the difference.
 
-RESULTS_PLACEHOLDER
+## Measured on real small models
+
+28 generated questions with exact answers (seed 1), Qwen 2.5 3B (Q4, llama.cpp, 4 CPU cores):
+
+| how the question was asked | correct | accuracy | average time |
+|---|---|---|---|
+| the model alone, thinking step by step | 7 / 28 | 25% | 58 s |
+| through the harness with the accuracy boost | 26 / 28 | **93%** | 45 s |
+| the boost, after working through other questions of the same kinds and one sleep | 26 / 28 | 93% | 30 s |
+
+The model alone got none of the CSV totals, group questions, date differences, letter counts, percentages, compound interest or the two-file join right. With the boost it got all of them except one join and one unit conversion.
+
+Experience did not raise the score here, and it cut the time by a third. It also shows the limit described below: one wrong solution to the join question had been agreed on and kept, and it made the join questions worse (0 of 2, down from 1 of 2), while unit conversion went from 1 of 2 to 2 of 2.
+
+Real tasks on the same model, checked independently (tests the model never saw; pages rendered in a browser):
+
+| task | result |
+|---|---|
+| "code me a sleek designed hello world page" | complete, readable page from the design kit in 33 s, 16 of 16 checks |
+| landing page for a coffee shop with menu and hours | all requested content, 16 of 16 checks, 30 s |
+| `two_sum`, `is_palindrome`, `merge_intervals`, `to_roman` | hidden tests 5/5, 6/6, 5/5, 7/7 |
+| `group_anagrams` (groups sorted by first word) | 3/4: the groups were right but not sorted as asked |
+
+The first version of the page path let through pages that passed every check and looked bad (blue text on a blue card). That is why the checks now compute text contrast, and why pages are built from a design kit: the harness supplies a stylesheet and frame that are known to look right, and the model writes the content and picks an accent colour.
 
 ## What the harness does differently
 
@@ -66,7 +89,7 @@ Goals that are not one exact question (a report, a page, a document) still run o
 
 Two more kinds of goal leave the open-ended agent loop when the boost is on, because a small model loses a whole file to one JSON-escaping slip, or never tests what it wrote:
 
-- **A single web page** ("a sleek hello world page", "a landing page for…"). The model is asked for the complete file in one fenced block, with a design brief. The harness writes the file and reads it against a checklist of 14 points: doctype, complete document, title, viewport, real CSS, flex or grid layout, typography, CSS variables, background, rounded corners and shadow, a transition or animation, responsive sizing, no placeholder text, and the content the goal asks for. The misses go back to the model once as a list. Up to three candidates are made, and the one that passes the most checks is kept.
+- **A single web page** ("a sleek hello world page", "a landing page for…"). First choice is the **design kit**: the harness owns a stylesheet and page frame that are known to look right (centred card, type scale, spacing, list and card styles, hover motion, responsive), and the model writes only the content and picks an accent colour. A small model's HTML is fine; its CSS design sense is the weak part. If the model cannot keep to that form, it is asked for a complete file in one fenced block, with a design brief. The harness writes the file and reads it against a checklist of 16 points: doctype, complete document, title, viewport, real CSS, flex or grid layout, typography, CSS variables, background, rounded corners and shadow, a transition or animation, responsive sizing, no placeholder text, the content the goal asks for, **text that contrasts with what is behind it** (computed from the colours in the stylesheet), and one content block instead of pieces laid side by side. The last two were added after real 3B-model pages passed the first list while being hard to read. The misses go back to the model once as a list. Up to three candidates are made, and the one that passes the most checks is kept.
 - **A Python coding task** ("write a function…", "coding challenge: …"). The model writes a solution in one fenced block and then assert-style tests for it, a few times over. **Every candidate is run against every test**, its own and the other candidates', so one wrong test cannot crown a wrong solution. A test no candidate passes is dropped as probably wrong. The best candidate gets one repair on the tests it fails, and the candidate that passes the most tests is written to `output/solution.py`, with the tests it passes listed in `output/answer.md`.
 
 Both report what passed and what is still open, and a result that passes everything counts as verified.

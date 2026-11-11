@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/surenjanath/harnessmith/actions/workflows/ci.yml/badge.svg)](https://github.com/surenjanath/harnessmith/actions/workflows/ci.yml)
 
-**Self-improving, self-healing agent harnesses in Rust.** Harnessmith gives an agent a goal, then improves the agent's harness for that goal and keeps the run going when models or servers fail. It has a web UI, works with local and API models, and includes a guardrail gate, wired tools and project memory.
+**Self-improving, self-healing agent harnesses in Rust.** Harnessmith gives an agent a goal, then improves the agent's harness for that goal and keeps the run going when models or servers fail. It makes small local models far more accurate by having them compute, test and vote instead of guess. It has a web UI, works with local and API models, and includes a guardrail gate, wired tools and project memory.
 
 It is a Rust port of [google-research/harness2](https://github.com/google-research/harness2), *Recursive Agent Harnessing for an Open World*. It adds a model-agnostic agent runtime and a web UI where you connect models and hand the system a goal. The command-line tool is still called `harness2`. This is an independent project, not an official Google product.
 
@@ -40,6 +40,34 @@ A **harness** is everything around a model that makes it an agent: system prompt
 Budget per task and mode: R = 4k solver rollouts and P = 3k improver sessions. The ledger enforces this.
 
 **New here?** Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md): a first goal in five minutes with no API key. [docs/UPSTREAM_ISSUES.md](docs/UPSTREAM_ISSUES.md) tracks every issue on the original repo against this port.
+
+## Accurate answers from small models
+
+A small model asked a question directly usually guesses. With the **accuracy boost** (on by default for local and small models) the harness changes how the work is done, and checks it:
+
+- **Exact questions** (a number, a name, a date, a count, with or without data files): the model writes a short program, the harness runs it, repairs it, repeats the attempt independently and keeps the answer most attempts agree on. The agreement is shown as confidence.
+- **Coding tasks:** several candidate solutions and tests are written; every candidate runs against every test, and the one that passes the most is delivered.
+- **Web pages:** the model writes the content and the harness sets it in a design frame that is known to look right, then checks it against a 16-point design, readability and completeness list.
+- **Everything else:** the agent gets `python` and `calc` tools, and any figure it writes that matches nothing it read or computed is sent back.
+- **Experience and sleep:** verified solutions become worked examples for the next question of the same kind. While idle, a project can **sleep**: it consolidates those examples and rehearses on practice tasks it makes itself, after Google Research's ["Language Models Need Sleep"](https://arxiv.org/abs/2606.03979).
+
+Measured on Qwen 2.5 3B (4 CPU cores), 28 generated questions with exact answers:
+
+| | correct | average time |
+|---|---|---|
+| the model alone, step by step | 7 / 28 (25%) | 58 s |
+| with the accuracy boost | **26 / 28 (93%)** | 45 s |
+| boost, after learning and one sleep | 26 / 28 (93%) | 30 s |
+
+On real tasks with the same model: a sleek hello-world page and a coffee-shop landing page in about 30 s each, and four of five coding challenges passing every hidden test (the fifth 3 of 4). Details and limits are in the guide.
+
+Measure your own model with **Models → Accuracy check**, or:
+
+```bash
+./target/release/harness2 accuracy --model ollama/qwen2.5:3b
+```
+
+How it works, the settings and the limits are in [docs/ACCURACY.md](docs/ACCURACY.md).
 
 ## Quick start
 
@@ -171,6 +199,7 @@ What the runtime does for small local models:
 - `<think>` blocks are stripped, empty replies get a nudge to continue, and old observations are trimmed to fit the context window.
 - **Max parallel requests** per connection (default 1 for Ollama) queues requests instead of timing them out. With one local model serving every role, also set **Parallel stages = 1** (Models → Advanced) so the server's prompt cache is reused across an agent's turns. Otherwise interleaved sessions re-evaluate the whole prompt every turn.
 - A rollout whose session died before producing anything (server error, cancel) is reported as failed and is not cached, so a rerun tries it again.
+- **The accuracy boost is on for local models by default**: program-aided answers with voting, tested code, checked pages, and worked examples from experience. See [Accurate answers from small models](#accurate-answers-from-small-models).
 
 ## Self-healing
 
@@ -332,6 +361,7 @@ curl -X POST http://127.0.0.1:8765/api/hooks/goal \
 | `LongTermMEMORY.md` (harness) | facts and know-how, in every solver's instructions | solver | you, the improver, promotion |
 | **Project memory** (Memory tab) | notes from `remember` | solver, via `recall` and pinned notes | solver, you |
 | Experience library (Library tab) | one lesson per finished goal | improver | selector |
+| **Experience** (Memory tab) | verified solutions, kept as worked examples | the answer engine, for questions of the same kind | the answer engine; consolidated and rehearsed by sleep |
 | Session | the conversation, trimmed to fit the context window | that agent | automatic |
 
 The solver has two memory tools. `recall` searches notes from earlier goals in the project, and `remember` saves a durable fact or technique. Notes are stored in `<project>/memory.json`, outside the harness, so the gate can keep the harness read-only. A new note starts as a *candidate*. When the run ends:
@@ -351,6 +381,8 @@ harness2 goal "Find the three regions with the largest decline in sales.csv and 
 ```
 
 Rollouts run on the **native substrate** (`nx`): this crate's own tool loop with `list_files`, `read_file`, `write_file`, `edit_file`, `delete_file`, `bash`, `skill`, `task` (sub-agents) and `finish`. File tools are sandboxed to the workspace, and `hooks.json` hooks (`PreToolUse`, `PostToolUse`, `Stop`) run inside the loop. Turn the shell tool off in project settings or with `HARNESS2_ALLOW_SHELL=0`. The improver and selector run on the native `api` channel by default; `opencode` and `claude_cli` are also available.
+
+With the accuracy boost on, the agent also has `python` (runs code, notebook-style) and `calc`. `harness2 sleep --project <name>` consolidates a project's experience and rehearses on practice tasks; `harness2 accuracy --model <id>` measures what the harness adds to a model.
 
 To check a model on a task before paying for a full run, `harness2 solve` makes one solver attempt on the base harness and prints the output, steps, and tokens:
 
@@ -413,8 +445,10 @@ JobBench (`jb`), LAB (`lab`) and WorkBuddy-Bench (`wb --subset office|web|code`)
 src/core/        spec, tree, prompts, context, proposer, recursion, selection, schedule,
                  library, ledger, runmark, judge, report, pyrandom
 src/substrate/   opencode, codex, native
-src/llm/         connections, client (OpenAI / Anthropic / Gemini / Ollama / mock), agent loop
-src/benchmarks/  demo, goal, jobbench (+ jb_oc_runner), lab, workbuddy (+ wb_render)
+src/llm/         connections, client (OpenAI / Anthropic / Gemini / Ollama / mock), agent loop,
+                 precise (answer engine), maker (pages, code), pycode, calc, ground,
+                 experience, sleep
+src/benchmarks/  demo, goal, accuracy, jobbench (+ jb_oc_runner), lab, workbuddy (+ wb_render)
 src/cli/         subcommands
 src/ui/          axum server + embedded single-page UI
 ```

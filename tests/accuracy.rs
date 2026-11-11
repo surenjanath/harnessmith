@@ -317,8 +317,8 @@ fn accuracy_boost_scenarios() {
         if n == 1 {
             return text("```html\n<html><body><h1>Hello, world!</h1></body></html>\n```");
         }
-        assert!(last(req).contains("not finished") && last(req).contains("viewport"), "the misses are listed: {}", last(req));
-        text(&format!("```html\n{GOOD_PAGE}\n```"))
+        assert!(last(req).contains("Use exactly the form"), "the form is asked for again: {}", last(req));
+        text("TITLE: Hello\nACCENT: #0369a1\n```html\n<h1>Hello, World!</h1>\n<p>A sleek little page.</p>\n```")
     }));
     // ---- K: a coding task. The first candidate is wrong; the tests pick a right one.
     let (pk, _) = server(Arc::new(|n, req: &Value| {
@@ -339,10 +339,10 @@ fn accuracy_boost_scenarios() {
     let j = project(&d.path().join("proj_j"), "j/m", "on");
     let (rd, _) = solve(&j, "code me a sleek designed hello world page", &[], "j1");
     let page = std::fs::read_to_string(rd.join("workspace/output/index.html")).unwrap();
-    assert!(page.starts_with("<!DOCTYPE html>") && page.contains("var(--accent)") && page.contains("Hello, World!"), "{page}");
-    assert_eq!(seen_j.lock().unwrap().len(), 2, "one draft, one repair, and a candidate that passes everything ends it");
+    assert!(page.starts_with("<!DOCTYPE html>") && page.contains("--accent:#0369a1") && page.contains("<h1>Hello, World!</h1>"), "{page}");
+    assert_eq!(seen_j.lock().unwrap().len(), 2, "one reply in the wrong form, one in the right one");
     let u = read_json(&rd.join("usage.json"));
-    assert_eq!((u["accuracy"]["confidence"].as_str(), u["accuracy"]["passed"].as_u64()), (Some("high"), Some(14)), "{u}");
+    assert_eq!((u["accuracy"]["confidence"].as_str(), u["accuracy"]["passed"].as_u64()), (Some("high"), Some(16)), "{u}");
     assert_eq!(u["review_open"], json!([]));
     let k = project(&d.path().join("proj_k"), "k/m", "on");
     let (rd, out) = solve(&k, "Write a Python function is_palindrome(s) that ignores case and punctuation.", &[], "k1");
