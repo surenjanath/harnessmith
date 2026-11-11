@@ -33,6 +33,8 @@ pub enum Kind {
     Code,
     /// A written document about the goal's data files.
     Report,
+    /// A longer written document from the model's own knowledge (no input files).
+    Document,
 }
 
 /// Is this goal a single page, or a Python coding task? Anything else stays on the agent loop.
@@ -54,6 +56,10 @@ pub fn kind(task: &str) -> Option<Kind> {
     let page = Regex::new(r"\b(html|web ?page|landing page|website|home ?page)\b").unwrap().is_match(&g) || (Regex::new(r"\bpage\b").unwrap().is_match(&g) && !doc);
     if page && exts.iter().all(|e| matches!(*e, "html" | "css" | "js")) {
         return Some(Kind::Page);
+    }
+    let writes_doc = Regex::new(r"\b(research (document|paper|report)|report|essay|article|guide|white ?paper|overview|write[- ]?up|document|explainer|study|blog post)\b").unwrap().is_match(&g);
+    if writes_doc && !page && exts.iter().all(|e| matches!(*e, "md" | "txt")) && !Regex::new(r"\b(function|script|program|code|class|html|pdf|docx|slides?|email|letter)\b").unwrap().is_match(&g) {
+        return Some(Kind::Document);
     }
     let other_lang = Regex::new(r"\b(javascript|typescript|node\.?js|rust|golang|java|c\+\+|c#|ruby|php|swift|kotlin|bash script|shell script|sql)\b").unwrap().is_match(&g);
     let code = Regex::new(r"\b(coding (challenge|problem|task|exercise)|leetcode|(write|code|implement|create|build|make|solve|give me)\b[^.?!\n]{0,80}\b(function|program|script|class|algorithm|solution|code)\b|python (function|program|script))").unwrap().is_match(&g);
@@ -870,6 +876,78 @@ fn make_report(c: &mut Ctx, task: &str, goal: &str, ws: &Path) -> Result<()> {
     Ok(())
 }
 
+// ---- long documents ----------------------------------------------------------------------------
+
+/// A long document, one section at a time. A small model asked for 800 words in one reply
+/// stops at 150 or loses the thread; asked for one section with the outline in view, it writes
+/// a full one. The harness plans, asks section by section, checks each, and assembles.
+fn make_document(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
+    let file = Regex::new(r"(?i)\boutput/([\w\-]+\.(?:md|txt))\b").unwrap().captures(goal).map(|m| format!("output/{}", &m[1])).unwrap_or_else(|| "output/report.md".into());
+    let notes = if c.o.notes.trim().is_empty() { String::new() } else { format!("\n\nNotes from earlier work on this project:\n{}", c.o.notes.trim()) };
+    let plan = c.call(
+        &format!("You plan clear, well-organised documents.{notes}"),
+        &[Msg::User(format!("Task: {goal}\n\nPlan the document. Reply in exactly this form and nothing else:\nTITLE: <a specific title>\n- <section heading 1>\n- <section heading 2>\n(5 to 7 section headings, in reading order, from an introduction to a conclusion; each a short phrase, no numbering)"))],
+        0.4,
+    )?;
+    let title = Regex::new(r"(?im)^\s*(?:#\s*)?TITLE:\s*(.+)$").unwrap().captures(&plan).map(|m| m[1].trim().trim_matches(|ch| ch == '*' || ch == '"').to_string()).unwrap_or_else(|| util::take_chars(goal, 80));
+    let mut heads: Vec<String> = plan.lines().filter_map(|l| Regex::new(r"^\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$").unwrap().captures(l).map(|m| m[1].trim().trim_matches(|ch| ch == '*' || ch == '#' || ch == ':').trim().to_string())).filter(|h| h.len() >= 3 && h.len() <= 90).collect();
+    heads.dedup();
+    heads.truncate(8);
+    if heads.len() < 3 {
+        bail!("the model gave no usable outline");
+    }
+    crate::say!("{}document: \"{}\" in {} sections", c.o.log_prefix, util::take_chars(&title, 60), heads.len());
+    let outline = heads.iter().enumerate().map(|(i, h)| format!("{}. {h}", i + 1)).collect::<Vec<_>>().join("\n");
+    let system = format!("You write one section of a document at a time: specific, concrete, in plain prose.\nRules:\n- Write ONLY the body of the section you are asked for: 140 to 220 words, in 2 or 3 paragraphs (a short bullet list is fine where it helps). No heading, no title, no \"In this section\".\n- Give concrete facts, examples and figures you are confident of. Do not invent statistics, studies, quotations or sources; when unsure of an exact figure, say it in general terms.\n- Do not repeat what belongs in the other sections.{notes}");
+    let mut body = format!("# {title}\n");
+    let (mut good, mut words_total) = (0usize, 0usize);
+    for (i, h) in heads.iter().enumerate() {
+        if crate::log::cancelled() || c.left().is_zero() {
+            break;
+        }
+        let ask = format!("Document: {title}\nTask it answers: {goal}\n\nOutline:\n{outline}\n\nWrite section {}: \"{h}\".", i + 1);
+        let mut text = String::new();
+        let mut msgs = vec![Msg::User(ask)];
+        for round in 0..2 {
+            let Ok(reply) = c.call(&system, &msgs, 0.5) else { break };
+            // Drop a heading or a fence the model added anyway.
+            let cleaned: String = fenced(&reply, &["markdown", "md"]).unwrap_or(reply.clone()).lines().filter(|l| !l.trim_start().starts_with('#') && l.trim().trim_matches(|ch| ch == '*' || ch == ':').to_lowercase() != h.to_lowercase()).collect::<Vec<_>>().join("\n").trim().to_string();
+            let w = cleaned.split_whitespace().count();
+            if w > text.split_whitespace().count() {
+                text = cleaned;
+            }
+            if w >= 110 || round == 1 {
+                break;
+            }
+            msgs.push(Msg::Assistant { text: reply, calls: vec![] });
+            msgs.push(Msg::User(format!("That is only {w} words. Write the full section body, 140 to 220 words, with specifics.")));
+        }
+        let w = text.split_whitespace().count();
+        if w >= 90 {
+            good += 1;
+        }
+        words_total += w;
+        if !text.is_empty() {
+            body.push_str(&format!("\n## {h}\n\n{text}\n"));
+        }
+        c.ev(json!({"type": "tool", "name": "write_section", "input": {"section": h}, "status": if w >= 90 { "ok" } else { "error" }, "output": format!("{w} words")}));
+    }
+    if words_total < 200 {
+        bail!("the model wrote almost nothing");
+    }
+    body.push_str("\n---\n\n*Written from the model's own knowledge, without sources to check against. Verify names, dates and figures before relying on them.*\n");
+    util::write(&ws.join(&file), &body)?;
+    crate::say!("{}document: {} words in {} of {} sections", c.o.log_prefix, words_total, good, heads.len());
+    c.m.file = file;
+    c.m.kind = "document".into();
+    c.m.candidates = 1;
+    c.m.passed = good;
+    c.m.total = heads.len();
+    c.m.open = if good < heads.len() { vec![format!("{} section(s) came out short", heads.len() - good)] } else { vec![] };
+    c.m.summary = format!("A {words_total}-word document in {} sections, planned first and written one section at a time.", heads.len());
+    Ok(())
+}
+
 /// Build the deliverable for a page or coding goal into `workspace/output/`.
 pub fn make(task: &str, workspace: &Path, k: Kind, o: &Opts) -> Result<Made> {
     let goal = task.split("\n\nInput files (in your workspace):").next().unwrap_or(task).trim();
@@ -889,6 +967,7 @@ pub fn make(task: &str, workspace: &Path, k: Kind, o: &Opts) -> Result<Made> {
         Kind::Page => make_page(&mut c, goal, workspace)?,
         Kind::Code => make_code(&mut c, goal, workspace)?,
         Kind::Report => make_report(&mut c, task, goal, workspace)?,
+        Kind::Document => make_document(&mut c, goal, workspace)?,
     }
     crate::log::event("accuracy", "made", json!({"file": c.m.file, "kind": c.m.kind, "passed": c.m.passed, "total": c.m.total, "candidates": c.m.candidates, "confidence": c.m.confidence()}));
     c.ev(json!({"type": "made", "file": c.m.file, "passed": c.m.passed, "total": c.m.total}));
@@ -909,7 +988,10 @@ mod tests {
         assert_eq!(kind("Write a Python function is_palindrome(s) that ignores case and punctuation."), Some(Kind::Code));
         assert_eq!(kind("Coding challenge: given a list of integers, return the two that sum to a target."), Some(Kind::Code));
         assert_eq!(kind("Implement a function fizzbuzz(n) in JavaScript"), None);
-        assert_eq!(kind("i want a research document on dogs"), None);
+        assert_eq!(kind("i want a research document on dogs"), Some(Kind::Document));
+        assert_eq!(kind("Write a short guide to brewing pour-over coffee"), Some(Kind::Document));
+        assert_eq!(kind("Write a PDF report on dogs"), None);
+        assert_eq!(kind("What is the capital of France?"), None);
         assert_eq!(kind("Write a script that parses sales.csv\n\nInput files (in your workspace): sales.csv"), None);
         assert_eq!(kind("Using sales.csv, write a short report to output/report.md on revenue per region, with a table.\n\nInput files (in your workspace): sales.csv"), Some(Kind::Report));
         assert_eq!(kind("Convert sales.csv to JSON\n\nInput files (in your workspace): sales.csv"), None);

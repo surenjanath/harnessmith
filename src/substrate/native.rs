@@ -336,7 +336,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
             mo.wall = Duration::from_secs(o.timeout);
             mo.trajectory = Some(run_dir.join("trajectory.jsonl"));
             mo.gate = Some(gate.clone());
-            crate::say!("      accuracy boost: {} → built from fenced blocks and checked, up to {} candidate(s)", match k { crate::llm::maker::Kind::Page => "a page", crate::llm::maker::Kind::Code => "a coding task", crate::llm::maker::Kind::Report => "a report on data" }, mo.candidates);
+            crate::say!("      accuracy boost: {} → built from fenced blocks and checked, up to {} candidate(s)", match k { crate::llm::maker::Kind::Page => "a page", crate::llm::maker::Kind::Code => "a coding task", crate::llm::maker::Kind::Report => "a report on data", crate::llm::maker::Kind::Document => "a document, written section by section" }, mo.candidates);
             match crate::llm::maker::make(task, &ws, k, &mo) {
                 Ok(m) if !m.file.is_empty() => return finish_made(run_dir, &ws, fp_dir, o, &m),
                 Ok(m) => engine_usage = (m.calls, m.input_tokens, m.output_tokens, m.cost_usd),
