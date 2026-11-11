@@ -12,9 +12,11 @@ A small model asked "what is the total revenue in this CSV?" will usually reply 
 | through the harness with the accuracy boost | 26 / 28 | **93%** | 45 s |
 | the boost, after working through other questions of the same kinds and one sleep | 26 / 28 | 93% | 30 s |
 
+The same 28 questions on Llama 3.2 1B (five attempts per vote): 2 / 28 (7%) alone, **10 / 28 (36%)** with the boost, at 75 s a question. A 1B model writes working programs for totals, statistics and letter counts, and still fails most multi-step ones; the boost multiplies what it gets right, it does not make it a 3B model.
+
 The model alone got none of the CSV totals, group questions, date differences, letter counts, percentages, compound interest or the two-file join right. With the boost it got all of them except one join and one unit conversion.
 
-Experience did not raise the score here, and it cut the time by a third. It also shows the limit described below: one wrong solution to the join question had been agreed on and kept, and it made the join questions worse (0 of 2, down from 1 of 2), while unit conversion went from 1 of 2 to 2 of 2.
+Experience did not raise the score in that run, and it cut the time by a third. It also exposed a fault: one wrong solution to the join question had been agreed on and kept, and it made the join questions worse (0 of 2, down from 1 of 2). The sleep had already found that example useless in rehearsal, so examples that fail in rehearsal more often than they help are now withheld; re-asked with that change, both join questions came out right.
 
 Real tasks on the same model, checked independently (tests the model never saw; pages rendered in a browser):
 
@@ -23,7 +25,9 @@ Real tasks on the same model, checked independently (tests the model never saw; 
 | "code me a sleek designed hello world page" | complete, readable page from the design kit in 33 s, 16 of 16 checks |
 | landing page for a coffee shop with menu and hours | all requested content, 16 of 16 checks, 30 s |
 | `two_sum`, `is_palindrome`, `merge_intervals`, `to_roman` | hidden tests 5/5, 6/6, 5/5, 7/7 |
-| `group_anagrams` (groups sorted by first word) | 3/4: the groups were right but not sorted as asked |
+| `group_anagrams` (groups sorted by first word) | first 3/4 (groups right, not sorted as asked); 4/4 once tests had to cover every requirement and a requirements review was added |
+| report on `sales.csv`: revenue per region, table, overall total | on the agent loop: a template with `${total_revenue}` left in it. Through the report path: every figure right, East correctly named highest, in about 60 s |
+| the same exact question through the web UI (full run) | 6,263.75, two attempts agreeing, adopted without the improvement loop, about 20 s |
 
 The first version of the page path let through pages that passed every check and looked bad (blue text on a blue card). That is why the checks now compute text contrast, and why pages are built from a design kit: the harness supplies a stylesheet and frame that are known to look right, and the model writes the content and picks an accent colour.
 

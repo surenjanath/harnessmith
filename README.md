@@ -59,7 +59,9 @@ Measured on Qwen 2.5 3B (4 CPU cores), 28 generated questions with exact answers
 | with the accuracy boost | **26 / 28 (93%)** | 45 s |
 | boost, after learning and one sleep | 26 / 28 (93%) | 30 s |
 
-On real tasks with the same model: a sleek hello-world page and a coffee-shop landing page in about 30 s each, and four of five coding challenges passing every hidden test (the fifth 3 of 4). Details and limits are in the guide.
+Llama 3.2 1B on the same questions: 2 / 28 (7%) alone, 10 / 28 (36%) with the boost.
+
+On real tasks with Qwen 3B: a sleek hello-world page and a coffee-shop landing page in about 30 s each, five of five coding challenges passing every hidden test, and a data report with every figure and ranking right in about a minute. Details and limits are in the guide.
 
 !["code me a sleek designed hello world page", as Qwen 2.5 3B delivered it through the harness in 17 seconds](docs/img/page_hello_qwen3b.png)
 
