@@ -604,19 +604,46 @@ pub fn expected_exts(prompt: &str) -> Vec<&'static str> {
     v
 }
 
+/// Files the goal names under `output/` ("write a report to output/report.md"), relative to
+/// the output folder and lowercased.
+pub fn named_outputs(prompt: &str) -> Vec<String> {
+    let goal = prompt.split_once("\n\nInput files (in your workspace):").map(|(g, _)| g).unwrap_or(prompt);
+    let re = regex::Regex::new(r"(?i)\boutput/([\w\-./]+\.[a-z0-9]{1,5})\b").unwrap();
+    let mut v: Vec<String> = re.captures_iter(goal).map(|c| c[1].trim_end_matches('.').to_lowercase()).collect();
+    v.dedup();
+    v
+}
+
+/// Whether the run's own finish check left figures in the deliverable that match nothing in the
+/// inputs or in any tool output (recorded in usage.json as review_open).
+pub fn has_ungrounded_figures(run_dir: &std::path::Path) -> bool {
+    std::fs::read_to_string(run_dir.join("usage.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|u| u["review_open"].as_array().cloned())
+        .map(|a| a.iter().any(|x| x.as_str().map(|s| s.starts_with("figures that match nothing")).unwrap_or(false)))
+        .unwrap_or(false)
+}
+
 fn guard_pool(cands: &mut BTreeMap<String, RunView>, base: &[RunView], adapter: &dyn BenchmarkAdapter, task_id: &str) -> bool {
     let text = |rv: &RunView| adapter.deliverable_text(&rv.run_dir).unwrap_or_default();
-    let want = expected_exts(&adapter.task_prompt(task_id).unwrap_or_default());
+    let prompt = adapter.task_prompt(task_id).unwrap_or_default();
+    let want = expected_exts(&prompt);
+    let named = named_outputs(&prompt);
     let on_format = |rv: &RunView| {
-        want.is_empty()
-            || adapter.deliverable_files(&rv.run_dir).map(|m| m.keys().any(|f| want.iter().any(|e| f.to_lowercase().ends_with(&format!(".{e}"))))).unwrap_or(false)
+        let files = adapter.deliverable_files(&rv.run_dir).unwrap_or_default();
+        (want.is_empty() || files.keys().any(|f| want.iter().any(|e| f.to_lowercase().ends_with(&format!(".{e}")))))
+            && named.iter().all(|n| files.keys().any(|f| f.to_lowercase() == *n))
     };
     let mut added = vec![];
     if let Some(b) = base.iter().find(|b| b.delivered && b.ok && !cands.contains_key(&b.label) && !looks_failed(&text(b))) {
         cands.insert(b.label.clone(), b.clone());
         added.push(b.label.clone());
     }
-    let mut suspect: Vec<String> = cands.iter().filter(|(_, rv)| !rv.delivered || looks_failed(&text(rv))).map(|(l, _)| l.clone()).collect();
+    // Figures the run's own check could not trace to the inputs or to any computation count as
+    // a failure: an invented number reads as well as a computed one, so the selector cannot
+    // tell them apart.
+    let mut suspect: Vec<String> = cands.iter().filter(|(_, rv)| !rv.delivered || looks_failed(&text(rv)) || has_ungrounded_figures(&rv.run_dir)).map(|(l, _)| l.clone()).collect();
     // Of the healthy ones, those without the requested file type lose to those with it.
     let healthy: Vec<&String> = cands.keys().filter(|l| !suspect.contains(l)).collect();
     let off: Vec<String> = healthy.iter().filter(|l| !on_format(&cands[**l])).map(|l| (*l).clone()).collect();
@@ -889,7 +916,25 @@ mod tests {
 
 #[cfg(test)]
 mod guard_tests {
-    use super::looks_failed;
+    use super::{has_ungrounded_figures, looks_failed, named_outputs};
+
+    #[test]
+    fn files_the_goal_names_are_found() {
+        assert_eq!(named_outputs("Using orders.csv, write a short report to output/report.md. Round to 2 decimals.\n\nInput files (in your workspace): orders.csv"), vec!["report.md"]);
+        assert_eq!(named_outputs("Save output/Data/summary.CSV and output/chart.svg"), vec!["data/summary.csv", "chart.svg"]);
+        assert!(named_outputs("Write a report on orders.csv").is_empty());
+        assert!(named_outputs("Summarise it.\n\nInput files (in your workspace): output/old.md").is_empty(), "an input is not a requested output");
+    }
+
+    #[test]
+    fn invented_figures_mark_a_run() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(!has_ungrounded_figures(d.path()), "no usage.json");
+        std::fs::write(d.path().join("usage.json"), r#"{"review_open": ["the written deliverable has only 50 words"]}"#).unwrap();
+        assert!(!has_ungrounded_figures(d.path()));
+        std::fs::write(d.path().join("usage.json"), r#"{"review_open": ["figures that match nothing in the inputs or in any tool output: 2569.2 (output/report.md)"]}"#).unwrap();
+        assert!(has_ungrounded_figures(d.path()));
+    }
 
     #[test]
     fn failure_reports_are_spotted_and_answers_are_not() {

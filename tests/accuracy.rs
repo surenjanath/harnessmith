@@ -325,6 +325,14 @@ fn accuracy_boost_scenarios() {
         if last(req).contains("write tests") {
             return text("```python\nassert is_palindrome(\"Racecar\") == True\nassert is_palindrome(\"A man, a plan, a canal: Panama\") == True\nassert is_palindrome(\"hello\") == False\nassert is_palindrome(\"\") == True\n```");
         }
+        // Tests written without seeing a solution, in terms of the declared signature.
+        if last(req).contains("Do NOT solve it") {
+            assert!(last(req).contains("def is_palindrome(s):"), "the declared signature is shown: {}", last(req));
+            return text("```python\nassert is_palindrome(\"No lemon, no melon\") == True\ndef test_mixed_case():\n    assert is_palindrome(\"Abba\") == True\n    assert is_palindrome(\"Abc\") == False\n```");
+        }
+        if last(req).contains("List every requirement") {
+            return text("ignores case: test_mixed_case\nignores punctuation: assert 2\nCOVERED");
+        }
         if n == 1 {
             return program("def is_palindrome(s):\n    return s == s[::-1]");
         }
@@ -348,7 +356,7 @@ fn accuracy_boost_scenarios() {
     let (rd, out) = solve(&k, "Write a Python function is_palindrome(s) that ignores case and punctuation.", &[], "k1");
     let sol = std::fs::read_to_string(rd.join("workspace/output/solution.py")).unwrap();
     assert!(sol.contains("isalnum"), "the candidate that passes the tests is kept: {sol}");
-    assert!(out.contains("passes 4"), "{out}");
+    assert!(out.contains("passes 7"), "{out}");
     assert_eq!(read_json(&rd.join("usage.json"))["accuracy"]["confidence"], "high");
 
     // ---- H: a fenced Python block written instead of a tool call is run, not ignored.

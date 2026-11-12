@@ -162,12 +162,19 @@ fn ureq_post_cancellable(url: &str, headers: &[(&str, String)], body: &Value, ti
         };
         let _ = tx.send(r);
     });
+    // The read timeout is per socket read: a server that sends a byte now and then (keep-alive
+    // whitespace, a stalled stream) keeps a request open for ever. Hold the whole request to the
+    // caller's timeout, with a little slack for connecting and sending, and abandon the thread.
+    let deadline = std::time::Instant::now() + timeout + Duration::from_secs(30);
     loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(r) => return r,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if crate::log::cancelled() {
                     return Sent::Transport(CANCELLED.into(), true);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Sent::Transport(format!("no complete reply within {}s", timeout.as_secs() + 30), false);
                 }
             }
             Err(_) => return Sent::Transport("request thread ended".into(), false),

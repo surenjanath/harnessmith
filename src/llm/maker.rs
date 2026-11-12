@@ -99,6 +99,8 @@ pub struct Made {
     pub candidates: usize,
     /// What is still wrong with the kept candidate.
     pub open: Vec<String>,
+    /// Reasons the checks themselves may be too weak to call a full pass verified.
+    pub doubt: Vec<String>,
     pub summary: String,
     pub calls: u32,
     pub input_tokens: u64,
@@ -111,8 +113,10 @@ impl Made {
     pub fn confidence(&self) -> &'static str {
         if self.file.is_empty() || self.total == 0 {
             "none"
-        } else if self.passed == self.total {
+        } else if self.passed == self.total && self.doubt.is_empty() {
             "high"
+        } else if self.passed == self.total {
+            "medium"
         } else if self.passed * 4 >= self.total * 3 {
             "medium"
         } else {
@@ -120,7 +124,7 @@ impl Made {
         }
     }
     pub fn to_json(&self) -> Value {
-        json!({"file": self.file, "kind": self.kind, "passed": self.passed, "total": self.total, "candidates": self.candidates, "open": self.open, "confidence": self.confidence(), "calls": self.calls, "model": self.served_by})
+        json!({"file": self.file, "kind": self.kind, "passed": self.passed, "total": self.total, "candidates": self.candidates, "open": self.open, "doubt": self.doubt, "confidence": self.confidence(), "calls": self.calls, "model": self.served_by})
     }
 }
 
@@ -519,7 +523,16 @@ Rules:
 - Standard library only. No input(), no reading files unless the task says so, no code that runs on import except definitions.
 - Handle the edge cases the task mentions (empty input, zero, negative numbers, duplicates).";
 
-const TEST_ASK: &str = "Now write tests for that task. Reply with ONE ```python block that contains only single-line assert statements calling the function(s), one per line, 6 to 10 of them. Start with the examples the task gives, then write at least one test for EVERY requirement the task states, including how the result must be ordered or sorted (use an input whose natural order differs from the required order), then edge cases. Every expected value must be exactly what the task's rules give.";
+const TEST_ASK: &str = "Now write tests for that task. Reply with ONE ```python block that contains only single-line assert statements calling the function(s), one per line, 6 to 10 of them. Start with the examples the task gives, then write at least one test for EVERY requirement the task states, including how the result must be ordered or sorted (use an input whose natural order differs from the required order), then edge cases. Every expected value must be exactly what the task's rules give.
+For a plain function, use only single-line asserts, never a test function.
+Only for a class, or anything whose result depends on earlier calls, write a test function instead: `def test_<what>():` whose body creates ONE object, calls it step by step and asserts after each step. Never build a new object inside every assert. Write one such function per behaviour (e.g. one for eviction, one for updating a key).
+For an error the task requires, write a small test function per case that calls it in `try:` and asserts that the right exception was raised.";
+
+/// Tests written without seeing any solution: what the task demands, not what one program does.
+const INDEPENDENT_TEST_ASK: &str = "Write tests for the task below. Do NOT solve it. A correct solution will be called exactly as declared here:\n{sig}\n\nTask:\n{goal}\n\nReply with ONE ```python block of tests, 6 to 10 of them: single-line `assert` statements for a plain function; only for a class or anything that depends on earlier calls, one `def test_<what>():` function per behaviour that creates one object and asserts after each step. Cover every feature and rule the task names (each operator, each kind of input, each error case, ordering), the examples it gives, and edge cases. Compute every expected value carefully from the task's rules.";
+
+/// A requirements-to-tests audit: which stated requirement does no test exercise?
+const COVERAGE_ASK: &str = "Task:\n{goal}\n\nThe solution is declared as:\n{sig}\n\nThese tests exist:\n```python\n{tests}\n```\n\nList every requirement the task states (each feature, operator, kind of input, rule, error case and ordering), one per line, and next to each the test that exercises it, or MISSING. Then, if any is MISSING, write tests for exactly those in ONE ```python block (single-line asserts, or a `def test_<what>():` function for anything with state or an expected exception). If every requirement is exercised, end with the word COVERED and no code block.";
 
 const DRIVER: &str = r#"import json, sys, io, contextlib, signal
 sols, asserts = json.load(open(sys.argv[1]))
@@ -551,12 +564,77 @@ for path in sols:
 print(json.dumps(out))
 "#;
 
-/// Single-line asserts in a block of test code.
+/// Test units in a block of test code: single-line asserts, and `def test_*():` functions
+/// (for anything with state or an expected exception), each run as one unit that defines the
+/// function and calls it.
 pub fn asserts_in(code: &str) -> Vec<String> {
-    let mut v: Vec<String> = code.lines().map(|l| l.trim()).filter(|l| l.starts_with("assert ") && l.len() > 9 && l.matches('(').count() == l.matches(')').count()).map(String::from).collect();
-    v.dedup();
-    v.truncate(12);
+    let lines: Vec<&str> = code.lines().collect();
+    let mut v: Vec<String> = vec![];
+    let mut i = 0;
+    while i < lines.len() {
+        let raw = lines[i].trim_end();
+        let t = raw.trim();
+        if t.starts_with("def test") && t.ends_with(':') {
+            let indent = raw.len() - raw.trim_start().len();
+            let name = t[4..].split('(').next().unwrap_or("").trim().to_string();
+            let mut body = vec![t.to_string()];
+            i += 1;
+            while i < lines.len() {
+                let l = lines[i].trim_end();
+                if l.trim().is_empty() {
+                    i += 1;
+                    continue;
+                }
+                if l.len() - l.trim_start().len() <= indent {
+                    break;
+                }
+                body.push(l[indent.min(l.len() - l.trim_start().len())..].to_string());
+                i += 1;
+            }
+            // A test function that is nothing but one-line asserts on a plain function has no
+            // state to carry: split it, so one wrong expected value does not sink the others.
+            let stmts: Vec<&str> = body.iter().skip(1).map(|b| b.trim()).collect();
+            let only_asserts = stmts.iter().all(|s| s.starts_with("assert ") && s.matches('(').count() == s.matches(')').count());
+            if only_asserts {
+                for s in stmts {
+                    if s.len() > 9 && !v.iter().any(|u| u == s) {
+                        v.push(s.to_string());
+                    }
+                }
+            } else if stmts.iter().any(|b| b.contains("assert") || b.contains("raise")) && !name.is_empty() {
+                let unit = format!("{}\n{name}()", body.join("\n"));
+                if !v.contains(&unit) {
+                    v.push(unit);
+                }
+            }
+            continue;
+        }
+        if t.starts_with("assert ") && t.len() > 9 && t.matches('(').count() == t.matches(')').count() && !v.iter().any(|u| u == t) {
+            v.push(t.to_string());
+        }
+        i += 1;
+    }
+    v.truncate(20);
     v
+}
+
+/// The `def`/`class` lines a solution declares at top level, for asking tests in its terms.
+fn signature(code: &str) -> String {
+    let mut v = vec![];
+    let mut in_class = false;
+    for l in code.lines() {
+        let t = l.trim_end();
+        if t.starts_with("class ") {
+            in_class = true;
+            v.push(t.to_string());
+        } else if t.starts_with("def ") {
+            in_class = false;
+            v.push(t.to_string());
+        } else if in_class && t.trim_start().starts_with("def ") && !t.trim_start().starts_with("def _") || in_class && t.trim_start().starts_with("def __init__") {
+            v.push(t.to_string());
+        }
+    }
+    v.join("\n")
 }
 
 /// Run every solution against every assert: `matrix[s][a]`.
@@ -615,16 +693,39 @@ fn make_code(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
         bail!("the model produced no program");
     }
     c.m.candidates = sols.len();
-    let score = |m: &[Vec<bool>], s: usize| m.get(s).map(|r| r.iter().filter(|x| **x).count()).unwrap_or(0);
-    let mut matrix = if asserts.is_empty() { vec![vec![]; sols.len()] } else { cross_run(ws, c.o.sandbox.as_ref(), &sols, &asserts)? };
-    // A test no candidate passes is more likely a wrong test than three wrong programs.
-    if sols.len() >= 2 {
-        let keep: Vec<usize> = (0..asserts.len()).filter(|a| matrix.iter().any(|r| r[*a])).collect();
-        if keep.len() >= 3 && keep.len() < asserts.len() {
-            asserts = keep.iter().map(|a| asserts[*a].clone()).collect();
-            matrix = matrix.iter().map(|r| keep.iter().map(|a| r[*a]).collect()).collect();
+    // Tests written right after a solution lean towards what that solution does. Ask once more
+    // for tests in a fresh conversation that sees only the task and the declared names, then
+    // audit the whole set against the task's requirements.
+    let sig = signature(&sols[0]);
+    let mut audited = false;
+    if !sig.is_empty() && !crate::log::cancelled() && !c.left().is_zero() {
+        let ask = INDEPENDENT_TEST_ASK.replace("{sig}", &sig).replace("{goal}", goal);
+        if let Ok(t) = c.call(&system, &[Msg::User(ask)], 0.3) {
+            for a in asserts_in(&fenced(&t, &["python", "py"]).unwrap_or(t)) {
+                if !asserts.contains(&a) {
+                    asserts.push(a);
+                }
+            }
         }
     }
+    if !sig.is_empty() && !asserts.is_empty() && !crate::log::cancelled() && !c.left().is_zero() {
+        let ask = COVERAGE_ASK.replace("{goal}", goal).replace("{sig}", &sig).replace("{tests}", &asserts.join("\n"));
+        if let Ok(t) = c.call(&system, &[Msg::User(ask)], 0.2) {
+            let added = fenced(&t, &["python", "py"]).map(|b| asserts_in(&b)).unwrap_or_default();
+            let n0 = asserts.len();
+            for a in added {
+                if !asserts.contains(&a) {
+                    asserts.push(a);
+                }
+            }
+            // Audited: it wrote tests for the gaps it found, or it named no gap.
+            audited = asserts.len() > n0 || !t.contains("MISSING");
+            crate::say!("{}code: coverage audit {}", c.o.log_prefix, if asserts.len() > n0 { format!("added {} test(s) for requirements no test exercised", asserts.len() - n0) } else if audited { "found every requirement exercised".to_string() } else { "named gaps but wrote no usable tests for them".to_string() });
+        }
+    }
+    asserts.truncate(24);
+    let score = |m: &[Vec<bool>], s: usize| m.get(s).map(|r| r.iter().filter(|x| **x).count()).unwrap_or(0);
+    let mut matrix = if asserts.is_empty() { vec![vec![]; sols.len()] } else { cross_run(ws, c.o.sandbox.as_ref(), &sols, &asserts)? };
     let mut best = (0..sols.len()).max_by_key(|s| (score(&matrix, *s), usize::MAX - *s)).unwrap_or(0);
     c.ev(json!({"type": "tool", "name": "run_tests", "input": {"candidates": sols.len(), "tests": asserts.len()}, "status": "ok", "output": (0..sols.len()).map(|s| format!("candidate {}: {}/{} tests", s + 1, score(&matrix, s), asserts.len())).collect::<Vec<_>>().join("\n")}));
     crate::say!("{}code: {} candidate(s) × {} test(s); best passes {}", c.o.log_prefix, sols.len(), asserts.len(), score(&matrix, best));
@@ -645,6 +746,19 @@ fn make_code(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
                     crate::say!("{}code: after a repair, best passes {}/{}", c.o.log_prefix, score(&matrix, best), asserts.len());
                 }
             }
+        }
+    }
+    // A test no candidate passes may be a wrong test, or a bug every candidate shares (they come
+    // from the same model). It is set aside for scoring, but it stays unsettled: the result is
+    // not called verified while one remains, so the improvement loop gets its turn.
+    let mut unsettled: Vec<String> = vec![];
+    if sols.len() >= 2 {
+        let keep: Vec<usize> = (0..asserts.len()).filter(|a| matrix.iter().any(|r| r[*a])).collect();
+        if keep.len() >= 3 && keep.len() < asserts.len() {
+            unsettled = (0..asserts.len()).filter(|a| !keep.contains(a)).map(|a| asserts[a].clone()).collect();
+            asserts = keep.iter().map(|a| asserts[*a].clone()).collect();
+            matrix = matrix.iter().map(|r| keep.iter().map(|a| r[*a]).collect()).collect();
+            best = (0..sols.len()).max_by_key(|s| (score(&matrix, *s), usize::MAX - *s)).unwrap_or(best);
         }
     }
     // Requirements review: tests the model wrote can miss a sentence of the task (an ordering,
@@ -680,12 +794,30 @@ fn make_code(c: &mut Ctx, goal: &str, ws: &Path) -> Result<()> {
     c.m.passed = score(&matrix, best);
     c.m.total = asserts.len();
     c.m.open = failing.iter().take(5).map(|f| format!("fails: {f}")).collect();
+    // Tests set aside as unsettled: count those the kept solution now passes (a repair or the
+    // review may have fixed the shared bug) and keep the rest as doubts.
+    if !unsettled.is_empty() {
+        if let Ok(m) = cross_run(ws, c.o.sandbox.as_ref(), &[sols[best].clone()], &unsettled) {
+            unsettled = unsettled.iter().zip(m[0].iter()).filter(|(_, ok)| !**ok).map(|(t, _)| t.clone()).collect();
+        }
+    }
+    if !unsettled.is_empty() {
+        c.m.doubt.push(format!("{} test(s) that no candidate passes (a wrong test, or a bug every candidate shares)", unsettled.len()));
+        c.m.open.extend(unsettled.iter().take(3).map(|t| format!("unsettled: {}", t.replace('\n', " ⏎ "))));
+    }
+    if !audited {
+        c.m.doubt.push("the tests were not checked against every requirement of the task".into());
+    }
+    if asserts.len() < 5 {
+        c.m.doubt.push(format!("only {} test(s)", asserts.len()));
+    }
     let passing: Vec<&String> = asserts.iter().enumerate().filter(|(a, _)| matrix[best].get(*a).copied().unwrap_or(false)).map(|(_, t)| t).collect();
     c.m.summary = format!(
-        "{} candidate solution(s) were written and run against {} test(s); the one kept passes {}.\n\nTests it passes:\n\n```python\n{}\n```",
+        "{} candidate solution(s) were written and run against {} test(s); the one kept passes {}.{}\n\nTests it passes:\n\n```python\n{}\n```",
         c.m.candidates,
         asserts.len(),
         c.m.passed,
+        if c.m.doubt.is_empty() { String::new() } else { format!("\n\nNot verified: {}.", c.m.doubt.join("; ")) },
         passing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
     );
     Ok(())
@@ -698,6 +830,8 @@ Rules:
 - Compute every figure the report will need (totals, per-group values, counts, averages, the largest and smallest) from the files. Never calculate in your head.
 - Print each fact on its own line as `label: value`, with clear labels (for a per-group result, one line per group). Round money to 2 decimals.
 - Standard library only (csv, json, math, statistics, collections, re, datetime). Simple step-by-step code with plain loops. No input().
+- Keep each row as the dict csv.DictReader gives you and read fields by name (row[\"date\"], row[\"qty\"]). Never pack rows into tuples or lists and index them by position: that is where the wrong column gets used.
+- To combine two files that share a column, first build a dict from the smaller one keyed on that column, then look each row of the other up in it.
 - Do NOT write or open any file for writing, and do not write the report itself: only print() the facts. The report is written later from what you print.";
 
 const WRITE_SYSTEM: &str = "You write clear, short business documents in Markdown.
@@ -775,10 +909,16 @@ fn make_report(c: &mut Ctx, task: &str, goal: &str, ws: &Path) -> Result<()> {
     // 1. The facts, computed.
     let system = format!("{FACTS_SYSTEM}{}", super::precise::cookbook(ws, &files));
     let ask = format!("A report will be written later about this:\n\"{goal}\"{}\n\nYour job now is only the figures. Write the Python program that print()s the facts that report needs. Reply with one ```python block and nothing else.", super::precise::files_block(ws, &files));
-    let mut msgs = vec![Msg::User(ask)];
+    let mut msgs = vec![Msg::User(ask.clone())];
     let mut facts = String::new();
-    for round in 0..3 {
-        let Ok(reply) = c.call(&system, &msgs, if round == 0 { 0.2 } else { 0.6 }) else { break };
+    let mut last_problem = String::new();
+    for round in 0..6 {
+        // Repairs patch the same program, and a small model keeps its mistaken layout through
+        // them. After three rounds, start again from a clean conversation.
+        if round == 3 {
+            msgs = vec![Msg::User(format!("{ask}\n\nAn earlier program for this failed with: {}\nWrite a new program from scratch, reading every field by its column name.", util::take_chars(&last_problem, 300)))];
+        }
+        let Ok(reply) = c.call(&system, &msgs, match round { 0 => 0.2, 3 => 0.7, _ => 0.6 }) else { break };
         let Some(code) = pycode::extract_code(&reply) else {
             msgs.push(Msg::Assistant { text: reply, calls: vec![] });
             msgs.push(Msg::User("Reply with the program in one ```python block.".into()));
@@ -795,6 +935,7 @@ fn make_report(c: &mut Ctx, task: &str, goal: &str, ws: &Path) -> Result<()> {
             break;
         }
         let problem = if !out.ok() { format!("The program failed:\n{}", util::take_chars(&out.render(), 800)) } else if lines < 2 { "The program printed almost nothing. Do not write to a file: print() every fact the report needs, one `label: value` per line.".to_string() } else { format!("The program printed {lines} lines, too many for a short report. Print only summary facts (totals and per-group values), not every row.") };
+        last_problem = problem.clone();
         msgs.push(Msg::Assistant { text: reply, calls: vec![] });
         msgs.push(Msg::User(format!("{problem}\n\nFix it. Reply with the full corrected program in one ```python block.")));
     }
@@ -1057,5 +1198,38 @@ main{padding:clamp(2rem,6vw,4rem);border-radius:24px;box-shadow:0 20px 60px rgba
         assert_eq!(m[0], vec![false, true, false, false]);
         assert_eq!(m[1], vec![true, true, true, false]);
         assert_eq!(m[2], vec![false; 4], "an endless loop fails its tests instead of hanging");
+    }
+
+    #[test]
+    fn stateful_tests_run_as_one_unit() {
+        let code = "assert f(1) == 1\n\ndef test_evicts():\n    c = Cache(1)\n    c.put(1, 1)\n\n    c.put(2, 2)\n    assert c.get(1) == -1\nassert f(2) == 2\n    def test_nested_ok():\n        x = 0\n        assert x == 0\ndef test_no_check():\n    x = 1\ndef test_plain():\n    assert f(3) == 3\n    assert f(4) == 5\n";
+        let u = asserts_in(code);
+        assert_eq!(u.len(), 6, "{u:?}");
+        assert_eq!(u[1], "def test_evicts():\n    c = Cache(1)\n    c.put(1, 1)\n    c.put(2, 2)\n    assert c.get(1) == -1\ntest_evicts()");
+        assert_eq!(u[2], "assert f(2) == 2");
+        assert!(u[3].starts_with("def test_nested_ok():\n    x = 0\n    assert x == 0"));
+        assert_eq!(&u[4..], &["assert f(3) == 3", "assert f(4) == 5"], "a test function of bare asserts is split, so one wrong value does not sink the rest");
+        if !pycode::available() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let good = "from collections import OrderedDict\nclass Cache:\n    def __init__(self, n):\n        self.n, self.d = n, OrderedDict()\n    def get(self, k):\n        if k not in self.d: return -1\n        self.d.move_to_end(k)\n        return self.d[k]\n    def put(self, k, v):\n        self.d[k] = v\n        self.d.move_to_end(k)\n        if len(self.d) > self.n: self.d.popitem(last=False)\n";
+        let bad = good.replace("self.d.move_to_end(k)\n        if len", "self.d.move_to_end(k, False)\n        if len");
+        let m = cross_run(d.path(), None, &[good.to_string(), bad], &[u[1].clone()]).unwrap();
+        assert_eq!(m, vec![vec![true], vec![false]], "a multi-step test catches an eviction bug one-line asserts cannot");
+    }
+
+    #[test]
+    fn signature_lists_what_a_solution_declares() {
+        let s = signature("import re\nclass LRUCache:\n    def __init__(self, capacity):\n        pass\n    def get(self, key):\n        return -1\n    def _helper(self):\n        pass\ndef eval_expr(s: str) -> float:\n    def inner():\n        pass\n    return 0\n");
+        assert_eq!(s, "class LRUCache:\n    def __init__(self, capacity):\n    def get(self, key):\ndef eval_expr(s: str) -> float:");
+    }
+
+    #[test]
+    fn doubts_keep_a_full_pass_from_counting_as_verified() {
+        let mut m = Made { file: "output/solution.py".into(), passed: 9, total: 9, ..Default::default() };
+        assert_eq!(m.confidence(), "high");
+        m.doubt.push("2 test(s) that no candidate passes".into());
+        assert_eq!(m.confidence(), "medium");
     }
 }
