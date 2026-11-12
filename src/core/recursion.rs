@@ -377,7 +377,7 @@ fn roll_many(
     let got = util::par_map(items, width, |(label, t)| roll(adapter, task_id, &label, Some(&t), run_id_of, work_dir));
     let mut out = BTreeMap::new();
     for (label, rv) in labels.into_iter().zip(got) {
-        ledger.rollout(&label, 0.0, false);
+        ledger.rollout_of(&rv);
         out.insert(label, rv);
     }
     out
@@ -406,7 +406,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
     let (task_id, k) = (a.task_id, a.k);
     let mut ledger = Ledger::new("agg", task_id, k);
     for r in a.base {
-        ledger.rollout(&r.label, 0.0, false);
+        ledger.rollout_of(r);
     }
     let mut result = ModeResult::new("agg", task_id, k, ledger.clone());
     for r in a.base {
@@ -526,7 +526,7 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
     let (task_id, k) = (a.task_id, a.k);
     let mut ledger = Ledger::new("seq", task_id, k);
     for r in a.base {
-        ledger.rollout(&r.label, 0.0, false);
+        ledger.rollout_of(r);
     }
     let mut result = ModeResult::new("seq", task_id, k, ledger.clone());
     for r in a.base {
@@ -612,7 +612,7 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
         result.stages.push(comp.clone());
         result.trees.insert(ck.clone(), comp.tree.clone());
         let rv = roll(adapter, task_id, &ck, Some(&comp.tree), a.run_id_of, &a.work_dir);
-        ledger.rollout(&ck, 0.0, false);
+        ledger.rollout_of(&rv);
         result.rollouts.insert(ck.clone(), rv.clone());
         history = round_pool;
         history.push((ck.clone(), a.work_dir.join("harnesses").join(&ck), Some(rv)));

@@ -19,6 +19,8 @@ pub struct Summary {
     pub chose_final: usize,
     pub chose_candidate: usize,
     pub fell_back: usize,
+    /// (dead, all) rollouts across the mode's saved ledgers (upstream #143 1a).
+    pub dead_rollouts: (usize, usize),
     pub usd: f64,
     pub metrics: Vec<String>,
 }
@@ -44,7 +46,8 @@ impl Summary {
         );
         let fb = if self.fell_back > 0 { format!(" | fell back {}", self.fell_back) } else { String::new() };
         let ug = if self.n_ungraded > 0 { format!(" | ungraded {}", self.n_ungraded) } else { String::new() };
-        format!("  {}: n={:>3} | {figures}{pick}{fb}{ug}", self.name(), self.n)
+        let dead = if self.dead_rollouts.0 > 0 { format!(" | dead rollouts {}/{}", self.dead_rollouts.0, self.dead_rollouts.1) } else { String::new() };
+        format!("  {}: n={:>3} | {figures}{pick}{fb}{dead}{ug}", self.name(), self.n)
     }
 }
 
@@ -146,6 +149,13 @@ pub fn render(summaries: &[Summary], title: &str, bench: &str) -> String {
         lines.push(format!(
             "  WARNING  {}: {} stage(s) fell back to the inherited harness. Inspect the stage errors when interpreting these results.",
             s.name(), s.fell_back
+        ));
+    }
+    for s in summaries.iter().filter(|s| s.dead_rollouts.0 > 0) {
+        lines.push(String::new());
+        lines.push(format!(
+            "  WARNING  {}: {} of {} rollouts produced no run. They count toward R = 4k but are not evidence; see each mode's `ledger.dead` in summary.json for the errors.",
+            s.name(), s.dead_rollouts.0, s.dead_rollouts.1
         ));
     }
     for s in summaries.iter().filter(|s| s.metrics.len() > 1) {

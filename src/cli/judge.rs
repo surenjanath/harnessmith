@@ -13,7 +13,7 @@ use crate::core::schedule;
 use anyhow::{bail, Result};
 use clap::Args;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const PARALLEL: usize = 8;
@@ -94,12 +94,27 @@ fn summaries(ns_dir: &Path) -> Vec<(PathBuf, Value)> {
     out
 }
 
+/// Why a mode's pick on one task can't be trusted: its saved ledger fails the budget
+/// identity (an interrupted or oddly resumed run). None for a sound ledger or no pick.
+fn unverified(summary: &Value, mode: &str) -> Option<String> {
+    let sel = summary.get("selections").and_then(|x| x.get(mode))?;
+    if sel["chosen_label"].as_str().unwrap_or("").is_empty() {
+        return None;
+    }
+    let rec = summary.get("modes").or_else(|| summary.get("arms")).and_then(|x| x.get(mode)).cloned().unwrap_or(Value::Null);
+    crate::core::ledger::check_saved(&rec["ledger"])
+}
+
 /// Every requested mode's selection record from every finished task summary.
 pub fn collect_selections(ns_dir: &Path, modes: &[&str]) -> Vec<Value> {
     let mut out = vec![];
     for (_, s) in summaries(ns_dir) {
         for m in modes {
             if let Some(sel) = s.get("selections").and_then(|x| x.get(*m)).filter(|v| v.as_object().map(|o| !o.is_empty()).unwrap_or(false)) {
+                if let Some(why) = unverified(&s, m) {
+                    println!("  ! not judging {} {}: its saved budget ledger does not hold ({why}); re-run the task", s["task_id"].as_str().unwrap_or("?"), schedule::mode_name(m));
+                    continue;
+                }
                 let mut sel = sel.clone();
                 if sel.get("mode").is_none() {
                     if let Some(a) = sel.get("arm").cloned() {
@@ -195,21 +210,40 @@ pub fn judge_cmd(a: JudgeArgs) -> Result<i32> {
     Ok(if all_graded { 0 } else { 2 })
 }
 
-/// (fell_back, usd) keyed (mode token, k), from the summaries the sweep checkpointed.
-fn spend_and_fallbacks(ns_dir: &Path, modes: &[&str], k: usize) -> (BTreeMap<(String, usize), usize>, BTreeMap<(String, usize), f64>) {
-    let (mut fb, mut usd) = (BTreeMap::new(), BTreeMap::new());
+/// What the report reads from the summaries the sweep checkpointed, keyed (mode token, k).
+#[derive(Default)]
+struct Saved {
+    fell_back: BTreeMap<(String, usize), usize>,
+    usd: BTreeMap<(String, usize), f64>,
+    /// (dead rollouts, all rollouts) from the saved ledgers.
+    dead: BTreeMap<(String, usize), (usize, usize)>,
+    /// (task, mode) picks whose saved ledger fails the budget identity.
+    unverified: BTreeSet<(String, String)>,
+}
+
+fn read_saved(ns_dir: &Path, modes: &[&str], k: usize, into: &mut Saved) {
+    let (fb, usd) = (&mut into.fell_back, &mut into.usd);
     for (_, s) in summaries(ns_dir) {
         let recs = s.get("modes").or_else(|| s.get("arms")).cloned().unwrap_or(json!({}));
         for m in modes {
             let key = (m.to_string(), k);
             let rec = recs.get(*m).cloned().unwrap_or(json!({}));
+            if let Some(why) = unverified(&s, m) {
+                let task = s["task_id"].as_str().unwrap_or("?").to_string();
+                println!("  ! leaving out {task} {}: its saved budget ledger does not hold ({why})", schedule::mode_name(m));
+                into.unverified.insert((task, m.to_string()));
+            }
+            if let Some(r) = rec["ledger"]["R"].as_u64() {
+                let d = into.dead.entry(key.clone()).or_insert((0, 0));
+                d.0 += rec["ledger"]["dead"].as_array().map(|a| a.len()).unwrap_or(0);
+                d.1 += r as usize;
+            }
             *fb.entry(key.clone()).or_insert(0) += rec["fell_back"].as_array().map(|a| a.len()).unwrap_or(0);
             let spend: f64 = rec["stages"].as_array().map(|a| a.iter().map(|s| s["usd"].as_f64().unwrap_or(0.0) + s["replayed_usd"].as_f64().unwrap_or(0.0)).sum()).unwrap_or(0.0);
             let sel_usd = s["selections"][*m]["usd"].as_f64().unwrap_or(0.0);
             *usd.entry(key).or_insert(0.0) += spend + sel_usd;
         }
     }
-    (fb, usd)
 }
 
 pub fn report_cmd(a: ReportArgs) -> Result<i32> {
@@ -221,7 +255,7 @@ pub fn report_cmd(a: ReportArgs) -> Result<i32> {
         bail!("--k named no scale");
     }
     let adapter = common::make_adapter(&a.cell, None)?;
-    let (mut rows, mut fell_back, mut usd) = (vec![], BTreeMap::new(), BTreeMap::new());
+    let (mut rows, mut saved) = (vec![], Saved::default());
     for k in ks {
         let ns_dir = common::runs_root_for(adapter.as_ref()).join(common::summary_namespace(adapter.as_ref(), k, a.seed, "")?);
         let judged = ns_dir.join("judged.json");
@@ -231,10 +265,9 @@ pub fn report_cmd(a: ReportArgs) -> Result<i32> {
             continue;
         }
         rows.extend(got.into_iter().filter(|r| modes.contains(&r.mode.as_str())));
-        let (fb, sp) = spend_and_fallbacks(&ns_dir, &modes, k);
-        fell_back.extend(fb);
-        usd.extend(sp);
+        read_saved(&ns_dir, &modes, k, &mut saved);
     }
+    rows.retain(|r| !saved.unverified.contains(&(r.task_id.clone(), r.mode.clone())));
     if rows.is_empty() {
         bail!("nothing to report");
     }
@@ -245,7 +278,10 @@ pub fn report_cmd(a: ReportArgs) -> Result<i32> {
         a.seed.map(|s| format!(" seed={s}")).unwrap_or_default(),
         modes.iter().map(|m| schedule::mode_name(m)).collect::<Vec<_>>().join(",")
     );
-    let sums = R::summarise(&rows, &fell_back, &usd);
+    let mut sums = R::summarise(&rows, &saved.fell_back, &saved.usd);
+    for s in &mut sums {
+        s.dead_rollouts = saved.dead.get(&(s.mode.clone(), s.k)).copied().unwrap_or((0, 0));
+    }
     println!("{}", R::render(&sums, &title, &adapter.spec().name));
     let spend: f64 = sums.iter().map(|s| s.usd).sum();
     if spend > 0.0 {

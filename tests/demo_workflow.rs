@@ -35,13 +35,16 @@ fn demo_runs_both_modes_and_resumes() {
         for m in ["agg", "seq"] {
             let ledger = &s["modes"][m]["ledger"];
             assert_eq!((ledger["R"].as_u64(), ledger["P"].as_u64()), (Some(8), Some(6)));
+            assert_eq!(harness2::core::ledger::check_saved(ledger), None, "{ledger}");
+            assert_eq!((ledger["live_R"].as_u64(), ledger["dead"].as_array().map(|a| a.len())), (Some(8), Some(0)));
             let rd = s["selections"][m]["chosen_run_dir"].as_str().unwrap();
             let answer = std::fs::read_to_string(std::path::Path::new(rd).join("answer.txt")).unwrap();
             let want = if t == "ledger-1" { "Total: 85.15" } else { "Total: 20.25" };
             assert_eq!(answer.trim(), want);
         }
     }
-    assert!(lib.join("agg/accounting/harnesses/ledger-1/EXPERIENCE.md").is_file());
+    let exp = std::fs::read_to_string(lib.join("agg/accounting/harnesses/ledger-1/EXPERIENCE.md")).unwrap();
+    assert!(exp.contains("- **provenance**: measured"), "{exp}");
     assert!(runs.join("demo-oc-agg2/ledger-2/context/inv1/library/INDEX.md").is_file());
 
     let before = adapter.execution_count.load(Ordering::SeqCst);

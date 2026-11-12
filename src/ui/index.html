@@ -2151,6 +2151,15 @@ function openLive() {
 function closeLive() { if (liveES) { liveES.close(); liveES = null; } }
 const setCls = (id, cls, on) => { const e = document.getElementById(id); if (e) e.classList.toggle(cls, on); };
 const setTxt = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+// Shorten a run slot's goal title to the room the run label leaves, so the two never overlap.
+function fitSlotGoal(i) {
+  const l = document.getElementById(`ov-slot-t-${i}`), g = document.getElementById(`ov-slot-g-${i}`);
+  if (!l || !g || !g.getComputedTextLength) return;
+  const room = 548 - 20 - l.getComputedTextLength() - 18;
+  let t = g.textContent;
+  if (room < 30) { g.textContent = ""; return; }
+  while (t.length > 1 && g.getComputedTextLength() > room) { t = t.slice(0, -2); g.textContent = t.trimEnd() + "…"; }
+}
 const show_ = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? "" : "none"; };
 function liveUpdate(L) {
   if ($("#v-overview").classList.contains("hidden")) return;
@@ -2174,7 +2183,8 @@ function liveUpdate(L) {
     setCls(`ov-slot-${i}`, "live", !!r); setCls(`ov-slot-${i}`, "dash", !r);
     const serving = r ? [...new Set(r.active.map(a => a.model).filter(Boolean))] : [];
     setTxt(`ov-slot-t-${i}`, r ? `RUN-${r.id.slice(4, 18)}${serving.length ? "  ·  " + serving.join(", ").toUpperCase() : ""}` : "FREE SLOT");
-    setTxt(`ov-slot-g-${i}`, r ? (r.goal || "").slice(0, serving.length ? 30 : 48).toUpperCase() : "OWN WORKSPACE, HARNESS COPY, MODELS");
+    setTxt(`ov-slot-g-${i}`, r ? (r.goal || "").slice(0, 48).toUpperCase() : "OWN WORKSPACE, HARNESS COPY, MODELS");
+    fitSlotGoal(i);
     const nowSt = new Set(r ? r.active.map(a => STAGE_OF(a.node)) : []);
     const maxSt = r ? Math.max(-1, ...r.active.map(a => STAGE_OF(a.node))) : -1;
     for (let j = 0; j < 5; j++) {

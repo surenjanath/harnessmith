@@ -283,12 +283,13 @@ fn restore_libraries(task_id: &str, k: usize, adapter: &dyn BenchmarkAdapter, ru
     for mode in modes {
         let (Some(lib), Some(sel)) = (libs.get(*mode), selections.get(*mode)) else { continue };
         let label = sel.get("chosen_label").and_then(|v| v.as_str()).unwrap_or("");
-        if label.is_empty() || !sel.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) || !library::has_experience(sel.get("experience")) {
+        if label.is_empty() || !sel.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
             continue;
         }
         let n = Namespace::new(&adapter.spec().name, adapter.substrate_name(), mode, k, seed, tag);
         let t = tree::read_tree(&surface, &n.task_dir(runs_root, task_id).join("harnesses").join(label), None);
-        if t.is_empty() {
+        // A lesson needs its harness; a no-lesson record (NO_ENTRY.md) does not.
+        if t.is_empty() && library::has_experience(sel.get("experience")) {
             continue;
         }
         lib.add(
@@ -530,7 +531,8 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
     }
     if let Some(lib) = mode_lib {
         let ev = sel.experience_value();
-        if sel.ok && library::has_experience(Some(&ev)) {
+        // add() keeps a lesson, or records why there is none (NO_ENTRY.md).
+        if sel.ok && !sel.chosen_label.is_empty() {
             lib.add(task_id, &chosen_tree, &sel.why, &sel.chosen_label, &sel.chosen_run_id, Some(&ev))?;
         }
     }

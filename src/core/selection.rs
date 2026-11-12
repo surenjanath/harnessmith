@@ -1,6 +1,7 @@
 //! Choose an existing anonymized final output, then reflect on its refinement evidence.
 
 use super::context;
+use super::library;
 use super::prompts as P;
 use super::proposer::{CallOpts, Propose, ProposerError};
 use super::pyrandom::PyRandom;
@@ -380,11 +381,24 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
     crate::log::at("learn", "learn");
     crate::log::event("learn", "start", json!({}));
     crate::say!("  [experience.{}{}] reflecting on the adopted harness", sel.mode, sel.k);
+    // Every way out records why no lesson was kept, with the edit rows (upstream #143).
+    let none_kept = |outcome: &str, error: &str, edits: Option<&String>| -> Map<String, Value> {
+        crate::log::event("learn", "done", json!({"entry": false, "outcome": outcome}));
+        let mut m = Map::new();
+        m.insert("outcome".into(), json!(outcome));
+        if !error.is_empty() {
+            m.insert("error".into(), json!(util::take_chars(error, 600)));
+        }
+        if let Some(e) = edits {
+            m.insert("edits".into(), json!(e));
+        }
+        m
+    };
     let reply = match prop.call(&mission, Some(&exp_root), &format!("experience.{}{}", sel.mode, sel.k), CallOpts::default()) {
         Err(e) => {
             sel.usd += e.cost_usd;
             crate::log::event("learn", "failed", json!({"error": util::take_chars(&e.message, 600)}));
-            return Ok(Map::new());
+            return Ok(none_kept("session_failed", &e.message, None));
         }
         Ok(r) => r,
     };
@@ -393,9 +407,11 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
     if let Some(e) = &edits {
         util::write(&root.join("edits.md"), format!("{e}\n"))?;
     }
+    let bad = edits.as_deref().map(library::bad_verdicts).unwrap_or_default();
     let Some(m) = EXP.captures(&reply.text) else {
-        crate::log::event("learn", "done", json!({"entry": false}));
-        return Ok(Map::new());
+        let declined = reply.text.lines().any(|l| l.trim() == "NO_ENTRY");
+        let error = if bad.is_empty() { String::new() } else { format!("verdicts outside the four allowed: {}", bad.join(", ")) };
+        return Ok(none_kept(if declined { "declined" } else { "malformed" }, &error, edits.as_ref()));
     };
     let mut out = Map::new();
     for line in m[1].trim().lines() {
@@ -406,11 +422,23 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
             }
         }
     }
-    if !["cue", "lesson", "evidence"].iter().all(|k| out.get(*k).and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-        crate::log::event("learn", "done", json!({"entry": false}));
-        return Ok(Map::new());
+    let missing: Vec<&str> = ["cue", "lesson", "evidence", "confidence"].into_iter().filter(|k| !out.get(*k).and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)).collect();
+    if !missing.is_empty() || !bad.is_empty() {
+        let mut why = vec![];
+        if !missing.is_empty() {
+            why.push(format!("missing {}", missing.join(", ")));
+        }
+        if !bad.is_empty() {
+            why.push(format!("verdicts outside the four allowed: {}", bad.join(", ")));
+        }
+        return Ok(none_kept("malformed", &why.join("; "), edits.as_ref()));
     }
-    crate::log::event("learn", "done", json!({"entry": true, "cue": out.get("cue"), "lesson": out.get("lesson")}));
+    let prov = provenance(out["evidence"].as_str().unwrap_or(""), edits.as_deref().unwrap_or(""));
+    out.insert("provenance".into(), json!(prov));
+    if prov == "unverified" {
+        return Ok(none_kept("unverified", "", edits.as_ref()));
+    }
+    crate::log::event("learn", "done", json!({"entry": true, "cue": out.get("cue"), "lesson": out.get("lesson"), "provenance": prov}));
     if let Some(e) = edits {
         out.insert("edits".into(), json!(e));
     }
@@ -420,9 +448,54 @@ fn distil(task_id: &str, sel: &mut Selection, adapter: &dyn BenchmarkAdapter, pr
     Ok(out)
 }
 
+/// A run label of this task: base1, inv2, dom1, agg3, c1, ...
+static RUN_LABEL: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b(base|inv|dom|agg|c)\d+\b").unwrap());
+
+/// Where a lesson's evidence comes from (upstream #143, ask 3), read from what the
+/// reflection already writes, so the prompt stays as upstream has it:
+/// - `measured`: the evidence names a run of this task, or an edit row whose `candidates`
+///   names one.
+/// - `upstream`: it rests on an earlier library entry instead.
+/// - `unverified`: neither; such a lesson is not stored.
+pub fn provenance(evidence: &str, edits: &str) -> &'static str {
+    if RUN_LABEL.is_match(evidence) {
+        return "measured";
+    }
+    let mut component = String::new();
+    for line in edits.lines() {
+        let line = line.trim();
+        if let Some(c) = line.strip_prefix("component:") {
+            component = c.trim().trim_matches('`').to_string();
+        } else if let Some(c) = line.strip_prefix("candidates:") {
+            if !component.is_empty() && evidence.contains(component.as_str()) && RUN_LABEL.is_match(c) {
+                return "measured";
+            }
+        }
+    }
+    let low = evidence.to_lowercase();
+    if ["library", "harnesses/", "earlier task", "previous task", "prior task"].iter().any(|w| low.contains(w)) {
+        return "upstream";
+    }
+    "unverified"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn provenance_reads_the_citations() {
+        let rows = "component: scripts/summarize.py\ncandidates: inv1\nverdict: helped";
+        assert_eq!(provenance("the scripts/summarize.py row", rows), "measured");
+        assert_eq!(provenance("agg2 diverged at step 4", ""), "measured");
+        assert_eq!(provenance("the library entry for ledger-1 showed this", ""), "upstream");
+        assert_eq!(provenance("it seems right", rows), "unverified");
+        assert_eq!(provenance("the cinv1 thing", ""), "unverified");
+    }
+    #[test]
+    fn verdicts_are_checked() {
+        assert!(library::bad_verdicts("verdict: helped\nverdict: confounded -- two edits\nverdict: `no observed effect`").is_empty());
+        assert_eq!(library::bad_verdicts("verdict: probably helped\nverdict: helpedish"), vec!["probably helped", "helpedish"]);
+    }
     #[test]
     fn anon_ids() {
         assert_eq!(anon_id(0), "A");

@@ -4,6 +4,7 @@
 //!     <root>/<run-tag>/<mode>/<domain>/INDEX.md
 //!     <root>/<run-tag>/<mode>/<domain>/harnesses/<task>/harness/<rel>   the full adopted tree
 //!     <root>/<run-tag>/<mode>/<domain>/harnesses/<task>/EXPERIENCE.md   why picked + lesson
+//!     <root>/<run-tag>/<mode>/<domain>/harnesses/<task>/NO_ENTRY.md     reflected on, no lesson kept, and why
 //! ```
 //!
 //! Retrieval is by construction: a domain's directory only ever holds same-domain entries.
@@ -22,13 +23,46 @@ pub fn slug(task_id: &str) -> String {
     task_id.replace('/', "__")
 }
 
-/// The lesson fields a library entry needs.
+/// The four verdicts an edit row may carry.
+pub const VERDICTS: [&str; 4] = ["helped", "hurt", "no observed effect", "confounded"];
+
+/// Edit-row verdicts that are not one of `VERDICTS` (upstream #143). A verdict may be
+/// followed by a short reason after punctuation ("confounded -- two edits at once").
+pub fn bad_verdicts(edits: &str) -> Vec<String> {
+    edits
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("verdict:"))
+        .map(|v| v.trim().trim_matches(|c: char| c == '`' || c == '*').trim().to_string())
+        .filter(|v| {
+            let low = v.to_lowercase();
+            !VERDICTS.iter().any(|ok| low == *ok || low.strip_prefix(ok).map(|rest| rest.starts_with(|c: char| !c.is_alphanumeric())).unwrap_or(false))
+        })
+        .collect()
+}
+
+/// The lesson fields a library entry needs: cue, lesson and evidence; and, for records with a
+/// provenance (written since upstream #143), confidence too and a provenance that is not
+/// `unverified`. Older records keep the older rule so resuming them keeps their lessons.
 pub fn has_experience(experience: Option<&Value>) -> bool {
-    match experience.and_then(|e| e.as_object()) {
-        Some(o) => ["cue", "lesson", "evidence"]
-            .iter()
-            .all(|k| o.get(*k).and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)),
-        None => false,
+    let Some(o) = experience.and_then(|e| e.as_object()) else { return false };
+    let filled = |k: &str| o.get(k).and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false);
+    if !["cue", "lesson", "evidence"].iter().all(|k| filled(k)) {
+        return false;
+    }
+    match o.get("provenance").and_then(|v| v.as_str()) {
+        None => true,
+        Some(p) => p != "unverified" && filled("confidence"),
+    }
+}
+
+/// Why a reflection left no library entry, in words for NO_ENTRY.md and INDEX.md.
+pub fn outcome_text(outcome: &str) -> &'static str {
+    match outcome {
+        "declined" => "declined: the reflection found no transferable lesson (NO_ENTRY)",
+        "malformed" => "malformed: the reflection's lesson was incomplete or used a verdict outside helped / hurt / no observed effect / confounded",
+        "session_failed" => "session failed: the reflection session did not complete",
+        "unverified" => "unverified: the lesson's evidence cites no run of this task and no earlier library entry",
+        _ => "no lesson recorded",
     }
 }
 
@@ -82,7 +116,17 @@ impl Library {
         (self.exists() && has).then(|| self.dir())
     }
 
+    /// Tasks with a lesson (EXPERIENCE.md).
     pub fn entries(&self) -> Vec<String> {
+        self.all_dirs().into_iter().filter(|n| self.dir().join("harnesses").join(n).join("EXPERIENCE.md").is_file()).collect()
+    }
+
+    /// Tasks that were reflected on and left no lesson (NO_ENTRY.md).
+    pub fn declined(&self) -> Vec<String> {
+        self.all_dirs().into_iter().filter(|n| self.dir().join("harnesses").join(n).join("NO_ENTRY.md").is_file()).collect()
+    }
+
+    fn all_dirs(&self) -> Vec<String> {
         let d = self.dir().join("harnesses");
         let mut v: Vec<String> = std::fs::read_dir(&d)
             .map(|rd| {
@@ -124,17 +168,52 @@ impl Library {
     pub fn retain(&self, task_ids: &[String]) -> Result<()> {
         let keep: HashSet<String> = task_ids.iter().map(|t| slug(t)).collect();
         self.locked(|| {
-            let drop: Vec<String> = self.entries().into_iter().filter(|e| !keep.contains(e)).collect();
+            let drop: Vec<String> = self.all_dirs().into_iter().filter(|e| !keep.contains(e)).collect();
             self.forget_unlocked(&drop)
         })
     }
 
     /// Store one adopted harness plus why it was adopted, and rebuild INDEX.md from disk.
+    /// A reflection that left no lesson is stored as NO_ENTRY.md with its reason and edit
+    /// rows instead (upstream #143, ask 2), and the result is None.
     pub fn add(&self, task_id: &str, harness: &Tree, why: &str, label: &str, run_id: &str, experience: Option<&Value>) -> Result<Option<PathBuf>> {
         if !has_experience(experience) {
+            // Record why only when a reflection ran and said; an empty record stays a gap.
+            if let Some(exp) = experience.filter(|e| e.get("outcome").is_some()) {
+                self.locked(|| self.decline_unlocked(task_id, label, run_id, exp))?;
+            }
             return Ok(None);
         }
         self.locked(|| self.add_unlocked(task_id, harness, why, label, run_id, experience.unwrap()))
+    }
+
+    fn decline_unlocked(&self, task_id: &str, label: &str, run_id: &str, exp: &Value) -> Result<()> {
+        let get = |k: &str| exp.get(k).map(value_text).unwrap_or_default();
+        let outcome = get("outcome");
+        let mut lines = vec![
+            format!("# {task_id}"),
+            String::new(),
+            format!("- adopted: `{label}`{}", if run_id.is_empty() { String::new() } else { format!("  (run `{run_id}`)") }),
+            format!("- **outcome**: {outcome}"),
+            format!("- {}", outcome_text(&outcome)),
+        ];
+        if !get("error").trim().is_empty() {
+            lines.push(format!("- error: {}", util::take_chars(get("error").trim(), 400)));
+        }
+        lines.push(String::new());
+        if !get("edits").trim().is_empty() {
+            lines.extend(["## What each edit did".into(), get("edits").trim().to_string(), String::new()]);
+        }
+        let body = lines.join("\n");
+        let mut probe = BTreeMap::new();
+        probe.insert("NO_ENTRY.md".to_string(), body.clone());
+        context::assert_tree_has_no_grader_verdicts(&probe)?;
+        let d = self.entry_dir(task_id);
+        util::rmtree(&d);
+        std::fs::create_dir_all(&d)?;
+        util::write(&d.join("NO_ENTRY.md"), body)?;
+        self.rebuild_index_unlocked()?;
+        Ok(())
     }
 
     fn add_unlocked(&self, task_id: &str, harness: &Tree, why: &str, label: &str, run_id: &str, exp: &Value) -> Result<Option<PathBuf>> {
@@ -144,6 +223,7 @@ impl Library {
         context::assert_tree_has_no_grader_verdicts(&probe)?;
         let d = self.entry_dir(task_id);
         util::rmtree(&d.join("harness"));
+        let _ = std::fs::remove_file(d.join("NO_ENTRY.md"));
         std::fs::create_dir_all(d.join("harness"))?;
         tree::write_tree(&self.surface, harness, &d.join("harness"), false)?;
         let get = |k: &str| exp.get(k).map(value_text).unwrap_or_default();
@@ -162,7 +242,7 @@ impl Library {
         }
         if !get("lesson").is_empty() {
             lines.push("## Transferable lesson".into());
-            for f in ["cue", "lesson", "evidence", "confidence"] {
+            for f in ["cue", "lesson", "evidence", "confidence", "provenance"] {
                 if !get(f).is_empty() {
                     lines.push(format!("- **{f}**: {}", get(f).trim()));
                 }
@@ -191,7 +271,7 @@ impl Library {
         let pinned = |n: &String| self.dir().join("harnesses").join(n).join("PINNED").is_file();
         names.sort_by_key(|n| !pinned(n));
         if names.is_empty() {
-            rows.push("_(empty — this is the first task in this domain)_".into());
+            rows.push(if self.declined().is_empty() { "_(empty — this is the first task in this domain)_" } else { "_(no lessons yet)_" }.into());
         }
         for name in names {
             let ed = self.dir().join("harnesses").join(&name);
@@ -205,6 +285,19 @@ impl Library {
             rows.push(format!("- why:     `harnesses/{name}/EXPERIENCE.md`"));
             if !cue.is_empty() {
                 rows.push(format!("- cue:     {cue}"));
+            }
+            rows.push(String::new());
+        }
+        // Tried and left nothing transferable is not the same as never tried (upstream #143).
+        let declined = self.declined();
+        if !declined.is_empty() {
+            rows.push("## Tried, no lesson kept".into());
+            rows.push(String::new());
+            rows.push("These earlier tasks were reflected on and left no entry. Their edit rows are still in each NO_ENTRY.md.".into());
+            rows.push(String::new());
+            for name in declined {
+                let outcome = field(&self.dir().join("harnesses").join(&name).join("NO_ENTRY.md"), "outcome");
+                rows.push(format!("- `harnesses/{name}/NO_ENTRY.md` — {}", outcome_text(&outcome)));
             }
             rows.push(String::new());
         }
@@ -273,4 +366,38 @@ pub fn root_for(base: &Path, benchmark: &str, k: usize, variant: &str, tag: &str
         parts.push(variant.into());
     }
     base.join(benchmark).join(parts.join("-"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_reflection_without_a_lesson_leaves_a_record() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(d.path().to_path_buf(), "accounting", crate::substrate::codex::codex_surface());
+        let mut t = Tree::new();
+        t.insert("AGENTS.md".into(), "base".into());
+        let lesson = json!({"cue": "c", "lesson": "l", "evidence": "inv1 showed it", "confidence": "high", "provenance": "measured"});
+        assert!(lib.add("t1", &t, "why", "agg1", "r1", Some(&lesson)).unwrap().is_some());
+        let declined = json!({"outcome": "declined", "edits": "component: AGENTS.md\ncandidates: inv1\nverdict: confounded"});
+        assert!(lib.add("t2", &t, "why", "agg1", "r2", Some(&declined)).unwrap().is_none());
+        // A record with no outcome (no reflection ran) stays a gap.
+        assert!(lib.add("t3", &t, "", "agg1", "r3", Some(&json!({}))).unwrap().is_none());
+        assert_eq!(lib.entries(), vec!["t1"]);
+        assert_eq!(lib.declined(), vec!["t2"]);
+        let tomb = std::fs::read_to_string(lib.entry_dir("t2").join("NO_ENTRY.md")).unwrap();
+        assert!(tomb.contains("- **outcome**: declined") && tomb.contains("verdict: confounded"), "{tomb}");
+        let index = std::fs::read_to_string(lib.index()).unwrap();
+        assert!(index.contains("## Tried, no lesson kept") && index.contains("`harnesses/t2/NO_ENTRY.md` — declined"), "{index}");
+        assert!(!lib.entry_dir("t3").exists());
+        // A later lesson for the same task replaces its no-lesson record.
+        lib.add("t2", &t, "why", "agg1", "r2", Some(&lesson)).unwrap();
+        assert!(lib.declined().is_empty() && lib.entries().len() == 2);
+        // New-format records need confidence and a verified provenance; old ones keep the old rule.
+        assert!(!has_experience(Some(&json!({"cue": "c", "lesson": "l", "evidence": "e", "confidence": "high", "provenance": "unverified"}))));
+        assert!(!has_experience(Some(&json!({"cue": "c", "lesson": "l", "evidence": "e", "provenance": "measured"}))));
+        assert!(has_experience(Some(&json!({"cue": "c", "lesson": "l", "evidence": "e"}))));
+    }
 }
