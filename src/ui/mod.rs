@@ -288,7 +288,7 @@ async fn status() -> ApiResult {
         "connections_file": connections::path(),
         "projects_root": goal::projects_root(),
         "providers": connections::PROVIDERS,
-        "python": util::which("python3").is_some(),
+        "python": util::which(util::python()).is_some(),
         "auth": auth::password().is_some(),
         "sandbox": {"bwrap": crate::llm::sandbox::availability().0, "unshare": crate::llm::sandbox::availability().1},
         "policy": {
@@ -306,7 +306,7 @@ async fn list_connections() -> ApiResult {
     Ok(Json(json!({
         "connections": reg.connections.iter().map(|c| c.redacted()).collect::<Vec<_>>(),
         "roles": reg.roles,
-        "builtins": ["openai", "anthropic", "gemini", "ollama", "openrouter", "groq", "deepseek", "together", "mistral", "nvidia", "mock"],
+        "builtins": ["openai", "anthropic", "gemini", "ollama", "codex", "openrouter", "groq", "deepseek", "together", "mistral", "nvidia", "mock"],
     })))
 }
 
@@ -383,6 +383,7 @@ async fn move_key(AxPath(name): AxPath<String>) -> ApiResult {
 }
 
 fn restrict_perms(p: &Path) {
+    let _ = p; // used on unix only
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

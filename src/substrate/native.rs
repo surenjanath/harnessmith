@@ -79,11 +79,11 @@ pub fn environment_note() -> String {
     static NOTE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     NOTE.get_or_init(|| {
         let bins = ["python3", "node", "pandoc", "pdflatex", "xelatex", "wkhtmltopdf", "soffice", "chromium", "google-chrome"];
-        let have = |b: &str| std::process::Command::new("bash").arg("-c").arg(format!("command -v {b}")).output().map(|o| o.status.success()).unwrap_or(false);
+        let have = |b: &str| crate::util::bash_command(&format!("command -v {b}")).output().map(|o| o.status.success()).unwrap_or(false);
         let found: Vec<&str> = bins.iter().copied().filter(|b| have(b)).collect();
         let missing: Vec<&str> = bins.iter().copied().filter(|b| !found.contains(b)).collect();
         let mods = ["reportlab", "fpdf", "weasyprint", "markdown", "docx", "openpyxl", "pandas", "numpy", "matplotlib"];
-        let py = std::process::Command::new("python3")
+        let py = std::process::Command::new(crate::util::python())
             .arg("-c")
             .arg(format!("import importlib.util as u;print(' '.join(m for m in {mods:?} if u.find_spec(m)))"))
             .output()

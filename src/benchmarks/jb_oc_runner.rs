@@ -176,8 +176,15 @@ fn attempt(cfg: &Settings, ws: &Path, traj: &Path, log_file: &Path, task_name: &
     c.stdin(Stdio::null()).stdout(out).stderr(err);
     let st = c.status()?;
     let code = st.code().unwrap_or_else(|| {
-        use std::os::unix::process::ExitStatusExt;
-        -st.signal().unwrap_or(9)
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            -st.signal().unwrap_or(9)
+        }
+        #[cfg(not(unix))]
+        {
+            -9
+        }
     });
     let body = util::read_lossy(&raw).unwrap_or_default();
     let events: String = body.split_inclusive('\n').filter(|l| l.starts_with(EVENT_PREFIX)).collect();

@@ -19,7 +19,9 @@ cargo build --release
 Then open http://127.0.0.1:8765. **Overview** shows the whole system, **Models** connects a model, and **Run a goal** starts a run.
 
 Other ways to install:
-- **Prebuilt binaries** for Linux (x86_64, arm64) and macOS (Apple silicon, Intel) are on the [Releases](https://github.com/surenjanath/harnessmith/releases) page. On Windows, use WSL or Docker: the agent's tools need bash.
+- **Prebuilt binaries** for Windows (x86_64), macOS (Apple silicon, Intel) and Linux (x86_64, arm64) are built automatically by GitHub Actions. The [nightly release](https://github.com/surenjanath/harnessmith/releases/tag/nightly) is rebuilt from every commit on `main`; versioned builds are on the [Releases](https://github.com/surenjanath/harnessmith/releases) page. Unpack the archive and run `harness2 serve` (`harness2.exe serve` on Windows).
+- **Windows:** the agent's shell tools need bash and Python. Install [Git for Windows](https://git-scm.com/download/win) (its bash is found automatically, or set `HARNESS2_BASH`) and [Python 3](https://www.python.org/downloads/). WSL and Docker also work.
+- **macOS:** the binaries are not notarized. If macOS blocks the first start, run `xattr -d com.apple.quarantine harness2` in the unpacked folder.
 - **Docker:**
 
 ```bash
@@ -91,7 +93,7 @@ The demo runs both recursion modes with scripted editors and real Python executi
 
 Then open <http://127.0.0.1:8765>:
 
-- **Models**: add a connection (OpenAI-compatible, Anthropic, Gemini, Ollama), fetch its model list, test it, and choose models for the solver, improver and selector roles.
+- **Models**: add a connection (OpenAI-compatible, Anthropic, Gemini, Ollama, or the Codex CLI with your ChatGPT sign-in), fetch its model list, test it, and choose models for the solver, improver and selector roles.
 - **Run a goal**: type the task, attach input files, pick parallel or sequential mode and the budget k, then watch the live log.
 - **History**: the adopted output, why it was picked, the harness diff against base, every stage's notes, and the trajectory.
 - **Base harness**: edit the starting harness of a project. **Library**: the lessons learned so far.

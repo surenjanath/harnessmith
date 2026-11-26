@@ -50,6 +50,12 @@ It writes the full layout (rollouts, harness proposals, selection, ledger) under
 
 - **Local:** install [Ollama](https://ollama.com), then pull a model that fits your machine. **Models → Model advisor** tells you which one, and can download it.
 - **API:** **Models → Add a connection** (OpenAI-compatible, Anthropic, Gemini, OpenRouter…), then **Test**.
+- **Codex (ChatGPT sign-in, no API key):** install the [Codex CLI](https://github.com/openai/codex) and run `codex login` once. The built-in prefix `codex/` then works in any role, e.g. `codex/gpt-6.1-terra`; add `@low`, `@medium` or `@high` to set the reasoning effort (`codex/gpt-6.1-terra@high`). **Models → Quick fill → Codex** saves it as a connection. Each model call is one stateless `codex exec` in an empty read-only folder; the harness runs its own tools, so Codex's shell is never used. A call takes about 5 s plus thinking time, and usage counts against your ChatGPT plan's Codex limits. When a limit is hit, the call fails over to the next model in the role's chain.
+
+  ```bash
+  ./target/release/harness2 models test codex/gpt-6.1-terra@low
+  ./target/release/harness2 goal "…" --solver codex/gpt-6.1-terra@low --improver codex/gpt-6.1-terra --selector codex/gpt-6.1-terra@low
+  ```
 - **Mixed:** a local solver with an API improver usually gives the best result per dollar. The advisor offers it as a one-click setup.
 
 Then use **✨ Improve with AI** on your goal to turn a one-liner into a full brief with grading criteria, and **Start**.

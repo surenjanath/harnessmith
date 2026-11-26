@@ -190,7 +190,78 @@ pub fn run_with_timeout(mut cmd: Command, stdin: Option<&str>, timeout: Duration
 /// `which`: the first executable named `name` on PATH.
 pub fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(name)).find(|p| p.is_file())
+    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
+    std::env::split_paths(&path)
+        .flat_map(|d| exts.iter().map(move |e| d.join(format!("{name}{e}"))))
+        // Windows ships `python3.exe` stubs in WindowsApps that only open the Store.
+        .find(|p| p.is_file() && !(cfg!(windows) && p.to_string_lossy().contains("WindowsApps")))
+}
+
+/// The bash the agent's shell tools run under. `HARNESS2_BASH` wins; on Windows, Git for
+/// Windows' bash is preferred to whatever `bash` is on PATH (System32\bash.exe is WSL's, whose
+/// Linux paths do not match the workspace).
+pub fn bash() -> PathBuf {
+    if let Some(b) = std::env::var_os("HARNESS2_BASH").filter(|b| !b.is_empty()) {
+        return PathBuf::from(b);
+    }
+    if cfg!(windows) {
+        let mut cands: Vec<PathBuf> = vec![];
+        for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            if let Some(d) = std::env::var_os(var) {
+                let d = PathBuf::from(d);
+                cands.push(d.join("Git").join("bin").join("bash.exe"));
+                cands.push(d.join("Programs").join("Git").join("bin").join("bash.exe"));
+            }
+        }
+        if let Some(git) = which("git") {
+            // ...\Git\cmd\git.exe -> ...\Git\bin\bash.exe
+            if let Some(root) = git.parent().and_then(|p| p.parent()) {
+                cands.push(root.join("bin").join("bash.exe"));
+            }
+        }
+        if let Some(b) = cands.into_iter().find(|p| p.is_file()) {
+            return b;
+        }
+        if let Some(b) = which("bash").filter(|p| !p.to_string_lossy().to_lowercase().contains("system32")) {
+            return b;
+        }
+    }
+    PathBuf::from("bash")
+}
+
+/// The command that starts Python 3 here: `python3`, else `python`, else the `py` launcher.
+pub fn python() -> &'static str {
+    static P: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    P.get_or_init(|| ["python3", "python", "py"].into_iter().find(|p| which(p).is_some()).unwrap_or("python3"))
+}
+
+/// `bash -c cmd`. Where Python is not called `python3` (most Windows installs), a `python3`
+/// shim goes first on PATH, since models write `python3 script.py`.
+pub fn bash_command(cmd: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(bash());
+    if python() != "python3" {
+        let shims = std::env::temp_dir().join("harnessmith-shims");
+        let shim = shims.join("python3");
+        if !shim.is_file() {
+            let _ = std::fs::create_dir_all(&shims);
+            let _ = std::fs::write(&shim, format!("#!/bin/sh\nexec {} \"$@\"\n", python()));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+        // Inside Git Bash, `C:\x\y` is `/c/x/y`.
+        let s = shims.to_string_lossy().replace('\\', "/");
+        let posix = match s.split_once(":/") {
+            Some((drive, rest)) if drive.len() == 1 => format!("/{}/{rest}", drive.to_lowercase()),
+            _ => s,
+        };
+        c.arg("-c").arg(format!("export PATH=\"$HARNESS2_SHIMS:$PATH\"; {cmd}")).env("HARNESS2_SHIMS", &posix);
+        return c;
+    }
+    c.arg("-c").arg(cmd);
+    c
 }
 
 /// Python's `fnmatch.fnmatch` (POSIX: case-sensitive; `*` also matches `/`).

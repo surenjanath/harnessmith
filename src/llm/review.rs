@@ -27,7 +27,7 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
         }
     }
     let styled_wanted = ["sleek", "modern", "beautiful", "stylish", "styled", "polished", "responsive", "elegant", "nice looking", "professional", "landing page", "design"].iter().any(|w| g.contains(w));
-    let long_wanted = ["research", "report", "document", "essay", "article", "guide", "whitepaper", "analysis", "study", "overview", "brief"].iter().any(|w| g.contains(w));
+    let long_wanted = wants_long_prose(&g);
     let has_css_file = files.iter().any(|p| ext(p) == "css");
     let mut text_words = 0;
     for p in &files {
@@ -122,6 +122,21 @@ pub fn review(goal: &str, out_dir: &Path) -> Vec<String> {
     issues
 }
 
+/// Whether the goal asks for long-form prose, so a short document is a failure. File names do
+/// not count (`output/report.md` is not a request for an essay), and a computation whose
+/// deliverable is a table and a few figures is not one unless the goal asks for depth: seen live,
+/// a revenue table refused three times until the model padded it past 600 words.
+pub fn wants_long_prose(goal_lower: &str) -> bool {
+    let g = Regex::new(r"[\w./-]+\.(md|markdown|txt|html?|csv|json|pdf|docx|xlsx)\b").unwrap().replace_all(goal_lower, " ");
+    let kind = ["research", "report", "document", "essay", "article", "guide", "whitepaper", "analysis", "study", "overview", "brief"].iter().any(|w| g.contains(w));
+    if !kind {
+        return false;
+    }
+    let depth = Regex::new(r"in[- ]depth|detailed|comprehensive|thorough|essay|whitepaper|research|literature|\d+\s*(words|pages)|long[- ]form").unwrap().is_match(&g);
+    let data = Regex::new(r"\b(compute|calculate|table|csv|xlsx|totals?|sum|average|percent(age)?|how (many|much)|top \d+|rank)\b").unwrap().is_match(&g);
+    depth || !data
+}
+
 /// One concrete next action for a model that keeps calling finish: small models act on a single
 /// instruction far better than on a list of problems.
 pub fn next_step(issues: &[String], out_dir: &Path) -> String {
@@ -184,5 +199,18 @@ mod tests {
         assert!(review("i want a research document on dogs", d.path()).iter().any(|x| x.contains("written with HTML tags")));
         std::fs::write(d.path().join("answer.md"), "{\"status\":\"ERROR\",\"data\":{}}").unwrap();
         assert!(review("anything", d.path()).iter().any(|x| x.contains("error message")));
+    }
+}
+
+#[cfg(test)]
+mod prose_tests {
+    use super::wants_long_prose;
+
+    #[test]
+    fn a_data_table_is_not_an_essay() {
+        assert!(!wants_long_prose("using orders.csv: compute revenue per region. write output/report.md with a table of every region and the top 3 customers."));
+        assert!(wants_long_prose("write a report on the history of the printing press"));
+        assert!(wants_long_prose("compute the totals and write a detailed report explaining the drivers"));
+        assert!(!wants_long_prose("fix the bug and update notes in output/report.md"));
     }
 }

@@ -65,10 +65,14 @@ pub fn lookup(table: &BTreeMap<String, String>, value: &str) -> String {
 /// Run `argv` in its own process group; kill the group on a wall timeout. `Ok(None)` = timed out.
 /// `log`: send stdout and stderr to this file (otherwise they are inherited).
 pub fn run_detached(argv: &[String], env: &BTreeMap<String, String>, cwd: Option<&Path>, wall: u64, log: Option<&Path>) -> Result<Option<i32>> {
-    use std::os::unix::process::CommandExt;
     use wait_timeout::ChildExt;
     let mut c = std::process::Command::new(&argv[0]);
-    c.args(&argv[1..]).stdin(std::process::Stdio::null()).process_group(0);
+    c.args(&argv[1..]).stdin(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        c.process_group(0);
+    }
     crate::config::apply_env(&mut c, env);
     if let Some(d) = cwd {
         c.current_dir(d);

@@ -87,7 +87,7 @@ impl PyOut {
 
 pub fn available() -> bool {
     static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *OK.get_or_init(|| util::which("python3").is_some())
+    *OK.get_or_init(|| util::which(util::python()).is_some())
 }
 
 /// The first fenced code block of a reply (an unclosed fence runs to the end), or the whole
@@ -141,12 +141,12 @@ pub fn run(workspace: &Path, sandbox: Option<&Sandbox>, code: &str, timeout: Dur
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let name = format!("{DIR}/program_{}_{n}.py", std::process::id());
     util::write(&workspace.join(&name), clean(code))?;
-    let cmdline = format!("python3 {DIR}/runner.py {name}");
+    let cmdline = format!("{} {DIR}/runner.py {name}", util::python());
     let mut c = match sandbox {
         Some(sb) => sb.command(&cmdline),
         None => {
-            let mut c = std::process::Command::new("bash");
-            c.arg("-c").arg(&cmdline).current_dir(workspace);
+            let mut c = util::bash_command(&cmdline);
+            c.current_dir(workspace);
             super::sandbox::scrub_env(&mut c);
             c
         }
