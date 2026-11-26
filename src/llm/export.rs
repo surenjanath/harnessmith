@@ -17,7 +17,7 @@ pub fn chrome() -> Option<String> {
         }
     }
     for b in ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"] {
-        if let Ok(o) = std::process::Command::new("bash").arg("-c").arg(format!("command -v {b}")).output() {
+        if let Ok(o) = crate::util::bash_command(&format!("command -v {b}")).output() {
             if o.status.success() {
                 return Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
             }

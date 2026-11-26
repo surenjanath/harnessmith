@@ -64,8 +64,8 @@ fn shell(cfg: &AgentConfig, cmd: &str) -> std::process::Command {
     match &cfg.sandbox {
         Some(sb) => sb.command(cmd),
         None => {
-            let mut c = std::process::Command::new("bash");
-            c.arg("-c").arg(cmd).current_dir(&cfg.workspace);
+            let mut c = util::bash_command(cmd);
+            c.current_dir(&cfg.workspace);
             super::sandbox::scrub_env(&mut c);
             c
         }
@@ -727,6 +727,47 @@ fn looks_like_broken_call(text: &str) -> bool {
     t.contains("<tool_call>") || t.starts_with("<|python_tag|>") || ((t.starts_with('{') || t.starts_with("```json")) && t.contains("\"name\"") && (t.contains("\"arguments\"") || t.contains("\"parameters\"")))
 }
 
+/// Observation masking, well inside the window: old tool outputs are most of an agent's input
+/// tokens (each one is re-sent on every later turn), and studies of coding and tool-use agents
+/// find that cutting stale ones halves cost without lowering solve rates. Outputs older than the
+/// last `MASK_KEEP_RECENT` messages and over `MASK_MIN` chars are cut to a short head, but only
+/// once together they pass `MASK_TRIGGER`: masking in batches keeps the provider's prompt-cache
+/// prefix intact between batches. `HARNESS2_OBS_MASK=0` turns it off.
+const MASK_KEEP_RECENT: usize = 6;
+const MASK_MIN: usize = 4_000;
+const MASK_TRIGGER: usize = 24_000;
+const MASK_HEAD: usize = 1_500;
+pub const MASK_NOTE: &str = "older observation masked to save tokens; re-run the tool if you need it again";
+
+/// Returns the chars removed.
+pub fn mask_stale(messages: &mut [Msg]) -> usize {
+    if std::env::var("HARNESS2_OBS_MASK").map(|v| v == "0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) {
+        return 0;
+    }
+    let n = messages.len().saturating_sub(MASK_KEEP_RECENT);
+    let stale: usize = messages[..n]
+        .iter()
+        .filter_map(|m| if let Msg::Tools(rs) = m { Some(rs) } else { None })
+        .flatten()
+        .filter(|r| r.content.len() > MASK_MIN)
+        .map(|r| r.content.len() - MASK_HEAD)
+        .sum();
+    if stale < MASK_TRIGGER {
+        return 0;
+    }
+    let mut removed = 0;
+    for m in messages[..n].iter_mut() {
+        if let Msg::Tools(rs) = m {
+            for r in rs.iter_mut().filter(|r| r.content.len() > MASK_MIN) {
+                let before = r.content.len();
+                r.content = format!("{}\n…({MASK_NOTE}; {before} chars originally)", util::take_chars(&r.content, MASK_HEAD));
+                removed += before.saturating_sub(r.content.len());
+            }
+        }
+    }
+    removed
+}
+
 /// Keep the conversation inside `budget` chars: first shrink older observations, then, if one
 /// recent observation alone is too big for the window (a large file read on a small local
 /// model), cap that one too. The task message and the model's own turns are never cut.
@@ -966,6 +1007,10 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
         // Chars of conversation the window can hold (~3 chars/token), minus system and reply room.
         let budget = ((conn.window().saturating_sub(max_tokens) as usize) * 3).saturating_sub(cfg.system.len()).clamp(8_000, 600_000);
         out.steps += 1;
+        let masked = mask_stale(&mut messages);
+        if masked > 0 {
+            traj.ev(json!({"type": "mask", "chars": masked}));
+        }
         compact(&mut messages, budget);
         event("call", json!({"model": model_id, "step": out.steps, "depth": cfg.depth}));
         let resp = match client::chat(conn, model, &ChatReq { system: &cfg.system, messages: &messages, tools: &tools, max_tokens, temperature: cfg.temperature }, left.max(Duration::from_secs(30))) {
@@ -1277,6 +1322,29 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_observations_are_masked_in_one_batch() {
+        let obs = |id: &str, n: usize| Msg::Tools(vec![ToolResult { id: id.into(), name: "read_file".into(), content: "x".repeat(n), is_error: false }]);
+        let call = || Msg::Assistant { text: String::new(), calls: vec![] };
+        // Small stale outputs: under the trigger, nothing changes (prefix stays cacheable).
+        let mut m = vec![Msg::User("task".into()), call(), obs("a", 5_000), call(), obs("b", 5_000)];
+        m.extend((0..6).map(|_| call()));
+        assert_eq!(mask_stale(&mut m), 0);
+        // Enough stale bytes: every large stale output is cut at once; recent ones are kept.
+        let mut m = vec![Msg::User("task".into())];
+        for i in 0..8 {
+            m.push(call());
+            m.push(obs(&i.to_string(), 9_000));
+        }
+        let recent_len = 9_000;
+        assert!(mask_stale(&mut m) > 30_000);
+        let lens: Vec<usize> = m.iter().filter_map(|x| if let Msg::Tools(r) = x { Some(r[0].content.len()) } else { None }).collect();
+        assert!(lens[..5].iter().all(|l| *l < 2_000), "{lens:?}");
+        assert!(lens[5..].iter().all(|l| *l == recent_len), "{lens:?}");
+        // Already masked: a second pass is a no-op.
+        assert_eq!(mask_stale(&mut m), 0);
+    }
     #[test]
     fn path_sandbox() {
         let ws = Path::new("/tmp/ws");

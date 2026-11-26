@@ -115,8 +115,8 @@ impl Sandbox {
         let ws = self.workspace.display().to_string();
         match self.kind {
             Kind::Off => {
-                let mut c = Command::new("bash");
-                c.arg("-c").arg(cmd).current_dir(&self.workspace);
+                let mut c = crate::util::bash_command(cmd);
+                c.current_dir(&self.workspace);
                 c
             }
             Kind::Bwrap => {

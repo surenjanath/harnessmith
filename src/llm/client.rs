@@ -333,6 +333,7 @@ pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) ->
         "ollama" => ollama(conn, model, req, timeout),
         "anthropic" => anthropic(conn, model, req, timeout),
         "gemini" => gemini(conn, model, req, timeout),
+        "codex" => super::codex_cli::chat(conn, model, req, timeout),
         "mock" => Ok(mock(req)),
         p => bail!("unknown provider {p:?}"),
     };
@@ -915,6 +916,7 @@ pub fn list_models(conn: &Connection) -> Result<Vec<String>> {
                 .filter_map(|m| m["name"].as_str().map(|s| s.trim_start_matches("models/").to_string()))
                 .collect()
         }
+        "codex" => super::codex_cli::list_models()?,
         "mock" => vec!["mock-1".into()],
         p => bail!("unknown provider {p:?}"),
     };

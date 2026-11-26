@@ -361,7 +361,11 @@ fn solve(a: SolveArgs) -> Result<i32> {
     println!("\n===== {} in {:.0}s, {} steps, {} in / {} out tokens{} =====", rd.display(), t0.elapsed().as_secs_f64(), usage["steps"], usage["input_tokens"], usage["output_tokens"],
         usage["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(", ended: {e}")).unwrap_or_default());
     println!("{}", adapter.deliverable_text(&rd)?);
-    Ok(if adapter.delivered(&rd) { 0 } else { 2 })
+    let ok = adapter.delivered(&rd);
+    // A quick model check is not a goal: without this, History listed it as "not run" with no
+    // results. The attempt itself stays in executions/solve/.
+    let _ = std::fs::remove_dir_all(adapter.task_dir(&id));
+    Ok(if ok { 0 } else { 2 })
 }
 
 /// The options a project's sleep runs with.

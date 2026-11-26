@@ -235,6 +235,22 @@ fn recommend(hw: &Value, models: &[Value]) -> Value {
         }
         presets.push(json!({"id": "nvidia_all", "label": "All NVIDIA", "about": "fastest; hosted free tier is rate-limited, so local models stay as fallback", "solver": with_local(&fast), "improver": with_local(&strong), "selector": with_local(&strong)}));
     }
+    // Codex with a ChatGPT sign-in: no key, strong models. Offered when a `codex` connection is
+    // saved, or the CLI is installed and signed in.
+    let cx_saved = connections::load().connections.into_iter().find(|c| c.provider == "codex");
+    let cx_conn = cx_saved.clone().or_else(|| connections::resolve("codex/x").ok().map(|(c, _)| c));
+    if let Some(cx) = cx_conn.filter(|c| cx_saved.is_some() || crate::llm::codex_cli::status(c).is_ok()) {
+        let model = Some(cx.default_model.clone()).filter(|m| !m.is_empty()).or_else(|| crate::llm::codex_cli::list_models().ok().and_then(|l| l.into_iter().next()));
+        if let Some(m) = model {
+            let base = format!("{}/{m}", cx.name);
+            let local = id(&improver);
+            let with_local = |m: &str| match &local { Some(l) => format!("{m}, {l}"), None => m.to_string() };
+            if solver.is_some() {
+                presets.push(json!({"id": "codex_hybrid", "label": "Local solver + Codex improver", "about": "free local rollouts; your ChatGPT sign-in's model edits the harness (no API key)", "solver": chain(&solver, None), "improver": with_local(&format!("{base}@medium")), "selector": with_local(&format!("{base}@low"))}));
+            }
+            presets.push(json!({"id": "codex_all", "label": "All Codex", "about": "strong models through your ChatGPT sign-in, no API key; counts against your plan's Codex limits", "solver": with_local(&format!("{base}@low")), "improver": with_local(&format!("{base}@medium")), "selector": with_local(&format!("{base}@low"))}));
+        }
+    }
     if let Some(a) = &api_best {
         let fb = id(&solver).map(|s| format!(", {s}")).unwrap_or_default();
         presets.push(json!({"id": "all_api", "label": "All API", "about": "fastest and strongest; costs per token (set a spending cap)", "solver": format!("{a}{fb}"), "improver": format!("{a}{fb}"), "selector": format!("{a}{fb}")}));

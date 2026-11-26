@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 /// The wire protocol a connection speaks.
-pub const PROVIDERS: &[&str] = &["openai", "anthropic", "gemini", "ollama", "mock"];
+pub const PROVIDERS: &[&str] = &["openai", "anthropic", "gemini", "ollama", "codex", "mock"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Connection {
@@ -82,7 +82,7 @@ impl Connection {
     /// Why calls would be refused for lack of a key, if they would (hosted endpoints only).
     pub fn missing_key(&self) -> Option<String> {
         let base = self.base();
-        let local = base.is_empty() || base.contains("localhost") || base.contains("127.0.0.1") || base.contains("[::1]") || self.provider == "ollama" || self.provider == "mock";
+        let local = base.is_empty() || base.contains("localhost") || base.contains("127.0.0.1") || base.contains("[::1]") || self.provider == "ollama" || self.provider == "mock" || self.provider == "codex";
         if local || !self.key().is_empty() {
             return None;
         }
@@ -101,7 +101,7 @@ impl Connection {
 
     /// Effective concurrency limit.
     pub fn concurrency(&self) -> usize {
-        self.max_concurrency.filter(|n| *n > 0).unwrap_or(if self.provider == "ollama" { 1 } else { 64 })
+        self.max_concurrency.filter(|n| *n > 0).unwrap_or(match self.provider.as_str() { "ollama" => 1, "codex" => 4, _ => 64 })
     }
 
     /// Effective context window in tokens (a conservative default when unknown).
@@ -251,6 +251,8 @@ fn builtin(name: &str) -> Option<Connection> {
             mk("gemini", "", env)
         }
         "ollama" => mk("ollama", "", ""),
+        // The Codex CLI with its own sign-in (`codex login`): no key here.
+        "codex" => mk("codex", "", ""),
         "openrouter" => mk("openai", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
         "groq" => mk("openai", "https://api.groq.com/openai/v1", "GROQ_API_KEY"),
         "deepseek" => mk("openai", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"),
@@ -278,7 +280,7 @@ pub fn resolve(model_id: &str) -> Result<(Connection, String)> {
         .or_else(|| builtin(&prefix))
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no model connection named {prefix:?}; add one in the UI (Models tab) or in {}, or use a built-in prefix (openai, anthropic, gemini, ollama, openrouter, groq, deepseek, together, mistral, nvidia)",
+                "no model connection named {prefix:?}; add one in the UI (Models tab) or in {}, or use a built-in prefix (openai, anthropic, gemini, ollama, codex, openrouter, groq, deepseek, together, mistral, nvidia)",
                 path().display()
             )
         })?;

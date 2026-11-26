@@ -40,6 +40,29 @@ Found and fixed along the way:
 
 The compare tab also showed something about the method. On an earlier 3B run, the adopted harness (agg1) wrote "No regions.csv found", while the unmodified base1 had produced a table. Blind selection with a single final candidate can adopt a regression. See roadmap item 12.
 
+## Real-model trials through Codex (ChatGPT sign-in)
+
+The `codex` provider runs every role on a capable hosted model with no API key: each model call is one stateless `codex exec` (Codex 0.165, `gpt-6.1-terra`). The harness keeps its own tools; Codex only answers with JSON (`--output-schema`) holding the reply and the tool calls.
+
+**Token cost per call.** Codex's own coding-agent prompt, tool schemas and skills list were ~17.5k input tokens on every call. Replacing its instructions (`model_instructions_file`), switching off its tools and context blocks, and running in one fixed folder (a random folder per call broke the prompt-cache prefix) brought that to ~4.3k. On the same 4-step solver task: 63.7k → 13.9k uncached input tokens (−78%), same answer.
+
+**Hard task** (messy multi-file data: three date formats, three currencies with monthly rates, 18 duplicate orders, refunds and cancellations, a join to regions; ground truth computed independently). Full goal, k=1, Codex in every role, from the web UI:
+
+| | time | tokens | base1 | adopted output |
+|---|---|---|---|---|
+| before the fixes below | 6m28s | 532k | 11 steps, 1m25s | every figure right, padded to 785 words, flagged "needs review" |
+| after | 4m29s | 354k | 6 steps, 47s | every figure right, 178 words, clean |
+
+Found and fixed on the way:
+1. **An input read as a requested output.** "convert each order with the fx_rates.csv rate" made a CSV a required deliverable, so every attempt's finish was refused (×11) and the run ended "needs review". Attached inputs, and names after "using/with/from/in/of", no longer count.
+2. **Essays demanded for tables.** "report" in the file name `output/report.md` triggered the 600-word depth check, so a correct table was refused until it was padded. File names no longer count, and a computation (table, totals, top N) needs depth only when the goal asks for it.
+3. **A stalled `codex exec`** hung one call for 13 minutes, because the agent passes its whole remaining time as the call timeout. Each call is now capped (`HARNESS2_CODEX_CALL_TIMEOUT`, default 600 s), and a killed call is retried or fails over.
+4. **Trailing junk after a tool call's JSON arguments** (`{…}"}]}=} CX1;…`) lost the call. The first complete object is now used.
+5. **Observation masking.** Old tool outputs are re-sent on every turn. Once stale outputs (older than the last 6 messages, over 4k chars each) add up past 24k chars, they are cut to a 1.5k head together, in one batch so the cached prefix survives between batches (`HARNESS2_OBS_MASK=0` turns it off). Studies of coding and tool-use agents report this halves cost without lowering solve rates.
+6. The UI said "refused finish with nothing written" for any refused finish. It now names the review's reason.
+
+`HARNESS2_CODEX_DUMP=<dir>` keeps every prompt and event stream, to see what a call cost.
+
 ## Roadmap, by expected value
 
 1. **Hybrid presets.** One-click role presets ("local solver + API improver", "all local", "all API"). The cost and time estimate before Start is now built.
@@ -54,4 +77,5 @@ The compare tab also showed something about the method. On an earlier 3B run, th
 10. **Benchmark parity runs.** Run JobBench, LAB and WorkBuddy against the installed datasets and compare a few tasks' summaries with the Python implementation's.
 11. **UI authentication.** The server is for localhost; serving it more widely needs a login and per-user projects.
 12. **Guard against adopting a regression.** Keep base1 as a candidate in selection when the adapted output is empty or says the inputs are missing, or flag it in the UI.
-13. **Health-aware chains.** Order a chain by measured success rate and latency instead of fixed order, and share breaker state across server restarts.
+13. **A persistent Codex process.** Each call starts `codex exec` (~1–2 s of a ~4–5 s call). The Codex app-server keeps one process and takes client-side tools on `thread/start`, which would also give native tool calls instead of JSON in the prompt.
+14. **Health-aware chains.** Order a chain by measured success rate and latency instead of fixed order, and share breaker state across server restarts.

@@ -128,7 +128,7 @@ pub fn checks() -> Vec<Value> {
     ));
 
     // 2. Python (harness scripts and the demo run with it).
-    let py = util::which("python3");
+    let py = util::which(util::python());
     out.push(check(
         "python",
         "Python for harness scripts",
@@ -153,6 +153,8 @@ pub fn checks() -> Vec<Value> {
                     ("fail".into(), format!("no API key: {why}"), None)
                 } else if st == "open" {
                     ("warn".into(), format!("circuit breaker OPEN after {} failures (last: {}); calls are failing over, retry in {}s", h.consecutive_fail, h.last_error, health::reopens_in(&c.name).as_secs()), Some(format!("reset_breaker:{}", c.name)))
+                } else if let Some(e) = (c.provider == "codex").then(|| crate::llm::codex_cli::status(&c).err()).flatten() {
+                    ("fail".into(), util::take_chars(&format!("{e}"), 300), None)
                 } else {
                     match client::list_models(&c) {
                         Ok(list) if !list.is_empty() && !list.iter().any(|x| x == &m || x.starts_with(&format!("{m}:")) || m.starts_with(x.as_str())) => (
@@ -179,6 +181,7 @@ pub fn checks() -> Vec<Value> {
 
     // 4. Secrets file permissions.
     let cp = connections::path();
+    let _ = &cp; // used on unix only
     #[cfg(unix)]
     if cp.is_file() {
         use std::os::unix::fs::PermissionsExt;
@@ -254,6 +257,7 @@ pub fn checks() -> Vec<Value> {
     }
     // 10. The .env file holds secrets: it should be private.
     let env = cfg.root.join(".env");
+    let _ = &env; // used on unix only
     #[cfg(unix)]
     if env.is_file() {
         use std::os::unix::fs::PermissionsExt;

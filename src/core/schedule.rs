@@ -562,12 +562,21 @@ pub fn expected_exts(prompt: &str) -> Vec<&'static str> {
     let p = goal.to_lowercase();
     let writes = regex::Regex::new(r"\b(write|save|export|output|produce|create|generate|store|dump|put|deliver|convert|make|build)\b[^.;:!?\n]{0,48}$").unwrap();
     let fname = regex::Regex::new(r"[\w\-./]+\.(html?|csv|json|py|svg|js|css|xlsx|docx|pdf)\b").unwrap();
+    // An attached input named in the goal stays an input whatever verb is near it ("convert
+    // each order with the fx_rates.csv rate" once made a CSV the required output), and so does a
+    // name right after "using/with/from/in/of (the)".
+    let input_names: Vec<String> = inputs.split(',').map(|f| f.trim().rsplit('/').next().unwrap_or("").to_lowercase()).filter(|f| !f.is_empty()).collect();
+    let used = regex::Regex::new(r"\b(using|with|from|in|of|by|per)( the| each| every)?\s*$").unwrap();
     let mut blanked = String::with_capacity(p.len());
     let mut last = 0;
     for m in fname.find_iter(&p) {
         blanked.push_str(&p[last..m.start()]);
         let before = &p[..m.start()];
-        if m.as_str().starts_with("output/") || writes.is_match(before) {
+        let base = m.as_str().rsplit('/').next().unwrap_or("");
+        let is_output_path = m.as_str().starts_with("output/");
+        if !is_output_path && (input_names.iter().any(|n| n == base) || used.is_match(before)) {
+            blanked.push(' ');
+        } else if is_output_path || writes.is_match(before) {
             blanked.push_str(m.as_str());
         } else {
             blanked.push(' ');
@@ -952,6 +961,10 @@ mod guard_tests {
         assert!(super::expected_exts("In config.json, what is the timeout?\n\nInput files (in your workspace): config.json").is_empty());
         assert!(super::expected_exts("Using the csv data, what is the total?\n\nInput files (in your workspace): sales.csv").is_empty());
         assert_eq!(super::expected_exts("Read sales.csv and write the totals to totals.json"), vec!["json"]);
+        // Seen live: an input named after "convert" was taken for a requested output.
+        assert!(super::expected_exts("Using orders.csv and fx_rates.csv: convert each order with the fx_rates.csv rate for its month. Write output/report.md with a table.\n\nInput files (in your workspace): orders.csv, fx_rates.csv").is_empty());
+        assert!(super::expected_exts("convert each amount with the rates.csv rate and write a summary").is_empty());
+        assert_eq!(super::expected_exts("Convert data.json to a CSV file\n\nInput files (in your workspace): data.json"), vec!["csv"]);
         assert_eq!(super::expected_exts("Clean sales.csv and export the result as a csv\n\nInput files (in your workspace): sales.csv"), vec!["csv"]);
         assert_eq!(super::expected_exts("Summarise notes.txt as a JSON file"), vec!["json"]);
         assert_eq!(super::expected_exts("Save the chart to output/chart.svg"), vec!["svg"]);

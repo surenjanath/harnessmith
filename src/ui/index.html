@@ -480,12 +480,12 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
     </div>
     <div class="panel">
       <div class="live-head"><h2 id="cf-title">Add a connection</h2><div class="spacer"></div><button class="btn small hidden" id="cf-new">+ New connection</button></div>
-      <div class="actions quickfill"><span class="hint">Quick fill:</span><button class="btn small" data-qf="nvidia">NVIDIA</button><button class="btn small" data-qf="openrouter">OpenRouter</button><button class="btn small" data-qf="groq">Groq</button><button class="btn small" data-qf="ollama">Ollama (local)</button><button class="btn small spark" id="nv-probe" title="Try NVIDIA's chat models with your key and show which answer and which can call tools">Find free NVIDIA models</button></div>
+      <div class="actions quickfill"><span class="hint">Quick fill:</span><button class="btn small" data-qf="nvidia">NVIDIA</button><button class="btn small" data-qf="openrouter">OpenRouter</button><button class="btn small" data-qf="groq">Groq</button><button class="btn small" data-qf="ollama">Ollama (local)</button><button class="btn small" data-qf="codex" title="Use the models of your ChatGPT / Codex sign-in through the codex CLI (run `codex login` first)">Codex</button><button class="btn small spark" id="nv-probe" title="Try NVIDIA's chat models with your key and show which answer and which can call tools">Find free NVIDIA models</button></div>
       <div id="nv-probe-out"></div>
       <div class="row">
         <div><label>Name <span class="muted">(prefix of model ids)</span></label><input id="cf-name" placeholder="e.g. nvidia"></div>
         <div><label>Provider</label><select id="cf-provider">
-          <option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="ollama">Ollama (local)</option><option value="mock">Mock (offline test)</option></select></div>
+          <option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="ollama">Ollama (local)</option><option value="codex">Codex CLI (ChatGPT sign-in)</option><option value="mock">Mock (offline test)</option></select></div>
       </div>
       <label>Base URL <span class="muted" id="cf-base-hint"></span></label><input id="cf-base" placeholder="leave empty for the provider default">
       <div id="cf-keyrow">
@@ -1054,7 +1054,7 @@ function renderPipeline(target, S) {
     h += `<div class="slowhint">⏱ Slowest model call: <b>${fmtT(sl.ms)}</b> at <b>${esc(sl.node)}</b>${sl.model ? " on " + esc(sl.model) : ""}${sl.inTok > 0 ? `, reading ${fmtK(sl.inTok)} new tokens of prompt` : ""}. ${big ? "Long prompts dominate on local models (prompt processing is slow without enough GPU): give the improver a faster model, raise GPU offload, or lower the connection's context window." : "The model itself is slow here: try a smaller or better-quantised model, or check the Model advisor on the Models tab."}</div>`;
   }
   if (S.heals.length) {
-    const label = {failover: "model failover", recovered: "back on the preferred model", loop_block: "stopped a repeated call", read_streak: "nudged a read-only improver", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run", no_action: "pushed a text-only reply to act", finish_refused: "refused finish with nothing written", budget_cap: "spending cap reached", spend_cap: "daily cap reached on every model"};
+    const label = {failover: "model failover", recovered: "back on the preferred model", loop_block: "stopped a repeated call", read_streak: "nudged a read-only improver", wait_recovery: "waited for a model to recover", retry_call: "retried a model call", loop_break: "broke a repetition loop", error_streak: "interrupted an error streak", deadline_rescue: "deadline rescue", retry_rollout: "retried a failed rollout", retry_run: "retried the run", no_action: "pushed a text-only reply to act", finish_refused: "refused a finish that failed review", budget_cap: "spending cap reached", spend_cap: "daily cap reached on every model"};
     const counts = {}; S.heals.forEach(e => counts[e.status] = (counts[e.status] || 0) + 1);
     const last = S.heals[S.heals.length - 1];
     h += `<div class="feed"><b>Self-healing ×${S.heals.length}</b> — ${Object.entries(counts).map(([k, v]) => `${esc(label[k] || k)} ×${v}`).join(" · ")}<div class="hint">latest: ${esc(label[last.status] || last.status)}${last.node ? " at " + esc(last.node) : ""}${last.to ? " → " + esc(last.to) : ""}${last.call ? ": " + esc(last.call) : ""}${last.error ? " (" + esc(String(last.error).slice(0, 120)) + ")" : ""}</div></div>`;
@@ -1172,7 +1172,7 @@ function nodeDrawer(n, t0) {
       cls = "act";
       const what = {failover: `Failed over ${esc(e.from || "")} → <b>${esc(e.to || "")}</b>`, recovered: `Recovered: back on <b>${esc(e.to || "")}</b> (from ${esc(e.from || "")})`, wait_recovery: `Every model down — waited ${e.seconds}s for <b>${esc(e.model)}</b>`, retry_call: `Retried a failed model call (attempt ${e.attempt})`,
         loop_break: `Loop breaker: told the agent to change approach after <code>${esc(e.call)}</code> repeated`, loop_block: `Loop stop: blocked <code>${esc(e.call)}</code> after too many repeats`, read_streak: `Improver read ${e.calls} times without editing: asked it to decide`, finish_refused: `Finish refused: the deliverable still had problems`, error_streak: `Error streak of ${e.streak}: told the agent to re-read the errors`,
-        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: output/ was still empty`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`, escalate: `Attempts did not agree: asked the stronger model <b>${esc(e.to || "")}</b>`, ungrounded_figures: `Figures with no source in the inputs or tool results: sent back to compute them`, ran_code_block: `Ran the Python block the model wrote instead of a tool call`}[e.status] || esc(e.status);
+        deadline_rescue: `Deadline rescue: ${e.steps_left} steps left and nothing delivered — told the agent to deliver now`, retry_rollout: `Rollout failed; retried after ${e.wait_s}s`, no_action: `Text-only reply with nothing written: told the agent to act with real tool calls`, finish_refused: `finish refused: ${esc(((e.issues || [])[0]) || "output/ was still empty")}`, budget_cap: `Spending cap of $${e.cap_usd} reached: stopping`, escalate: `Attempts did not agree: asked the stronger model <b>${esc(e.to || "")}</b>`, ungrounded_figures: `Figures with no source in the inputs or tool results: sent back to compute them`, ran_code_block: `Ran the Python block the model wrote instead of a tool call`}[e.status] || esc(e.status);
       txt = `🩹 ${what}${e.error ? ` <span class="muted">(${esc(String(e.error).slice(0, 160))})</span>` : ""}`;
     } else if (e.kind === "accuracy") {
       cls = e.status === "vote" ? (e.confidence === "high" ? "ok" : e.confidence === "low" || e.confidence === "none" ? "bad" : "act") : "act";
@@ -1404,7 +1404,7 @@ async function loadModels() {
   $("#conn-rows").innerHTML = conns.connections.length ? conns.connections.map(c => `<tr>
     <td><b>${esc(c.name)}</b><div class="hint">${esc(c.default_model || "")}</div></td><td>${esc(c.provider)}</td>
     <td class="muted" style="word-break:break-all">${esc(c.base_url || "(default)")}</td>
-    <td>${c.has_key ? `<span class="chip ok" title="${c.key_source === "file" ? "stored in connections.json" : esc(c.api_key_env) + " in the environment / .env"}">✓ ${c.key_tail ? esc(c.key_tail) : "set"}</span>${c.key_source === "file" ? ' <span class="chip warn" title="move it to .env from Edit">in file</span>' : ""}` : (c.provider === "ollama" || c.provider === "mock" || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(c.base_url || "")) ? '<span class="chip">not needed</span>' : `<span class="chip bad" title="${esc(c.api_key_env || "no key")}">missing</span>`}</td>
+    <td>${c.has_key ? `<span class="chip ok" title="${c.key_source === "file" ? "stored in connections.json" : esc(c.api_key_env) + " in the environment / .env"}">✓ ${c.key_tail ? esc(c.key_tail) : "set"}</span>${c.key_source === "file" ? ' <span class="chip warn" title="move it to .env from Edit">in file</span>' : ""}` : (c.provider === "ollama" || c.provider === "mock" || c.provider === "codex" || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(c.base_url || "")) ? '<span class="chip">not needed</span>' : `<span class="chip bad" title="${esc(c.api_key_env || "no key")}">missing</span>`}</td>
     <td style="white-space:nowrap"><button class="btn small" onclick="editConn('${esc(c.name)}')">Edit</button> <button class="btn small" onclick="delConn('${esc(c.name)}')">×</button></td></tr>`).join("")
     : `<tr><td colspan="5" class="muted">No saved connections yet. Built-in prefixes still work if their API key is in the environment.</td></tr>`;
   await refreshProject();
@@ -1444,17 +1444,18 @@ window.addFound = async (i) => {
     loadModels();
   } catch (e) { msg("#disc-msg", e.message); }
 };
-const BASES = {openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com", ollama: "http://localhost:11434", mock: ""};
+const BASES = {openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com", gemini: "https://generativelanguage.googleapis.com", ollama: "http://localhost:11434", codex: "", mock: ""};
 // Hosted OpenAI-compatible services: fill the form; the key stays in an environment variable.
 const QUICKFILL = {
   nvidia: {name: "nvidia", base: "https://integrate.api.nvidia.com/v1", env: "NVIDIA_API_KEY", model: "mistralai/mistral-large-4-1t-a52b", conc: 2},
   openrouter: {name: "openrouter", base: "https://openrouter.ai/api/v1", env: "OPENROUTER_API_KEY", model: "", conc: ""},
   groq: {name: "groq", base: "https://api.groq.com/openai/v1", env: "GROQ_API_KEY", model: "", conc: ""},
   ollama: {name: "ollama", provider: "ollama", base: "http://127.0.0.1:11434", env: "", model: "", conc: 1},
+  codex: {name: "codex", provider: "codex", base: "", env: "", model: "gpt-6.1-terra", conc: 4},
 };
 // Key state of the connection in the form: its variable name, whether a key is stored in connections.json.
 let cfKey = {env: "", literal: "", source: "none", tail: ""};
-const isLocalForm = () => ["ollama", "mock"].includes($("#cf-provider").value) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test($("#cf-base").value);
+const isLocalForm = () => ["ollama", "mock", "codex"].includes($("#cf-provider").value) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test($("#cf-base").value);
 const defaultEnvFor = () => {
   if (cfKey.env) return cfKey.env;
   const b = $("#cf-base").value, map = [["nvidia.com", "NVIDIA_API_KEY"], ["openrouter.ai", "OPENROUTER_API_KEY"], ["groq.com", "GROQ_API_KEY"], ["deepseek.com", "DEEPSEEK_API_KEY"], ["together.xyz", "TOGETHER_API_KEY"], ["mistral.ai", "MISTRAL_API_KEY"], ["anthropic.com", "ANTHROPIC_API_KEY"], ["api.openai.com", "OPENAI_API_KEY"]];
@@ -1493,7 +1494,7 @@ document.querySelectorAll("[data-qf]").forEach(b => b.onclick = () => {
   $("#cf-name").value = q.name; $("#cf-provider").value = q.provider || "openai"; $("#cf-base").value = q.base; $("#cf-model").value = q.model; $("#cf-conc").value = q.conc;
   cfKey = {env: q.env, literal: "", source: q.env ? "none" : "none", tail: ""};
   $("#cf-provider").onchange();
-  msg("#cf-msg", q.env ? `Filled for ${b.textContent}. Paste your key in “API key”, then Save & test.` : `Filled for ${b.textContent}. Save & test.`, true);
+  msg("#cf-msg", q.env ? `Filled for ${b.textContent}. Paste your key in “API key”, then Save & test.` : q.provider === "codex" ? "Filled for Codex: uses your ChatGPT sign-in (run codex login once in a terminal). Add @low, @medium or @high to a model id for reasoning effort. Save & test." : `Filled for ${b.textContent}. Save & test.`, true);
   if (q.env) $("#cf-keyin").focus();
 });
 // NVIDIA's hosted catalog runs on a free, rate-limited developer tier; which models answer for a
@@ -1516,7 +1517,7 @@ window.useModel = (field, id) => {
   el.scrollIntoView({block: "center"}); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1200);
   msg("#r-msg", "Role updated (local model kept as fallback). Click “Save roles” to keep it.", true);
 };
-$("#cf-provider").onchange = () => { $("#cf-base-hint").textContent = BASES[$("#cf-provider").value] ? "(default " + BASES[$("#cf-provider").value] + ")" : ""; renderKeyStat(); };
+$("#cf-provider").onchange = () => { const pv = $("#cf-provider").value; $("#cf-base-hint").textContent = pv === "codex" ? "(optional: path to the codex binary)" : BASES[pv] ? "(default " + BASES[pv] + ")" : ""; renderKeyStat(); };
 function connForm() {
   const num = (s) => s.value === "" ? null : +s.value;
   return {name: $("#cf-name").value.trim(), provider: $("#cf-provider").value, base_url: $("#cf-base").value.trim(), api_key: cfKey.literal ? "••••••" : "",
