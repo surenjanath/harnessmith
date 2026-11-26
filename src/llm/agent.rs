@@ -901,6 +901,64 @@ fn ungrounded(cfg: &AgentConfig, task: &str, evidence: &mut super::ground::Evide
     ))
 }
 
+const AUTO_NOTES_SYSTEM: &str = "You just finished a task that worked on some input files. From the record of your work below, write the durable facts a LATER task on similar files would need to know up front: data formats and conventions you had to discover (number and date formats, separators, duplicates, units, what columns mean, how records relate) and pitfalls you hit and fixed. Not this task's answer, figures or conclusions. One fact per line, each starting with '- ', at most 3 lines, each under 200 characters. If nothing durable was discovered, reply with the single word NONE.";
+
+/// After a successful session in which the solver saved nothing itself, ask its model once for
+/// the reusable facts it discovered about the data, and keep them as candidate notes (they
+/// become active only if this attempt is adopted). Strong models rarely call `remember` on their
+/// own: in four real runs with a hosted model, one note was saved in total. Returns
+/// (input tokens, output tokens, notes saved). `HARNESS2_AUTO_NOTES=0` turns it off.
+fn auto_notes(cfg: &AgentConfig, task: &str, messages: &[Msg]) -> Option<(u64, u64, usize)> {
+    if std::env::var("HARNESS2_AUTO_NOTES").map(|v| v == "0" || v.eq_ignore_ascii_case("off")).unwrap_or(false) {
+        return None;
+    }
+    let (store, src) = cfg.memory.as_ref()?;
+    // A session that saved its own notes already did this.
+    if messages.iter().any(|m| matches!(m, Msg::Assistant { calls, .. } if calls.iter().any(|c| c.name == "remember"))) {
+        return None;
+    }
+    // The record: what was called and what came back, briefly; the newest part if it is long.
+    let mut lines = vec![format!("TASK: {}", util::take_chars(task, 1200))];
+    for m in messages {
+        match m {
+            Msg::Assistant { calls, .. } => {
+                for c in calls {
+                    lines.push(format!("CALL {}({})", c.name, util::take_chars(&c.args.to_string(), 400)));
+                }
+            }
+            Msg::Tools(rs) => {
+                for r in rs {
+                    lines.push(format!("{} {}", if r.is_error { "ERROR" } else { "RESULT" }, util::take_chars(&r.content.replace('\n', " | "), 500)));
+                }
+            }
+            Msg::User(_) => {}
+        }
+    }
+    let mut record = lines.join("\n");
+    if record.len() > 16_000 {
+        let cut = record.len() - 14_000;
+        let cut = (cut..record.len()).find(|i| record.is_char_boundary(*i)).unwrap_or(cut);
+        record = format!("{}\n…\n{}", lines[0], &record[cut..]);
+    }
+    let chain = resolve_chain(&cfg.model_id).ok()?;
+    let (conn, model, _) = chain.first()?;
+    let msgs = [Msg::User(record)];
+    let r = client::chat(conn, model, &ChatReq { system: AUTO_NOTES_SYSTEM, messages: &msgs, tools: &[], max_tokens: 400, temperature: Some(0.2) }, Duration::from_secs(180)).ok()?;
+    let mut saved = 0;
+    if !r.text.trim().eq_ignore_ascii_case("none") {
+        for l in r.text.lines().filter_map(|l| l.trim().strip_prefix("- ")).map(str::trim).filter(|l| l.len() >= 20).take(3) {
+            let mut s = src.clone();
+            s.node = crate::log::node();
+            s.mode = crate::log::ctx().mode;
+            if let Ok((n, dup)) = store.remember(&util::take_chars(l, 240), &["auto".to_string()], s, "candidate") {
+                crate::log::event("memory", "remember", json!({"id": n.id, "text": util::take_chars(&n.text, 160), "dup": dup, "auto": true}));
+                saved += 1;
+            }
+        }
+    }
+    Some((r.input_tokens + r.cached_tokens, r.output_tokens, saved))
+}
+
 /// Run the loop until the model finishes, the step budget runs out, or the wall clock does.
 /// Self-healing: model failover along the chain, waiting out a full outage, loop breaking,
 /// error-streak and deadline rescue.
@@ -1311,6 +1369,13 @@ pub fn run(cfg: &AgentConfig, task: &str) -> Result<AgentOutcome> {
                     out.review_open.push(format!("figures that match nothing in the inputs or in any tool output: {}", bad.iter().map(|(f, n)| format!("{n} ({f})")).collect::<Vec<_>>().join(", ")));
                 }
             }
+        }
+    }
+    if cfg.depth == 0 && out.finished && out.review_open.is_empty() && out.steps >= 3 {
+        if let Some((n_in, n_out, saved)) = auto_notes(cfg, task, &messages) {
+            out.input_tokens += n_in;
+            out.output_tokens += n_out;
+            traj.ev(json!({"type": "auto_notes", "saved": saved}));
         }
     }
     traj.ev(json!({"type": "finish", "text": out.final_text, "error": out.error, "steps": out.steps, "cost_usd": out.cost_usd, "review_open": out.review_open,

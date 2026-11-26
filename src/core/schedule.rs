@@ -500,13 +500,46 @@ fn run_one_mode(mode: &str, task_id: &str, k: usize, base: &[RunView], adapter: 
     }
     let mut candidates = selection::selection_pool(mode, k, &r.rollouts, base);
     let guarded = adapter.guard_selection() && guard_pool(&mut candidates, base, adapter, task_id);
+    // Candidates that are the same attempt (a reused base rollout) are one candidate: comparing
+    // an output with itself costs a selector session and decides nothing.
+    if adapter.reuse_unchanged() {
+        let mut seen: Vec<PathBuf> = vec![];
+        let labels: Vec<String> = candidates.keys().cloned().collect();
+        // Keep the mode's own finals over the added base entry.
+        let (mut finals, bases): (Vec<String>, Vec<String>) = labels.into_iter().partition(|l| !l.starts_with("base"));
+        finals.extend(bases);
+        // Same run, or a different run that delivered the very same text: one candidate.
+        let mut seen_text: Vec<String> = vec![];
+        for l in finals {
+            let d = candidates[&l].run_dir.clone();
+            let text = adapter.deliverable_text(&d).unwrap_or_default();
+            let digest = if text.trim().is_empty() { String::new() } else { util::sha256_hex(text.trim().as_bytes()) };
+            if seen.contains(&d) || (!digest.is_empty() && seen_text.contains(&digest)) {
+                candidates.remove(&l);
+            } else {
+                seen.push(d);
+                seen_text.push(digest);
+            }
+        }
+    }
     let mut sel: Selection = if pool_policy == "finals" && k == 1 && !(guarded && candidates.len() > 1) {
         selection::trivial_selection(task_id, k, mode, &candidates, adapter, &work_dir)?
     } else {
         selection::run_selection(task_id, k, mode, &candidates, adapter, selector, &work_dir, "finals")?
     };
     res.selections.insert(mode.into(), sel.to_json());
-    if mode_lib.is_some() && sel.ok {
+    let nothing_edited = adapter.reuse_unchanged() && !r.stages.is_empty() && r.stages.iter().all(|s| s.kept_base || s.fell_back);
+    if mode_lib.is_some() && sel.ok && nothing_edited {
+        // No stage changed the harness: there is no contrast for a reflection to learn from.
+        crate::log::at("learn", "learn");
+        crate::log::event("learn", "start", json!({}));
+        let mut exp = serde_json::Map::new();
+        exp.insert("outcome".into(), json!("no_edits"));
+        sel.experience = exp;
+        crate::log::event("learn", "done", json!({"entry": false, "outcome": "no_edits"}));
+        say!("  [learn] every stage kept the base harness: no contrast to learn from, reflection skipped");
+        res.selections.insert(mode.into(), sel.to_json());
+    } else if mode_lib.is_some() && sel.ok {
         let decisions = r.decisions();
         let out = selection::reflect_adoption(task_id, &mut sel, &r.rollouts, adapter, selector, &work_dir, Some(&decisions));
         res.selections.insert(mode.into(), sel.to_json());

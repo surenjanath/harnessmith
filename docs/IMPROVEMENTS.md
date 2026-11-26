@@ -63,6 +63,33 @@ Found and fixed on the way:
 
 `HARNESS2_CODEX_DUMP=<dir>` keeps every prompt and event stream, to see what a call cost.
 
+## Learning test, economy and local models
+
+**Learning with a strong solver.** Three related hard data goals in one project, then the third again in a fresh project as a control, all with Codex in every role. The data had traps the goals never mention (European amounts like `€1.234,50`, day-first dates, stale duplicate rows, refunds converted at the original order's month). Every attempt got every figure right (64/64), all 12 improver stages kept the base harness, and the library got only "no lesson" records: with nothing failing, there is nothing for harness edits to fix. Goal 3 after goals 1–2 took 4m58s, the control 5m16s.
+
+What changed because of it:
+1. **Unchanged harnesses are not run again** (goal mode). A stage whose harness is byte-identical to the base reuses the base attempt; it still counts in the ledger. Candidates that are the same run, or delivered the same text, are one candidate, so no selector session compares an output with itself.
+2. **No reflection without edits.** When every stage kept the base, the Learn step records "no edits" instead of spending a session to find nothing.
+3. **Automatic data notes.** Strong models rarely call `remember` (one note in four runs). After a successful session that saved none, the solver's model is asked once for up to three durable facts about the data, kept as candidate notes that become active if the attempt is adopted. First live result: "EUR uses periods for thousands and commas for decimals; USD and GBP use the reverse", among others. `HARNESS2_AUTO_NOTES=0` turns it off.
+4. **Terminal runs show in the UI.** `harness2 goal` marks its project while it runs; History shows "running (terminal)" and the header shows a chip.
+
+Benchmark mode keeps the paper's accounting: reuse and the skipped reflection are off there.
+
+**Local models on an M1 Max (64 GB), same hard task as a solver attempt.**
+
+| model | generation | result |
+|---|---|---|
+| gpt-oss:20b (MoE) | 61 tok/s | 2m46s, wrong: read `€1.234,50` as 123450 (total 3.6× too high) |
+| gemma4:26b-mlx (MoE) | 49 tok/s, ~12 tok/s prompt | stopped after 18 min and 3 tool calls |
+| qwen3.6:35b-a3b-mxfp8 (MoE) | 51 tok/s, ~490 tok/s prompt | rerun pending after the fix below |
+| qwen3.8:27b-mlx (dense) | 17.6 tok/s | too slow for agent loops |
+
+**Thinking models returned empty replies on Ollama.** Qwen3.x and Gemma 4 think by default there; a long hidden reasoning used the whole reply budget (0 characters of answer after 1,019 of thinking), so the accuracy boost's first strategy "gave nothing" on every attempt. The Ollama client now sends `think: false` unless a connection sets `thinking` ("on" or a level), and retries without the flag for models that refuse it.
+
+**Ollama serializes parallel agents.** On gpt-oss:20b, 4 parallel requests got 42.1 tok/s in total against 42.0 for one: the harness's parallel stages run one after another on a local model. A separate project, kiln, is a local model server built for agent workloads (parallel slots, per-agent prompt cache, speculative decoding) behind Ollama- and OpenAI-compatible APIs.
+
+Accuracy cross-checks for strong models stay opt-in (Accuracy boost "On"): Codex was right on 16 of 16 attempts, so voting would double the cost for no measured gain.
+
 ## Roadmap, by expected value
 
 1. **Hybrid presets.** One-click role presets ("local solver + API improver", "all local", "all API"). The cost and time estimate before Start is now built.
