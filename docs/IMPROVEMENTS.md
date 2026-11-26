@@ -104,5 +104,5 @@ Accuracy cross-checks for strong models stay opt-in (Accuracy boost "On"): Codex
 10. **Benchmark parity runs.** Run JobBench, LAB and WorkBuddy against the installed datasets and compare a few tasks' summaries with the Python implementation's.
 11. **UI authentication.** The server is for localhost; serving it more widely needs a login and per-user projects.
 12. **Guard against adopting a regression.** Keep base1 as a candidate in selection when the adapted output is empty or says the inputs are missing, or flag it in the UI.
-13. **A persistent Codex process.** Each call starts `codex exec` (~1–2 s of a ~4–5 s call). The Codex app-server keeps one process and takes client-side tools on `thread/start`, which would also give native tool calls instead of JSON in the prompt.
+13. **Native tool calls through Codex's app-server.** Codex calls now go through one long-lived `codex app-server` (done: 13 s vs 27 s on the same solver task, same answer; `HARNESS2_CODEX_SERVER=0` uses `codex exec`). Its client-side dynamic tools could replace the JSON-in-prompt tool calls, so a conversation stays in one thread instead of being re-sent each turn.
 14. **Health-aware chains.** Order a chain by measured success rate and latency instead of fixed order, and share breaker state across server restarts.
