@@ -470,6 +470,55 @@ pub fn files_block(workspace: &Path, files: &[String]) -> String {
 
 /// Harness guidance worth showing the engine: lessons and rules, minus the lines that are about
 /// the agent loop's mechanics (deliverable folders, finishing).
+/// The harness skills that match a task, inlined for the boost paths. Those paths write code
+/// from one prompt and have no `skill` tool, so a skill the improver wrote never reached a small
+/// solver: seen live, a reconciliation skill written by the improver for exactly this task was
+/// never loaded ("the trajectory shows no skill invocation"). A skill matches when its name or
+/// description shares at least two words of five letters or more with the task (or the harness
+/// has a single skill). At most `budget` characters, best matches first.
+pub fn skills_for_task(harness: &Path, task: &str, budget: usize) -> String {
+    let words = |s: &str| -> std::collections::BTreeSet<String> {
+        s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 5).map(|w| w.to_string()).collect()
+    };
+    let want = words(task);
+    let mut found: Vec<(usize, String, String)> = vec![];
+    for e in std::fs::read_dir(harness.join("skills")).into_iter().flatten().flatten() {
+        let Ok(body) = util::read_lossy(&e.path().join("SKILL.md")) else { continue };
+        let name = e.file_name().to_string_lossy().to_string();
+        let desc = body.lines().find_map(|l| l.trim().strip_prefix("description:")).unwrap_or("").trim().to_string();
+        let score = words(&format!("{} {desc}", name.replace('-', " "))).intersection(&want).count();
+        found.push((score, name, body));
+    }
+    let single = found.len() == 1;
+    found.retain(|(s, _, _)| *s >= 2 || single);
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out = String::new();
+    for (_, name, body) in found {
+        // Drop the frontmatter; keep the instructions.
+        let text = match body.trim_start().strip_prefix("---") {
+            Some(rest) => rest.split_once("\n---").map(|(_, b)| b.trim().to_string()).unwrap_or(body.clone()),
+            None => body.trim().to_string(),
+        };
+        let left = budget.saturating_sub(out.len());
+        if left < 400 {
+            break;
+        }
+        out.push_str(&format!("\n\n## Skill: {name}\n{}", util::take_chars(&text, left - 40)));
+    }
+    out.trim().to_string()
+}
+
+/// Notes and matching skills for the boost paths, as one block.
+pub fn guidance_for(harness: &Path, task: &str) -> String {
+    let notes = notes_from_harness(harness);
+    let skills = skills_for_task(harness, task, 4000);
+    match (notes.trim().is_empty(), skills.is_empty()) {
+        (_, true) => notes,
+        (true, false) => skills,
+        (false, false) => format!("{notes}\n\n{skills}"),
+    }
+}
+
 pub fn notes_from_harness(harness: &Path) -> String {
     let mut keep = vec![];
     for f in ["guardrails.md", "LongTermMEMORY.md"] {
@@ -1027,5 +1076,22 @@ assert!(c.contains(r#"csv.DictReader(open("sales.csv"))"#) && c.contains("column
         assert_eq!(wanted_decimals("rounded to 2 decimals"), Some(2));
         assert_eq!(wanted_decimals("to two decimal places"), Some(2));
         assert_eq!(wanted_decimals("How many boxes are there?"), None);
+    }
+}
+
+#[cfg(test)]
+mod skill_match_tests {
+    #[test]
+    fn matching_skills_are_inlined_and_others_are_not() {
+        let d = tempfile::tempdir().unwrap();
+        let s = d.path().join("skills");
+        for (name, desc) in [("net-revenue-reconciliation", "Reconcile versioned orders, refunds and monthly exchange rates for a net-revenue ranking."), ("poster-design", "Lay out a printable event poster.")] {
+            std::fs::create_dir_all(s.join(name)).unwrap();
+            std::fs::write(s.join(name).join("SKILL.md"), format!("---\nname: {name}\ndescription: {desc}\n---\nSteps for {name}.\n")).unwrap();
+        }
+        std::fs::write(s.join("README.md"), "index").unwrap();
+        let got = super::skills_for_task(d.path(), "Find the top customers by net revenue from orders.csv with refunds and exchange rates by month", 4000);
+        assert!(got.contains("## Skill: net-revenue-reconciliation") && got.contains("Steps for net-revenue-reconciliation."), "{got}");
+        assert!(!got.contains("poster") && !got.contains("description:"), "{got}");
     }
 }
