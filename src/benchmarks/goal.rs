@@ -82,6 +82,10 @@ pub struct GoalSettings {
     /// Regression guard: the base attempt competes in selection; failure-looking finals drop out.
     #[serde(default = "yes")]
     pub select_guard: bool,
+    /// Reuse the base attempt for stages that kept the base harness, and skip the reflection
+    /// when nothing was edited (see BenchmarkAdapter::reuse_unchanged).
+    #[serde(default = "yes")]
+    pub reuse_unchanged: bool,
     /// MCP servers (stdio) whose tools the solver can call.
     #[serde(default)]
     pub mcp_servers: Vec<crate::llm::mcp::ServerCfg>,
@@ -237,6 +241,7 @@ impl Default for GoalSettings {
             sandbox: auto(),
             sandbox_network: false,
             select_guard: true,
+            reuse_unchanged: true,
             mcp_servers: vec![],
             schedules: vec![],
             max_usd_per_run: 0.0,
@@ -475,6 +480,9 @@ impl BenchmarkAdapter for GoalAdapter {
     fn guard_selection(&self) -> bool {
         self.settings.select_guard
     }
+    fn reuse_unchanged(&self) -> bool {
+        self.settings.reuse_unchanged
+    }
     /// An exact answer that independent attempts agreed on (accuracy boost, confidence high).
     fn settled(&self, run_dir: &Path) -> bool {
         self.settings.settle_verified
@@ -627,4 +635,63 @@ mod pin_tests {
         t.insert("systemprompt.md".into(), "Edited prompt.\n".into());
         assert!(a.validate_tree(&t).is_ok(), "unpinned files stay editable");
     }
+}
+
+/// A goal run started outside the web UI (the `harness2 goal` command): marked by
+/// `<project>/active/<goal id>.json` while it runs, so the UI can show it as running.
+/// The marker is removed when the run ends (also on error, through Drop).
+pub struct ActiveMark(PathBuf);
+
+impl Drop for ActiveMark {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+pub fn mark_active(root: &Path, id: &str, goal: &str) -> ActiveMark {
+    let p = root.join("active").join(format!("{id}.json"));
+    let _ = util::write(&p, serde_json::to_string(&serde_json::json!({"pid": std::process::id(), "started": util::now_iso(), "goal": util::take_chars(goal, 200), "source": "terminal"})).unwrap_or_default());
+    ActiveMark(p)
+}
+
+/// Whether a process is alive. On Windows a marker younger than 12 hours counts as alive.
+fn pid_alive(pid: u64, marker: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        let _ = marker;
+        std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        std::fs::metadata(marker).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|e| e.as_secs() < 12 * 3600).unwrap_or(false)
+    }
+}
+
+/// The terminal run of this goal in progress, if any. A marker whose process is gone is removed.
+pub fn terminal_run(root: &Path, id: &str) -> Option<serde_json::Value> {
+    let p = root.join("active").join(format!("{id}.json"));
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).ok()?).ok()?;
+    if pid_alive(v["pid"].as_u64()?, &p) {
+        Some(v)
+    } else {
+        let _ = std::fs::remove_file(&p);
+        None
+    }
+}
+
+/// Every terminal run in progress across projects: (project, goal id, marker).
+pub fn terminal_runs() -> Vec<(String, String, serde_json::Value)> {
+    let mut out = vec![];
+    for proj in std::fs::read_dir(projects_root()).into_iter().flatten().flatten() {
+        for f in std::fs::read_dir(proj.path().join("active")).into_iter().flatten().flatten() {
+            let name = f.file_name().to_string_lossy().to_string();
+            if let Some(id) = name.strip_suffix(".json") {
+                if let Some(v) = terminal_run(&proj.path(), id) {
+                    out.push((proj.file_name().to_string_lossy().to_string(), id.to_string(), v));
+                }
+            }
+        }
+    }
+    out
 }

@@ -363,6 +363,27 @@ fn check_cancel() -> Result<()> {
     Ok(())
 }
 
+/// The base attempt standing in for a stage whose harness is the base, byte for byte
+/// (`reuse_unchanged`): another solver run on the same harness costs a full attempt and, with
+/// a strong model, returns the same answer. It still counts as the stage's rollout in the ledger.
+fn reused(adapter: &dyn BenchmarkAdapter, label: &str, t: &Tree, same: Option<(&Tree, &[RunView])>, work_dir: &Path) -> Option<RunView> {
+    let (base_tree, base) = same?;
+    if !adapter.reuse_unchanged() || t != base_tree {
+        return None;
+    }
+    let b = base.iter().find(|b| b.ok && b.delivered)?;
+    // The harness is still written, so the stage looks like any other in the UI and records.
+    let _ = tree::write_tree(&adapter.surface(), t, &work_dir.join("harnesses").join(label), true);
+    crate::log::at(label, "run");
+    say!("  [{label}] harness unchanged from base: reusing {} instead of a new rollout", b.label);
+    let mut info = rollout_info(&b.run_dir, true);
+    info["reused"] = json!(b.label);
+    crate::log::event("rollout", "done", info);
+    let mut rv = b.clone();
+    rv.label = label.to_string();
+    Some(rv)
+}
+
 /// Roll independent harnesses concurrently, then record them in the caller's order.
 fn roll_many(
     adapter: &dyn BenchmarkAdapter,
@@ -372,9 +393,15 @@ fn roll_many(
     run_id_of: RunIdOf,
     work_dir: &Path,
     width: usize,
+    same: Option<(&Tree, &[RunView])>,
 ) -> BTreeMap<String, RunView> {
     let labels: Vec<String> = items.iter().map(|(l, _)| l.clone()).collect();
-    let got = util::par_map(items, width, |(label, t)| roll(adapter, task_id, &label, Some(&t), run_id_of, work_dir));
+    let got = util::par_map(items, width, |(label, t)| {
+        if let Some(rv) = reused(adapter, &label, &t, same, work_dir) {
+            return rv;
+        }
+        roll(adapter, task_id, &label, Some(&t), run_id_of, work_dir)
+    });
     let mut out = BTreeMap::new();
     for (label, rv) in labels.into_iter().zip(got) {
         ledger.rollout_of(&rv);
@@ -464,6 +491,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
         a.run_id_of,
         &a.work_dir,
         a.rollout_workers,
+        Some((&a.base_tree, a.base)),
     );
     result.rollouts.extend(rolled);
 
@@ -510,6 +538,7 @@ pub fn run_parallel(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: ModeA
         a.run_id_of,
         &a.work_dir,
         a.rollout_workers,
+        Some((&a.base_tree, a.base)),
     );
     result.rollouts.extend(rolled);
     result.similarity = Some(tree::diversity(&aggs.iter().map(|s| (s.label.clone(), s.tree.clone())).collect()));
@@ -581,6 +610,7 @@ pub fn run_sequential(adapter: &dyn BenchmarkAdapter, prop: &dyn Propose, a: Mod
             a.run_id_of,
             &a.work_dir,
             a.rollout_workers,
+            Some((&a.base_tree, a.base)),
         );
         result.rollouts.extend(rolled);
         let mut round_pool = history.clone();

@@ -289,6 +289,7 @@ async fn status() -> ApiResult {
         "projects_root": goal::projects_root(),
         "providers": connections::PROVIDERS,
         "python": util::which(util::python()).is_some(),
+        "terminal_runs": goal::terminal_runs().into_iter().map(|(p, id, v)| json!({"project": p, "goal_id": id, "started": v["started"], "goal": v["goal"], "pid": v["pid"]})).collect::<Vec<_>>(),
         "auth": auth::password().is_some(),
         "sandbox": {"bwrap": crate::llm::sandbox::availability().0, "unshare": crate::llm::sandbox::availability().1},
         "policy": {
@@ -493,7 +494,9 @@ async fn list_projects() -> ApiResult {
 }
 
 fn goal_status(a: &GoalAdapter, id: &str) -> Value {
-    let running = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id && (r.status == "running" || r.status == "queued")).map(|r| r.id.clone()).next();
+    let running = RUNS.lock().unwrap().values().filter(|r| r.goal_id == id && (r.status == "running" || r.status == "queued")).map(|r| r.id.clone()).next()
+        // A run started with `harness2 goal` in a terminal.
+        .or_else(|| goal::terminal_run(&a.root, id).map(|v| format!("terminal:{}", v["pid"])));
     let mut best: Option<Value> = None;
     for dir in std::fs::read_dir(a.root.join("runs/adapt")).into_iter().flatten().flatten() {
         let p = dir.path().join(id).join("summary.json");

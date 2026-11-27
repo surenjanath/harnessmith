@@ -379,6 +379,7 @@ input.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transp
     <button data-v="doctor">Doctor</button>
   </nav>
   <div class="hright">
+  <button class="hpill warn hidden" id="tpill" title="Goals running from a terminal (harness2 goal). Their live logs are in those terminals; click to see the goal." onclick="openTerminalRun()"><span class="dot warn"></span><span id="tpill-t"></span></button>
   <button class="hpill" id="hpill" title="Model health (circuit breakers). Click for the Doctor." onclick="show('doctor')"><span class="dot"></span><span>models: checking…</span></button>
   <button class="hpill warn hidden" id="apill" onclick="window.scrollTo(0,0)"><span class="dot warn"></span><span id="apill-t"></span></button>
   <button class="theme-t" id="theme-t" title="Switch light / dark"></button>
@@ -929,13 +930,13 @@ function reduceEvents(events) {
       else if (e.status === "fell_back") { n.edit = {...n.edit, s: "fell", t1: e.t, err: e.error}; S.sessions++; }
     } else if (e.kind === "rollout") {
       if (e.status === "start") n.run = {s: "active", t: e.t};
-      else { n.run = {...n.run, s: e.status === "done" ? (e.delivered ? "ok" : "empty") : "failed", t1: e.t, usage: e.usage, err: e.error}; S.runs++; }
+      else { n.run = {...n.run, s: e.reused ? "reused" : e.status === "done" ? (e.delivered ? "ok" : "empty") : "failed", t1: e.t, usage: e.usage, err: e.error, reused: e.reused}; S.runs++; }
     } else if (e.kind === "select" && e.status === "guard") {
       n.guard = e;
     } else if (e.kind === "select" || e.kind === "learn") {
       if (e.status === "start") n.sel = {s: "active", t: e.t, n: e.n};
       else if (e.status === "settled") { settledRun = true; n.sel = {...n.sel, ...e, s: "ok", t1: e.t}; }
-      else { n.sel = {...n.sel, ...e, s: e.status === "done" ? "ok" : "failed", t1: e.t}; if (!(e.kind === "select" && e.trivial)) S.sessions++; }
+      else { n.sel = {...n.sel, ...e, s: e.status === "done" ? "ok" : "failed", t1: e.t}; if (!(e.kind === "select" && e.trivial) && e.outcome !== "no_edits") S.sessions++; }
     } else if (e.kind === "step") {
       const ph = e.phase === "run" ? n.run : e.phase === "edit" ? n.edit : n.sel;
       if (e.status === "call" && !e.depth) { ph.callT = e.t; ph.model = e.model; }
@@ -961,7 +962,7 @@ function phaseLine(name, p, kind) {
   const map = {
     wait: ["", settledRun ? "not needed: answer already verified" : "waiting"], active: ["active", kind === "run" ? "running" : "editing"],
     kept: ["ok", "kept harness"], edited: ["ok", "edited " + (((p.changed || {}).added || []).length + ((p.changed || {}).modified || []).length + ((p.changed || {}).removed || []).length) + " file(s)"],
-    fell: ["warn", "fell back"], ok: ["ok", "delivered"], empty: ["warn", "no output"], failed: ["bad", "failed"],
+    fell: ["warn", "fell back"], ok: ["ok", "delivered"], reused: ["ok", "same harness: reused " + (p.reused || "base")], empty: ["warn", "no output"], failed: ["bad", "failed"],
   };
   const [cls, txt] = map[p.s] || ["", p.s];
   const extra = [];
@@ -981,7 +982,7 @@ function nodeCard(laneId, n, adopted, selected) {
     const p = n.sel;
     const txt = n.label === "select"
       ? (p.s === "ok" ? (p.trivial ? `single final: <b>${esc(p.chosen)}</b>` : `chose <b>${esc(p.chosen)}</b>${p.fallback ? " (fallback)" : ""}`) : p.s === "active" ? `comparing ${p.n || ""} outputs blind` : p.s === "failed" ? "failed" : "waiting")
-      : (p.s === "ok" ? (p.entry ? "lesson saved" : "no lesson (not enough evidence)") : p.s === "active" ? "reflecting…" : p.s === "failed" ? "failed" : "waiting");
+      : (p.s === "ok" ? (p.entry ? "lesson saved" : p.outcome === "no_edits" ? "skipped: nothing was edited" : "no lesson (not enough evidence)") : p.s === "active" ? "reflecting…" : p.s === "failed" ? "failed" : "waiting");
     const lc = p.s === "ok" ? "ok" : p.s === "active" ? "active" : p.s === "failed" ? "bad" : "";
     body = `<div class="ln ${lc}"><span class="dot ${lc}"></span><span>${txt}</span></div>`;
     if (p.s === "active" && p.act) body += `<div class="act">${esc(p.act)}</div>`;
@@ -1188,7 +1189,7 @@ function nodeDrawer(n, t0) {
       txt = e.status === "settled" ? `🎯 The first attempt's answer is verified by attempts that agree: adopted as it stands, improvement loop skipped` : e.status === "guard" ? `🛡 Regression guard: ${(e.added || []).length ? "added the unmodified base attempt <b>" + esc(e.added.join(", ")) + "</b> to the pool" : ""}${(e.added || []).length && (e.dropped || []).length ? "; " : ""}${(e.dropped || []).length ? "dropped failure-looking outputs <b>" + esc(e.dropped.join(", ")) + "</b>" : ""}` : e.status === "start" ? `Comparing ${e.n} anonymous outputs` : e.status === "done" ? `Chose <b>${esc(e.chosen)}</b>${e.fallback ? " (fallback)" : ""}${e.why ? `<details open><summary>why</summary><pre>${esc(e.why)}</pre></details>` : ""}` : `<span class="err">${esc(e.error)}</span>`;
     } else if (e.kind === "learn") {
       cls = e.status === "done" ? "ok" : e.status === "failed" ? "bad" : "act";
-      txt = e.status === "start" ? "Reflecting on what each edit did" : e.status === "done" ? (e.entry ? `Lesson: <b>${esc(e.cue)}</b> → ${esc(e.lesson)}` : "No lesson the evidence supports") : `<span class="err">${esc(e.error)}</span>`;
+      txt = e.status === "start" ? "Reflecting on what each edit did" : e.status === "done" ? (e.entry ? `Lesson: <b>${esc(e.cue)}</b> → ${esc(e.lesson)}` : e.outcome === "no_edits" ? "Every stage kept the base harness: nothing to learn from, reflection skipped" : "No lesson the evidence supports") : `<span class="err">${esc(e.error)}</span>`;
     } else return "";
     if (e.kind === "heal") cls = "heal";
     if (tlFilter === "problems" && cls !== "bad" && cls !== "heal" && !/class="err"/.test(txt)) return "";
@@ -1280,6 +1281,23 @@ async function refreshHealth() {
       <td>${x.state === "open" || x.state === "degraded" ? `<button class="btn small" onclick="docFix('reset_breaker:${esc(n)}')">Reset</button>` : ""}</td></tr>`; }).join("")}</tbody></table>`;
   } catch (e) {}
 }
+// Goals started with `harness2 goal` in a terminal: not in this server's run list, so shown here.
+let termRuns = [];
+async function refreshTerminalRuns() {
+  try {
+    termRuns = (await api("status")).terminal_runs || [];
+    const p = $("#tpill");
+    p.classList.toggle("hidden", !termRuns.length);
+    $("#tpill-t").textContent = termRuns.length === 1 ? `running in terminal: ${termRuns[0].project}` : `${termRuns.length} running in terminals`;
+  } catch (e) {}
+}
+function openTerminalRun() {
+  const r = termRuns[0]; if (!r) return;
+  const sel = $("#project");
+  if (sel && sel.value !== r.project) { sel.value = r.project; sel.dispatchEvent(new Event("change")); }
+  location.hash = "goal=" + r.goal_id; show("history");
+}
+setInterval(refreshTerminalRuns, 5000); setTimeout(refreshTerminalRuns, 300);
 function startHealthTable() { refreshHealth(); clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 4000); }
 function stopHealthTable() { clearInterval(healthTimer); healthTimer = setInterval(refreshHealth, 20000); }
 // What to do about a problem the Doctor cannot fix itself.
@@ -1641,7 +1659,7 @@ function mdRender(src) {
 }
 let mdSource = {};
 function stateChip(st) {
-  if (st.running) return '<span class="chip warn">running</span>';
+  if (st.running) return String(st.running).startsWith("terminal:") ? '<span class="chip warn" title="started with harness2 goal in a terminal; its live log is in that terminal">running (terminal)</span>' : '<span class="chip warn">running</span>';
   const lr = st.last_run;
   if (lr && lr.status === "review") return `<span class="chip warn" title="${esc(lr.error || "")}">needs review</span> <span class="muted">k=${st.summary ? st.summary.k : "?"}</span>`;
   if (lr && lr.status === "cancelled") return '<span class="chip">cancelled</span>';

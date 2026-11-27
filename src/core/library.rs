@@ -62,6 +62,7 @@ pub fn outcome_text(outcome: &str) -> &'static str {
         "malformed" => "malformed: the reflection's lesson was incomplete or used a verdict outside helped / hurt / no observed effect / confounded",
         "session_failed" => "session failed: the reflection session did not complete",
         "unverified" => "unverified: the lesson's evidence cites no run of this task and no earlier library entry",
+        "no_edits" => "no edits: every stage kept the base harness, so there was no contrast to learn from (reflection skipped)",
         _ => "no lesson recorded",
     }
 }

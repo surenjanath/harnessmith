@@ -6,6 +6,7 @@ pub mod agent;
 pub mod calc;
 pub mod client;
 pub mod codex_cli;
+pub mod codex_server;
 pub mod connections;
 pub mod experience;
 pub mod export;

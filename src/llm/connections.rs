@@ -60,6 +60,10 @@ pub struct Connection {
     /// Prompt caching where the provider supports it (default on).
     #[serde(default)]
     pub prompt_cache: Option<bool>,
+    /// Ollama thinking: "off" (default: faster, and the reply budget goes to the answer), "on",
+    /// or a level ("low" | "medium" | "high") for models that take one.
+    #[serde(default)]
+    pub thinking: Option<String>,
 }
 
 impl Connection {
@@ -242,6 +246,7 @@ fn builtin(name: &str) -> Option<Connection> {
         cached_input_price: None,
         daily_usd: None,
         prompt_cache: None,
+        thinking: None,
     };
     Some(match name {
         "openai" => mk("openai", "", "OPENAI_API_KEY"),

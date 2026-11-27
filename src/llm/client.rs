@@ -561,9 +561,26 @@ fn ollama(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> R
     if !req.tools.is_empty() {
         body["tools"] = json!(req.tools.iter().map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}})).collect::<Vec<_>>());
     }
+    // Thinking models (Qwen3.x, Gemma 4, ...) think by default on Ollama, and a long hidden
+    // reasoning can use the whole reply budget: seen live, 0 characters of answer after 1,019 of
+    // thinking, so a whole strategy "gave nothing". Off unless the connection asks for it.
+    let think = conn.thinking.as_deref().map(|t| t.trim().to_lowercase()).unwrap_or_else(|| "off".into());
+    body["think"] = match think.as_str() {
+        "off" | "false" | "no" | "" => json!(false),
+        "on" | "true" | "yes" => json!(true),
+        level => json!(level),
+    };
     let base = conn.base();
     let base = base.strip_suffix("/v1").unwrap_or(&base);
-    let v = post(&format!("{base}/api/chat"), &[], &body, timeout)?;
+    let url = format!("{base}/api/chat");
+    let v = match post(&url, &[], &body, timeout) {
+        // A model without the setting refuses it ("does not support thinking"): ask again without.
+        Err(e) if format!("{e}").to_lowercase().contains("think") => {
+            body.as_object_mut().map(|o| o.remove("think"));
+            post(&url, &[], &body, timeout)?
+        }
+        r => r?,
+    };
     if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
         bail!("ollama: {e}");
     }

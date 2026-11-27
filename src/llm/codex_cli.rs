@@ -72,7 +72,7 @@ pub fn status(conn: &Connection) -> Result<String> {
     Ok(text)
 }
 
-fn schema(with_tools: bool) -> Value {
+pub fn schema(with_tools: bool) -> Value {
     let mut props = json!({"text": {"type": "string", "description": "The assistant's reply text (may be empty when calling tools)."}});
     let mut req = vec!["text"];
     if with_tools {
@@ -103,15 +103,15 @@ Write only the next assistant message of the conversation, following its SYSTEM 
 
 /// Codex features that add tool schemas or context this use never needs. Set through `-c`, so a
 /// name a Codex version does not know is ignored instead of failing the call.
-const OFF_FEATURES: &[&str] = &["apps", "browser_use", "computer_use", "goals", "shell_tool", "unified_exec", "image_generation", "multi_agent", "plugins", "remote_plugin", "skill_search", "sleep_tool", "tool_suggest", "view_image", "shell_snapshot", "memories", "code_mode", "code_mode_host"];
+pub const OFF_FEATURES: &[&str] = &["apps", "browser_use", "computer_use", "goals", "shell_tool", "unified_exec", "image_generation", "multi_agent", "plugins", "remote_plugin", "skill_search", "sleep_tool", "tool_suggest", "view_image", "shell_snapshot", "memories", "code_mode", "code_mode_host"];
 /// Context blocks Codex adds to every prompt (the skills list alone is ~2.8k tokens). Measured
 /// with Codex 0.165: these and OFF_FEATURES take a call's fixed cost from ~17.5k to ~4.3k tokens.
-const OFF_SETTINGS: &[&str] = &["include_skills_usage_instructions", "skills.include_instructions", "skills.bundled.enabled", "include_collaboration_mode_instructions", "include_permissions_instructions", "include_environment_context", "include_apps_instructions"];
+pub const OFF_SETTINGS: &[&str] = &["include_skills_usage_instructions", "skills.include_instructions", "skills.bundled.enabled", "include_collaboration_mode_instructions", "include_permissions_instructions", "include_environment_context", "include_apps_instructions"];
 
 /// A fixed, empty working folder holding the instructions file. It must not change between
 /// calls: Codex puts the cwd near the top of its prompt, and a new folder per call would defeat
 /// the provider's prefix cache on every turn.
-fn home_dir() -> Result<std::path::PathBuf> {
+pub fn home() -> Result<std::path::PathBuf> {
     let d = std::env::temp_dir().join("harnessmith-codex");
     let ws = d.join("ws");
     std::fs::create_dir_all(&ws)?;
@@ -239,13 +239,34 @@ fn toml_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// The per-call cap (HARNESS2_CODEX_CALL_TIMEOUT seconds, default 600), at least two minutes.
+fn call_limit(timeout: Duration) -> Duration {
+    let cap = Duration::from_secs(crate::config::env_int("HARNESS2_CODEX_CALL_TIMEOUT", 600).ok().filter(|s| *s >= 30).unwrap_or(600) as u64);
+    timeout.max(Duration::from_secs(120)).min(cap)
+}
+
+/// One model call: through the shared `codex app-server` (no process start per call), or with
+/// `codex exec` when the server is off or cannot serve.
 pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> Result<ChatResp> {
+    if super::codex_server::enabled() {
+        let (m, effort) = split_effort(model);
+        match super::codex_server::chat(&binary(conn), &m, &effort, req, call_limit(timeout)) {
+            Err(e) if format!("{e}").starts_with(super::codex_server::SERVER_ERR) => {
+                crate::say!("    ! {e}; using codex exec for this call");
+            }
+            r => return r,
+        }
+    }
+    chat_exec(conn, model, req, timeout)
+}
+
+fn chat_exec(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) -> Result<ChatResp> {
     let (model, effort) = split_effort(model);
     let dir = tempfile::Builder::new().prefix("harnessmith-codex-").tempdir()?;
     let with_tools = !req.tools.is_empty();
     let schema_path = dir.path().join("schema.json");
     std::fs::write(&schema_path, schema(with_tools).to_string())?;
-    let home = home_dir()?;
+    let home = home()?;
     let ws = home.join("ws");
     let last = dir.path().join("last.txt");
     let bin = binary(conn);
@@ -303,8 +324,7 @@ pub fn chat(conn: &Connection, model: &str, req: &ChatReq, timeout: Duration) ->
     // timeout is often the whole run's remaining time, and a `codex exec` that stalls (seen
     // live: one call hung 13 minutes on an open connection) must not eat it. Cap each call
     // (HARNESS2_CODEX_CALL_TIMEOUT seconds, default 600); a killed call is retried or fails over.
-    let cap = Duration::from_secs(crate::config::env_int("HARNESS2_CODEX_CALL_TIMEOUT", 600).ok().filter(|s| *s >= 30).unwrap_or(600) as u64);
-    let limit = timeout.max(Duration::from_secs(120)).min(cap);
+    let limit = call_limit(timeout);
     let t0 = Instant::now();
     let status = loop {
         if let Some(s) = child.try_wait()? {

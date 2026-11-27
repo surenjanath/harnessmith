@@ -301,6 +301,13 @@ pub trait BenchmarkAdapter: Send + Sync {
     fn guard_selection(&self) -> bool {
         false
     }
+    /// Economy (off for the paper's benchmarks, whose budget counts every rollout as real): a
+    /// stage whose harness is byte-identical to the base reuses the base attempt instead of
+    /// running the solver again, and a run whose stages all kept the base skips the reflection
+    /// (no edit means no contrast to learn from).
+    fn reuse_unchanged(&self) -> bool {
+        false
+    }
     /// Is this run's answer already verified (so that improving the harness on the task would
     /// buy nothing)? When the base attempt is, the mode adopts it and skips the recursion.
     fn settled(&self, _run_dir: &Path) -> bool {

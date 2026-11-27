@@ -258,7 +258,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         let files: Vec<String> = source.filter(|s| s.is_dir()).map(|s| util::files_sorted(s).iter().map(|p| util::rel(s, p)).collect()).unwrap_or_default();
         let mut po = precise::Opts::new(&o.model_id);
         po.samples = o.accuracy_samples.clamp(1, 9);
-        po.notes = precise::notes_from_harness(harness);
+        po.notes = precise::guidance_for(harness, task);
         po.sandbox = (sb.kind != crate::llm::sandbox::Kind::Off).then(|| sb.clone());
         po.wall = Duration::from_secs(o.timeout);
         po.trajectory = Some(run_dir.join("trajectory.jsonl"));
@@ -331,7 +331,7 @@ pub fn solve(task: &str, source: Option<&Path>, harness: &Path, harness_is_base:
         if let Some(k) = crate::llm::maker::kind(task) {
             let mut mo = crate::llm::maker::Opts::new(&o.model_id);
             mo.candidates = o.accuracy_samples.clamp(1, 4);
-            mo.notes = precise::notes_from_harness(harness);
+            mo.notes = precise::guidance_for(harness, task);
             mo.sandbox = (sb.kind != crate::llm::sandbox::Kind::Off).then(|| sb.clone());
             mo.wall = Duration::from_secs(o.timeout);
             mo.trajectory = Some(run_dir.join("trajectory.jsonl"));

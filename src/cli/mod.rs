@@ -310,6 +310,8 @@ pub fn goal_cmd(a: GoalArgs) -> Result<serde_json::Value> {
         files.push((f.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(f)?));
     }
     let id = adapter.add_task(&a.goal, &a.domain, &a.rubric, &files)?;
+    // The web UI shows this run as running while the marker exists.
+    let _active = goal::mark_active(&root, &id, &a.goal);
     let modes: Vec<&'static str> = if a.mode == "both" { schedule::MODES.to_vec() } else { vec![schedule::mode_token(&a.mode)?] };
     run_goal(&adapter, &id, a.k, modes)
 }
@@ -453,6 +455,7 @@ fn models(a: ModelsArgs) -> Result<()> {
                 cached_input_price: None,
                 daily_usd: None,
                 prompt_cache: None,
+                thinking: None,
             });
             connections::save(&reg)?;
             println!("saved {}", connections::path().display());
